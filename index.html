@@ -408,25 +408,24 @@ async function ai(prompt,sys,max){
 
 // Robust JSON parser - handles special chars, smart quotes, broken strings
 function safeJSON(str){
-  if(!str) return null;
+  if(!str) return {};
   try{
-    // Clean common issues: smart quotes, backtick fences, trailing commas
     var s = str
-      .replace(/```json|```/g,'')
-      .replace(/[‘’]/g,"'")
-      .replace(/[“”]/g,'"')
+      .replace(/```json|```/gi,'')
+      .replace(/[\u2018\u2019]/g,"'")
+      .replace(/[\u201C\u201D]/g,'"')
       .replace(/,\s*}/g,'}')
       .replace(/,\s*]/g,']')
       .trim();
-    return JSON.parse(s);
+    var parsed = JSON.parse(s);
+    return parsed || {};
   }catch(e){
-    // Try extracting just the JSON object
     try{
       var m = str.match(/\{[\s\S]*\}/);
-      if(m) return JSON.parse(m[0]);
+      if(m){ var p2=JSON.parse(m[0]); return p2||{}; }
     }catch(e2){}
-    console.error('safeJSON failed:',e.message, str.substring(0,200));
-    return null;
+    console.error('safeJSON failed:',e.message);
+    return {};
   }
 }
 
@@ -1330,7 +1329,7 @@ async function processScreenshot(e){
   res.innerHTML='<div style="display:flex;align-items:center;gap:10px;padding:14px;color:var(--muted)"><div class="spin"></div>AI reading screenshot...</div>';
   var base64=await new Promise(function(res2,rej){var fr=new FileReader();fr.onload=function(){res2(fr.result.split(',')[1]);};fr.onerror=rej;fr.readAsDataURL(file);});
   try{
-    var resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,system:'Extract construction lead info from screenshot. Return ONLY valid JSON.',messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:file.type,data:base64}},{type:'text',text:'Extract lead info from this Angi screenshot for Corestone Developers Hudson Valley NY. Return ONLY valid JSON: {"client_name":"","phone":"","email":"","address":"","job_type":"Custom Home Build|Full Home Renovation|Kitchen Remodel|Bathroom Remodel|Addition / Extension|Basement Finish|Deck / Patio|Garage / ADU|Roofing|Siding and Exterior|Commercial Build-Out|Other","estimated_value":0,"timeline":"","notes":"everything they said about project","owns_property":"yes/no/own land/unknown","lead_source":"Angi"}'}]}]})});
+    var resp=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,system:'Extract construction lead info from screenshot. Return ONLY valid JSON.',messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:file.type,data:base64}},{type:'text',text:'Extract lead info from this Angi screenshot for Corestone Developers Hudson Valley NY. Return ONLY valid JSON: {"client_name":"","phone":"","email":"","address":"","job_type":"Custom Home Build|Full Home Renovation|Kitchen Remodel|Bathroom Remodel|Addition / Extension|Basement Finish|Deck / Patio|Garage / ADU|Roofing|Siding and Exterior|Commercial Build-Out|Other","estimated_value":0,"timeline":"","notes":"everything they said about project","owns_property":"yes/no/own land/unknown","lead_source":"Angi"}'}]}]})});
     var d=await resp.json();
     var lead=JSON.parse((d.content&&d.content[0]?d.content[0].text:'{}').replace(/```json|```/g,'').trim());
     showLeadResult(res,lead,'SCREENSHOT');
@@ -1576,13 +1575,13 @@ async function uploadAndAnalyzePlan(){
       +'"red_flags":["anything unusual or risky noted on the plan"]\n'
       +'}';
     
-    var response=await fetch('https://api.anthropic.com/v1/messages',{
+    var response=await fetch('/api/claude',{
       method:'POST',
       headers:{
         'Content-Type':'application/json',
-        'x-api-key':localStorage.getItem('cs_ai_key')||'',
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-request-not-sampled-because-we-are-testing':'true'
+        
+        
+        'Content-Type':'application/json'
       },
       body:JSON.stringify({
         model:'claude-sonnet-4-6',
