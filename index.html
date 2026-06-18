@@ -1153,16 +1153,21 @@ async function openCallMode(leadId){
 }
 
 async function toggleRecording(){
+  console.log('toggleRecording called, callRec=',callRec);
   var btn=$('co-rec-btn'),dot=$('co-dot');
-  if(!btn){console.warn('toggleRecording: co-rec-btn not found');return;}
+  if(!btn){console.warn('co-rec-btn element not found in DOM');return;}
   if(!callRec){
+    btn.disabled=true;
+    btn.innerHTML='⏳ Requesting mic...';
     try{
       if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-        toast('Microphone not supported on this browser','err');
-        btn.innerHTML='🎙️ Mic not supported — use situation buttons';
+        btn.disabled=false;
+        btn.innerHTML='🎙️ Start Recording';
+        toast('Microphone not available — use Chrome and allow mic access','err');
         return;
       }
       var stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      btn.disabled=false;
       // Auto-analyze every 15 seconds
       if(typeof autoAnalyzeTimer!=='undefined') clearInterval(autoAnalyzeTimer);
       autoAnalyzeTimer=setInterval(function(){ if(callRec&&liveWords.length>0) analyzeCallLive(); },15000);
