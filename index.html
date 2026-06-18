@@ -1127,29 +1127,22 @@ async function openCallMode(leadId){
       return '<div style="margin-bottom:24px"><div class="script-sec-lbl" style="background:rgba(255,255,255,0.08);color:'+sec.c+'">'+sec.l+'</div><div style="font-size:15px;line-height:2.1;color:rgba(255,255,255,0.92);white-space:pre-wrap">'+chunk+'</div></div>';
     }).join('');
   }else{
-    $('co-script').innerHTML='<div style="color:rgba(255,255,255,0.5);padding:20px;text-align:center" id="script-loading"><div class="spin" style="margin:0 auto 10px"></div>Generating your call script...</div>';
-    generateLeadAI(leadId, lead).then(function(){
-      dbGet('leads','?id=eq.'+leadId).then(function(res){
-        var updated=res[0];
-        if(updated&&updated.ai_call_script){
-          var lines=updated.ai_call_script.split('\n').filter(function(l){return l.trim();});
-          var secs=[{l:'Opening',c:'#93c5fd'},{l:'Discovery',c:'#fcd34d'},{l:'Company Pitch',c:'#6ee7b7'},{l:'Deposit',c:'#c4b5fd'},{l:'Close',c:'#86efac'}];
-          var per=Math.ceil(lines.length/secs.length);
-          $('co-script').innerHTML=secs.map(function(sec,i){
-            var chunk=lines.slice(i*per,(i+1)*per).join('\n');
-            return '<div style="margin-bottom:20px"><div class="script-sec-lbl" style="background:rgba(255,255,255,0.08);color:'+sec.c+'">'+sec.l+'</div><div style="font-size:14px;line-height:2;color:rgba(255,255,255,0.92);white-space:pre-wrap">'+chunk+'</div></div>';
-          }).join('');
-        }
-      });
+    $('co-script').innerHTML='<div style="padding:20px;text-align:center"><div class="spin" style="margin:0 auto 12px"></div><div style="color:rgba(255,255,255,0.5);font-size:13px">Generating your script...</div></div>';
+    ai('Write a 200 word word-for-word phone script for Feishy at Corestone Developers calling '+lead.client_name+' about their '+(lead.job_type||'project')+'. Budget $'+(lead.estimated_value||'unknown')+'. Include: friendly opening, 2 discovery questions, pitch cost-plus transparency, mention $5k deposit goes toward construction, soft close. Plain text only.',
+      'You are a construction sales coach. Return plain conversational script text only. No JSON, no headers.',1200)
+    .then(function(txt){
+      if(!txt){$('co-script').innerHTML='<div style="color:rgba(255,255,255,0.4);padding:20px;text-align:center">Could not load — use situation buttons</div>';return;}
+      var lines=txt.split('\n').filter(function(l){return l.trim();});
+      var secs=[{l:'Opening',c:'#93c5fd'},{l:'Discovery',c:'#fcd34d'},{l:'Pitch',c:'#6ee7b7'},{l:'Deposit',c:'#c4b5fd'},{l:'Close',c:'#86efac'}];
+      var per=Math.max(1,Math.ceil(lines.length/secs.length));
+      $('co-script').innerHTML=secs.map(function(sec,i){
+        var chunk=lines.slice(i*per,(i+1)*per).join('\n');
+        return '<div style="margin-bottom:20px"><div style="font-size:9px;font-weight:800;letter-spacing:0.1em;color:'+sec.c+';margin-bottom:5px;text-transform:uppercase">'+sec.l+'</div><div style="font-size:14px;line-height:2;color:rgba(255,255,255,0.92);white-space:pre-wrap">'+chunk+'</div></div>';
+      }).join('');
+    }).catch(function(e){
+      $('co-script').innerHTML='<div style="color:#ef4444;padding:20px;text-align:center">AI error: '+e.message+'<br><br>Use situation buttons on the right.</div>';
     });
   }
-  // Auto-start recording after 2 seconds (give overlay time to render)
-  setTimeout(function(){
-    if(!callRec && $('co-rec-btn')){
-      toast('🎙️ Auto-starting mic...','info');
-      toggleRecording();
-    }
-  }, 2000);
 }
 
 async function toggleRecording(){
