@@ -725,13 +725,12 @@ async function saveLead(id=null,runAI=true){
 }
 
 async function generateLeadAI(leadId,data){
-  const prompt=`You are the AI for Corestone Developers, a premium GC in Hudson Valley NY run by Feishy Felberbaum.
-COMPANY: Full-service GC. 20% contractor fee (cost-plus, transparent). Manage all permits, all subs, every phase. $5,000 deposit BEFORE site visit — goes TOWARD construction. Client sees everything 24/7. Daily photos/videos. Google verified, Houzz partner.
-LEAD: Name:${data.client_name}|Phone:${data.phone||'?'}|Address:${data.address||'?'}|Job:${data.job_type||'?'}|Budget:$${data.estimated_value||'?'}|Timeline:${data.timeline||'?'}|Source:${data.lead_source||'?'}|Owns:${data.owns_property||'?'}|Competing:${data.competing_bids||'?'}|Notes:${data.notes||'none'}
-Return ONLY valid JSON:
-{"call_script":"Full word-for-word script 400-500 words. Open with name/source. Discovery questions. Company pitch (cost-plus 20%, transparent, full management, daily updates). Explain $5000 deposit naturally. Social proof. Soft close.","objection_responses":{"too_expensive":"Response","deposit_concern":"Response","getting_other_bids":"Response","not_ready_yet":"Response","need_to_think":"Response"},"qualification_questions":["Q1","Q2","Q3","Q4","Q5"],"address_intelligence":"Municipality, zoning, permits required for ${data.job_type||'renovation'} at ${data.address||'Hudson Valley NY'}, building dept timeline, Ulster/Sullivan/Dutchess County specifics","red_flags":["Flag1","Flag2","Flag3"],"ai_next_action":"One sentence exact next step","followup_email_subject":"Subject","followup_email_body":"200 word post-call email. Their specific project. Google reviews, Houzz, Instagram links. $5k deposit process. Next step. Sign as Feishy, Corestone Developers.","sentiment_score":"hot/warm/cold","priority":"urgent/high/normal/low"}`;
+  const prompt=`You are AI for Corestone Developers, Hudson Valley NY GC. Owner: Feishy Felberbaum. Cost-plus 20% fee. $5k deposit before site visit.
+LEAD: Name:${data.client_name||'Unknown'}|Phone:${data.phone||'?'}|Job:${data.job_type||'?'}|Budget:$${data.estimated_value||'?'}|Source:${data.lead_source||'?'}|Notes:${data.notes||'none'}
+Return ONLY this JSON with no extra text:
+{"call_script":"Write a 250 word word-for-word phone script. Greet by name, mention source, ask discovery questions, pitch cost-plus transparency and full management, mention $5k deposit goes toward construction, soft close.","objection_responses":{"too_expensive":"2 sentence response","deposit_concern":"2 sentence response","getting_other_bids":"2 sentence response","not_ready_yet":"2 sentence response"},"qualification_questions":["Q1","Q2","Q3","Q4"],"ai_next_action":"One sentence next step","followup_email_subject":"Subject line","followup_email_body":"3 sentence follow up email"}`;
   try{
-    const r=await ai(prompt,'Return ONLY valid JSON. No markdown.');
+    const r=await ai(prompt,'Return ONLY raw JSON. No markdown, no extra text.',2000);
     const d=safeJSON(r);
     if(!d||!d.call_script){throw new Error('AI returned empty — please try again');}
     await dbUpd('leads',leadId,{ai_call_script:d.call_script,ai_objections:JSON.stringify(d.objection_responses),ai_questions:JSON.stringify(d.qualification_questions),ai_address_intel:d.address_intelligence,ai_red_flags:JSON.stringify(d.red_flags),ai_next_action:d.ai_next_action,ai_followup_email_subject:d.followup_email_subject,ai_followup_email_body:d.followup_email_body,ai_sentiment:d.sentiment_score,ai_priority:d.priority});
@@ -838,13 +837,15 @@ async function processEmailPaste(){
           <div style="grid-column:span 2"><span style="font-size:10px;color:var(--muted);font-weight:700;display:block">ADDRESS</span><strong>${d.address||'Not found'}</strong></div>
         </div>
         ${d.notes?`<div style="font-size:12px;color:var(--muted);background:#fff;padding:7px;border-radius:5px;margin-bottom:10px">${d.notes.substring(0,200)}${d.notes.length>200?'...':''}</div>`:''}
-        <button class="btn btn-p" style="width:100%;justify-content:center;font-size:14px;padding:11px" onclick='createFromEmail(${JSON.stringify(d).replace(/'/g,"\\'")})'> ✅ Create Lead + AI Script</button>
+        <button class="btn btn-p" style="width:100%;justify-content:center;font-size:14px;padding:11px" onclick='createFromEmail()'> ✅ Create Lead + AI Script</button>
       </div>`;
     window._emailLead=d;
   }catch(e){$('email-result').innerHTML=`<div style="color:var(--red);font-size:12px;margin-top:7px">Could not read email: ${e.message}</div>`;}
 }
 
 async function createFromEmail(data){
+  if(!data) data=window._emailLead;
+  if(!data){toast('No lead data found','err');return;}
   toast('Creating lead...');
   try{
     const r=await dbIns('leads',{client_name:data.client_name||'Unknown',phone:data.phone||'',email:data.email||'',address:data.address||'',job_type:data.job_type||'Other',estimated_value:data.estimated_value||0,timeline:data.timeline||'Unknown',notes:data.notes||'',owns_property:data.owns_property||'unknown',lead_source:'Angi',stage:'new',next_followup:new Date(Date.now()+7200000).toISOString()});
@@ -1338,7 +1339,7 @@ async function processScreenshot(e){
 }
 
 async function createLeadFromData(encoded){
-  var data;try{data=JSON.parse(decodeURIComponent(encoded));}catch(e){toast('Data error','err');return;}
+  var data;try{data=window._emailLead||JSON.parse(decodeURIComponent(encoded));}catch(e){data=window._emailLead;if(!data){toast('Data error - please try again','err');return;}}
   toast('Creating lead...','info');
   try{
     var r=await dbIns('leads',{client_name:data.client_name||'Unknown',phone:data.phone||'',email:data.email||'',address:data.address||'',job_type:data.job_type||'Other',estimated_value:data.estimated_value||0,timeline:data.timeline||'Unknown',notes:data.notes||'',owns_property:data.owns_property||'unknown',lead_source:data.lead_source||'Angi',stage:'new',next_followup:new Date(Date.now()+7200000).toISOString()});
