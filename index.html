@@ -1190,16 +1190,35 @@ async function toggleRecording(){
         };
         recog.start();
       }
-      callRec=new MediaRecorder(stream);callChunks=[];
-      callRec.ondataavailable=function(e){callChunks.push(e.data);};callRec.start(1000);
-      btn.innerHTML='Stop Recording';btn.style.background='#ef4444';
+      // Use SpeechRecognition as the primary recorder (works on Chrome desktop)
+      try{
+        callRec=new MediaRecorder(stream);callChunks=[];
+        callRec.ondataavailable=function(e){if(e.data.size>0)callChunks.push(e.data);};
+        callRec.start(1000);
+      }catch(me){
+        // MediaRecorder not supported — use a dummy object so callRec is truthy
+        console.warn('MediaRecorder not supported, using speech only:', me.message);
+        callRec={stream:stream, stop:function(){stream.getTracks().forEach(function(t){t.stop();});}};
+      }
+      btn.innerHTML='🔴 Stop Recording';btn.style.background='#ef4444';
       dot.style.display='block';
-      toast('Recording - AI listens automatically','info');
-    }catch(e){toast('Mic denied - use situation buttons','err');}
+      toast('🎙️ Mic active — AI is listening','info');
+    }catch(e){
+      console.error('Mic error:',e);
+      toast('Mic error: '+e.message+' — check Chrome mic permissions','err');
+      // Still let them use situation buttons
+      callRec={stream:null,stop:function(){}};
+      btn.innerHTML='⚠️ Mic blocked — use buttons below';
+    }
   }else{
-    callRec.stop();if(callRec.stream)callRec.stream.getTracks().forEach(function(t){t.stop();});callRec=null;
-    if(recog)recog.stop();dot.style.display='none';
-    btn.innerHTML='Start Recording Again';btn.style.background='var(--teal)';
+    try{callRec.stop();}catch(e){}
+    try{if(callRec.stream)callRec.stream.getTracks().forEach(function(t){t.stop();});}catch(e){}
+    callRec=null;
+    if(recog){try{recog.stop();}catch(e){}}
+    if(typeof autoAnalyzeTimer!=='undefined') clearInterval(autoAnalyzeTimer);
+    dot.style.display='none';
+    btn.innerHTML='🎙️ Start Recording Again';btn.style.background='var(--teal)';
+    toast('Recording stopped','info');
   }
 }
 
@@ -1258,10 +1277,20 @@ async function quickSit(situation){
 
 function endCallOnly(){
   clearInterval(callTimer);
-  if(callRec){callRec.stop();if(callRec.stream)callRec.stream.getTracks().forEach(function(t){t.stop();});callRec=null;}
-  if(recog)recog.stop();
+  if(typeof autoAnalyzeTimer!=='undefined') clearInterval(autoAnalyzeTimer);
+  if(callRec){
+    try{callRec.stop();}catch(e){}
+    try{if(callRec.stream)callRec.stream.getTracks().forEach(function(t){t.stop();});}catch(e){}
+    callRec=null;
+  }
+  if(recog){try{recog.stop();}catch(e){} recog=null;}
   $('call-overlay').style.display='none';
+  $('co-script').innerHTML='<em style="color:rgba(255,255,255,0.3);font-size:13px">Preparing your script...</em>';
+  $('co-transcript').innerHTML='';
   document.body.style.overflow='';
+  liveWords=[];
+  // Go back to lead detail if we have an active lead
+  if(ACTIVE_LEAD && ACTIVE_LEAD.id) setTimeout(function(){ leadDetail(ACTIVE_LEAD.id); }, 200);
 }
 
 async function endCallAndAnalyze(){
@@ -4345,7 +4374,8 @@ async function pgComments(){$("content").innerHTML='<div class="empty"><div styl
       <div id="co-dot" style="width:10px;height:10px;border-radius:50%;background:#ef4444;animation:blink-dot 1.2s infinite;display:none"></div>
       <div id="co-timer" style="font-size:20px;font-weight:800;color:#fff;background:rgba(0,0,0,0.3);padding:4px 12px;border-radius:7px;min-width:72px;text-align:center;font-variant-numeric:tabular-nums">0:00</div>
       <a id="co-phone" href="#" style="background:#1e8c45;color:#fff;padding:7px 13px;border-radius:6px;font-size:12px;font-weight:700;text-decoration:none">📞 Call</a>
-      <button onclick="endCallOnly()" style="background:#ef4444;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">⏹ End</button>
+      <button onclick="endCallOnly()" style="background:#ef4444;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">⏹ End Call</button>
+      <button onclick="endCallOnly()" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:8px 14px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">← Back</button>
     </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;flex:1;overflow:hidden;">
