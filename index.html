@@ -406,6 +406,30 @@ async function ai(prompt,sys,max){
   }
 }
 
+// Robust JSON parser - handles special chars, smart quotes, broken strings
+function safeJSON(str){
+  if(!str) return null;
+  try{
+    // Clean common issues: smart quotes, backtick fences, trailing commas
+    var s = str
+      .replace(/```json|```/g,'')
+      .replace(/[‘’]/g,"'")
+      .replace(/[“”]/g,'"')
+      .replace(/,\s*}/g,'}')
+      .replace(/,\s*]/g,']')
+      .trim();
+    return JSON.parse(s);
+  }catch(e){
+    // Try extracting just the JSON object
+    try{
+      var m = str.match(/\{[\s\S]*\}/);
+      if(m) return JSON.parse(m[0]);
+    }catch(e2){}
+    console.error('safeJSON failed:',e.message, str.substring(0,200));
+    return null;
+  }
+}
+
 function toast(msg,type='ok'){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;$('toasts').appendChild(el);setTimeout(()=>el.remove(),3500);}
 function closeModal(id){$(id)?.remove();}
 
@@ -709,7 +733,7 @@ Return ONLY valid JSON:
 {"call_script":"Full word-for-word script 400-500 words. Open with name/source. Discovery questions. Company pitch (cost-plus 20%, transparent, full management, daily updates). Explain $5000 deposit naturally. Social proof. Soft close.","objection_responses":{"too_expensive":"Response","deposit_concern":"Response","getting_other_bids":"Response","not_ready_yet":"Response","need_to_think":"Response"},"qualification_questions":["Q1","Q2","Q3","Q4","Q5"],"address_intelligence":"Municipality, zoning, permits required for ${data.job_type||'renovation'} at ${data.address||'Hudson Valley NY'}, building dept timeline, Ulster/Sullivan/Dutchess County specifics","red_flags":["Flag1","Flag2","Flag3"],"ai_next_action":"One sentence exact next step","followup_email_subject":"Subject","followup_email_body":"200 word post-call email. Their specific project. Google reviews, Houzz, Instagram links. $5k deposit process. Next step. Sign as Feishy, Corestone Developers.","sentiment_score":"hot/warm/cold","priority":"urgent/high/normal/low"}`;
   try{
     const r=await ai(prompt,'Return ONLY valid JSON. No markdown.');
-    const d=JSON.parse(r.replace(/```json|```/g,'').trim());
+    const d=safeJSON(r);
     await dbUpd('leads',leadId,{ai_call_script:d.call_script,ai_objections:JSON.stringify(d.objection_responses),ai_questions:JSON.stringify(d.qualification_questions),ai_address_intel:d.address_intelligence,ai_red_flags:JSON.stringify(d.red_flags),ai_next_action:d.ai_next_action,ai_followup_email_subject:d.followup_email_subject,ai_followup_email_body:d.followup_email_body,ai_sentiment:d.sentiment_score,ai_priority:d.priority});
     toast('✅ AI script ready — open the lead');
   }catch(e){toast('AI error: '+e.message,'err');}
@@ -802,7 +826,7 @@ async function processEmailPaste(){
   $('email-result').innerHTML='<div class="loading" style="padding:12px"><div class="spin"></div>AI reading...</div>';
   try{
     const r=await ai(`Extract lead info from this Angi email for Corestone Developers, Hudson Valley NY.\n\nEMAIL:\n${text}\n\nReturn ONLY valid JSON:\n{"client_name":"full name","phone":"phone or empty","email":"email or empty","address":"full address or empty","job_type":"one of: Custom Home Build, Full Home Renovation, Kitchen Remodel, Bathroom Remodel, Addition / Extension, Basement Finish, Deck / Patio, Garage / ADU, Roofing, Siding & Exterior, Commercial Build-Out, Other","estimated_value":0,"timeline":"when they want to start","notes":"everything they said","owns_property":"yes/no/own land/unknown","lead_source":"Angi"}`,'Return only valid JSON. No markdown.');
-    const d=JSON.parse(r.replace(/```json|```/g,'').trim());
+    const d=safeJSON(r);
     $('email-result').innerHTML=`
       <div style="background:var(--green-bg);border:2px solid var(--green);border-radius:var(--radius);padding:13px;margin-top:9px">
         <div style="font-size:10px;font-weight:800;color:var(--green);margin-bottom:9px">✅ AI EXTRACTED THIS LEAD</div>
@@ -1212,7 +1236,7 @@ async function generatePostCallReport(lead,notes,transcript){
   var ctx='CLIENT: '+lead.client_name+'|JOB: '+(lead.job_type||'Unknown')+'|ADDRESS: '+(lead.address||'Unknown')+'|BUDGET: '+fmt$(lead.estimated_value)+'|TIMELINE: '+(lead.timeline||'Unknown')+'|FINANCING: '+(lead.financing||'Unknown')+'|COMPETING BIDS: '+(lead.competing_bids||'Unknown')+'\nCALL NOTES: '+(notes||'None entered')+'\nLIVE TRANSCRIPT: '+(transcript||'Not captured');
   try{
     var r=await ai('Senior sales analyst for Corestone Developers. Analyze this construction sales call. Return ONLY valid JSON.\n'+ctx+'\nReturn: {"sentiment":"hot|warm|cold","sentiment_reason":"one sentence","interest_score":7,"interest_reason":"one sentence","what_client_said":["point1","point2","point3"],"objections_raised":["objection and how handled"],"agreements_made":["what was agreed"],"what_client_must_send":["item they need to send us"],"what_we_must_send":["item we promised to send"],"bid_notes":"if scope discussed full scope notes for bidding else empty string","follow_up_sequence":[{"day":"Day 1","action":"Send follow-up email","detail":"specific action"},{"day":"Day 3","action":"Second call","detail":"focus on this"},{"day":"Day 7","action":"Check-in","detail":"if no response"},{"day":"Day 14","action":"Final attempt","detail":"last touch"}],"email_subject":"subject line","email_body":"200-word personal follow-up email. Their project. Corestone value props. $5k deposit. Clear next step. Signed Feishy Felberbaum, Corestone Developers, 929-420-1008.","ai_recommendation":"3-4 sentences overall assessment biggest opportunity most important next action in 24 hours direct.","next_stage":"contacted|proposal|negotiating|signed|lost","priority":"urgent|high|normal|low"}','Return ONLY valid JSON. No markdown.',1500);
-    var data=JSON.parse(r.replace(/```json|```/g,'').trim());
+    var data=safeJSON(r);
     if(lead.id){
       var nextAction=data.follow_up_sequence&&data.follow_up_sequence[0]?data.follow_up_sequence[0].action:'Follow up';
       await dbUpd('leads',lead.id,{ai_sentiment:data.sentiment,ai_next_action:nextAction,ai_followup_email_subject:data.email_subject,ai_followup_email_body:data.email_body,last_contact_at:new Date().toISOString(),next_followup:new Date(Date.now()+86400000).toISOString(),notes:(lead.notes||'')+' [Call '+new Date().toLocaleDateString()+'] '+(notes||'Call logged'),stage:data.next_stage||lead.stage});
@@ -1337,7 +1361,7 @@ async function processEPText(){
   $('ep-result').innerHTML='<div style="display:flex;align-items:center;gap:10px;padding:12px;color:var(--muted)"><div class="spin"></div>AI reading...</div>';
   try{
     var r=await ai('Extract lead from this Angi email for Corestone Developers Hudson Valley NY.\nEMAIL:\n'+text+'\nReturn ONLY valid JSON: {"client_name":"","phone":"","email":"","address":"","job_type":"Custom Home Build|Full Home Renovation|Kitchen Remodel|Bathroom Remodel|Addition / Extension|Basement Finish|Deck / Patio|Garage / ADU|Roofing|Siding & Exterior|Commercial Build-Out|Other","estimated_value":0,"timeline":"","notes":"everything they said","owns_property":"yes/no/own land/unknown","lead_source":"Angi"}','Return only valid JSON. No markdown.');
-    var lead=JSON.parse(r.replace(/```json|```/g,'').trim());
+    var lead=safeJSON(r);
     showLeadResult($('ep-result'),lead,'EMAIL');
   }catch(e){$('ep-result').innerHTML='<div style="color:var(--red);padding:12px;background:var(--red-bg);border-radius:var(--radius);font-size:13px">Error: '+e.message+'</div>';}
 }
@@ -1737,7 +1761,7 @@ async function takeoffToEstimate(docId){
       'Return ONLY valid JSON. No markdown. Provide realistic Hudson Valley 2026 pricing.',
       2000
     );
-    var est=JSON.parse(r.replace(/```json|```/g,'').trim());
+    var est=safeJSON(r);
     
     // Save estimate as a gatekeeper item for review
     await dbIns('gatekeeper_queue',{
@@ -1867,7 +1891,7 @@ async function aiGenerateSchedule(){
       'Return ONLY valid JSON array. No markdown.',
       1500
     );
-    var phases=JSON.parse(r.replace(/```json|```/g,'').trim());
+    var phases=safeJSON(r);
     for(var i=0;i<phases.length;i++){
       await dbIns('schedule',{...phases[i],job_id:AJOB.id});
     }
@@ -2637,7 +2661,7 @@ async function aiGeneratePunchList(){
   toast('🤖 AI generating punch list...','ok',10000);
   try{
     var r=await ai('Generate a comprehensive construction punch list for this project:\nJob: '+AJOB.job_name+'\nType: '+(AJOB.job_type||'renovation')+'\nPhase: '+(AJOB.current_phase||'Punch List')+'\nProgress: '+(AJOB.percent_complete||90)+'%\n\nReturn ONLY valid JSON array:\n[{"title":"Item title","description":"Specific detail","assigned_to":"Trade responsible","priority":"urgent|high|normal","due_date":"'+new Date(Date.now()+14*86400000).toISOString().split('T')[0]+'"}]\n\nInclude 15-20 realistic items covering: paint touch-ups, fixture adjustments, door hardware, caulking, cleaning, punch-through repairs, final electrical, plumbing checks, exterior items, client-specific requests.','Return ONLY valid JSON array. No markdown.',1500);
-    var items=JSON.parse(r.replace(/```json|```/g,'').trim());
+    var items=safeJSON(r);
     for(var i=0;i<items.length;i++){
       await dbIns('punch_list',{...items[i],status:'open',job_id:AJOB.id});
     }
@@ -3769,7 +3793,7 @@ async function aiSuggestTasks(){
   try{
     var jobList = jobs.map(function(j){return j.job_name+' ('+j.job_type+', phase: '+(j.current_phase||'Unknown')+', '+j.percent_complete+'% done)';}).join('\n');
     var r = await ai('You are a construction project manager for Corestone Developers Hudson Valley NY.\nActive jobs:\n'+jobList+'\nGenerate 8-10 specific, actionable tasks that should be done THIS WEEK across these jobs.\nReturn ONLY valid JSON array:\n[{"title":"Task name","notes":"specific detail","job_name":"exact job name from list","assigned_to":"Feishy","priority":"urgent|high|normal","due_days":1}]\ndue_days = days from today when this should be done.','Return only JSON array.',1000);
-    var items = JSON.parse(r.replace(/```json|```/g,'').trim());
+    var items = safeJSON(r);
     var activeJobs = jobs;
     var count = 0;
     for(var i=0;i<items.length;i++){
@@ -4134,7 +4158,7 @@ async function aiEstimateHelper(estId){
       +'[{"description":"Item name","notes":"detail","cost_type":"Labor|Materials|Subcontractor|Equipment|Permit","unit":"EA|SF|LF|HR|LS","qty":1,"unit_cost":500,"markup_pct":20}]';
     
     var r = await ai(prompt, 'Construction estimator. Return only valid JSON array. Realistic Hudson Valley NY pricing.', 1500);
-    var items = JSON.parse(r.replace(/```json|```/g,'').trim());
+    var items = safeJSON(r);
     
     var existing = est.line_items||[];
     var combined = existing.concat(items);
