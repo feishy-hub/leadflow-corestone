@@ -826,6 +826,7 @@ async function processEmailPaste(){
   try{
     const r=await ai(`Extract lead info from this Angi email for Corestone Developers, Hudson Valley NY.\n\nEMAIL:\n${text}\n\nReturn ONLY valid JSON:\n{"client_name":"full name","phone":"phone or empty","email":"email or empty","address":"full address or empty","job_type":"one of: Custom Home Build, Full Home Renovation, Kitchen Remodel, Bathroom Remodel, Addition / Extension, Basement Finish, Deck / Patio, Garage / ADU, Roofing, Siding & Exterior, Commercial Build-Out, Other","estimated_value":0,"timeline":"when they want to start","notes":"everything they said","owns_property":"yes/no/own land/unknown","lead_source":"Angi"}`,'Return only valid JSON. No markdown.');
     const d=safeJSON(r);
+    window._emailLead=d;
     $('email-result').innerHTML=`
       <div style="background:var(--green-bg);border:2px solid var(--green);border-radius:var(--radius);padding:13px;margin-top:9px">
         <div style="font-size:10px;font-weight:800;color:var(--green);margin-bottom:9px">✅ AI EXTRACTED THIS LEAD</div>
@@ -839,7 +840,6 @@ async function processEmailPaste(){
         ${d.notes?`<div style="font-size:12px;color:var(--muted);background:#fff;padding:7px;border-radius:5px;margin-bottom:10px">${d.notes.substring(0,200)}${d.notes.length>200?'...':''}</div>`:''}
         <button class="btn btn-p" style="width:100%;justify-content:center;font-size:14px;padding:11px" onclick='createFromEmail()'> ✅ Create Lead + AI Script</button>
       </div>`;
-    window._emailLead=d;
   }catch(e){$('email-result').innerHTML=`<div style="color:var(--red);font-size:12px;margin-top:7px">Could not read email: ${e.message}</div>`;}
 }
 
@@ -1125,8 +1125,24 @@ async function openCallMode(leadId){
       return '<div style="margin-bottom:24px"><div class="script-sec-lbl" style="background:rgba(255,255,255,0.08);color:'+sec.c+'">'+sec.l+'</div><div style="font-size:15px;line-height:2.1;color:rgba(255,255,255,0.92);white-space:pre-wrap">'+chunk+'</div></div>';
     }).join('');
   }else{
-    $('co-script').innerHTML='<div style="color:rgba(255,255,255,0.5);padding:20px;text-align:center;font-size:14px">No script yet - AI will still coach you live using the situation buttons and auto-listening.</div>';
+    $('co-script').innerHTML='<div style="color:rgba(255,255,255,0.5);padding:20px;text-align:center" id="script-loading"><div class="spin" style="margin:0 auto 10px"></div>Generating your call script...</div>';
+    generateLeadAI(leadId, lead).then(function(){
+      dbGet('leads','?id=eq.'+leadId).then(function(res){
+        var updated=res[0];
+        if(updated&&updated.ai_call_script){
+          var lines=updated.ai_call_script.split('\n').filter(function(l){return l.trim();});
+          var secs=[{l:'Opening',c:'#93c5fd'},{l:'Discovery',c:'#fcd34d'},{l:'Company Pitch',c:'#6ee7b7'},{l:'Deposit',c:'#c4b5fd'},{l:'Close',c:'#86efac'}];
+          var per=Math.ceil(lines.length/secs.length);
+          $('co-script').innerHTML=secs.map(function(sec,i){
+            var chunk=lines.slice(i*per,(i+1)*per).join('\n');
+            return '<div style="margin-bottom:20px"><div class="script-sec-lbl" style="background:rgba(255,255,255,0.08);color:'+sec.c+'">'+sec.l+'</div><div style="font-size:14px;line-height:2;color:rgba(255,255,255,0.92);white-space:pre-wrap">'+chunk+'</div></div>';
+          }).join('');
+        }
+      });
+    });
   }
+  // Auto-start recording after 1 second
+  setTimeout(function(){ if(!callRec) toggleRecording(); }, 1000);
 }
 
 async function toggleRecording(){
@@ -1134,6 +1150,9 @@ async function toggleRecording(){
   if(!callRec){
     try{
       var stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      // Auto-analyze every 15 seconds
+      if(typeof autoAnalyzeTimer!=='undefined') clearInterval(autoAnalyzeTimer);
+      autoAnalyzeTimer=setInterval(function(){ if(callRec&&liveWords.length>0) analyzeCallLive(); },15000);
       if('webkitSpeechRecognition' in window||'SpeechRecognition' in window){
         var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
         recog=new SR();recog.continuous=true;recog.interimResults=true;recog.lang='en-US';
