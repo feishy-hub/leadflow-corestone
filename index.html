@@ -733,6 +733,7 @@ Return ONLY valid JSON:
   try{
     const r=await ai(prompt,'Return ONLY valid JSON. No markdown.');
     const d=safeJSON(r);
+    if(!d||!d.call_script){throw new Error('AI returned empty — please try again');}
     await dbUpd('leads',leadId,{ai_call_script:d.call_script,ai_objections:JSON.stringify(d.objection_responses),ai_questions:JSON.stringify(d.qualification_questions),ai_address_intel:d.address_intelligence,ai_red_flags:JSON.stringify(d.red_flags),ai_next_action:d.ai_next_action,ai_followup_email_subject:d.followup_email_subject,ai_followup_email_body:d.followup_email_body,ai_sentiment:d.sentiment_score,ai_priority:d.priority});
     toast('✅ AI script ready — open the lead');
   }catch(e){toast('AI error: '+e.message,'err');}
