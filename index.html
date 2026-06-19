@@ -564,56 +564,80 @@ async function sendClientUpdate(jobId){
 
 // ══════════════════════════════════════════════════
 // SMART NEXT STEP — appears after every action
-// ══════════════════════════════════════════════════
-function nextStep(title, message, actions){
-  // Remove any existing next step panel
-  var existing = document.getElementById('next-step-panel');
-  if(existing) existing.remove();
-
-  // Build panel
-  var panel = document.createElement('div');
-  panel.id = 'next-step-panel';
-  panel.style.cssText = 'position:fixed;bottom:20px;right:20px;width:320px;background:#fff;border:2px solid var(--teal);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.25);z-index:9999;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden;animation:slideUp 0.2s ease';
-
-  var html = '<div style="background:var(--teal);padding:12px 16px;display:flex;align-items:center;justify-content:space-between">'
-    + '<div style="font-size:13px;font-weight:800;color:#fff">✅ ' + title + '</div>'
-    + '<button onclick="document.getElementById(\'next-step-panel\').remove()" style="background:none;border:none;color:rgba(255,255,255,0.8);font-size:18px;cursor:pointer;line-height:1">×</button>'
-    + '</div>'
-    + '<div style="padding:12px 16px 6px">'
-    + '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">' + message + '</div>';
-
-  actions.forEach(function(action){
-    html += '<button onclick="document.getElementById(\'next-step-panel\').remove();' + action.fn + '" '
-      + 'style="width:100%;text-align:left;padding:10px 12px;margin-bottom:8px;background:' + (action.primary ? 'var(--teal)' : 'var(--bg)') + ';'
-      + 'color:' + (action.primary ? '#fff' : 'var(--text)') + ';'
-      + 'border:1px solid ' + (action.primary ? 'var(--teal)' : 'var(--border)') + ';'
-      + 'border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px">'
-      + '<span style="font-size:16px">' + action.icon + '</span>'
-      + '<div><div>' + action.label + '</div>'
-      + (action.sub ? '<div style="font-size:11px;opacity:0.7;font-weight:400">' + action.sub + '</div>' : '')
-      + '</div></button>';
-  });
-
-  html += '<button onclick="document.getElementById(\'next-step-panel\').remove()" '
-    + 'style="width:100%;padding:8px;margin-bottom:10px;background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;font-family:inherit">'
-    + 'Dismiss — I\'ll do this later</button></div>';
-
-  panel.innerHTML = html;
-  document.body.appendChild(panel);
-
-  // Auto-dismiss after 30 seconds if no action taken
-  setTimeout(function(){
-    var p = document.getElementById('next-step-panel');
-    if(p) p.style.opacity = '0.3';
-  }, 25000);
-}
-
-// Add slideUp animation
+// ══════════════════════════════════════════════════// Add slideUp animation
 if(!document.getElementById('next-step-style')){
   var s = document.createElement('style');
   s.id = 'next-step-style';
   s.textContent = '@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}';
   document.head.appendChild(s);
+}
+
+function nextStep(title, message, actions){
+  var ex=document.getElementById('ns-panel');
+  if(ex) ex.remove();
+
+  var overlay=document.createElement('div');
+  overlay.id='ns-panel';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.onclick=function(e){if(e.target===overlay)overlay.remove();};
+
+  var box=document.createElement('div');
+  box.style.cssText='background:#fff;border-radius:16px;overflow:hidden;width:420px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,0.4)';
+
+  // Header
+  var hdr=document.createElement('div');
+  hdr.style.cssText='background:#0d7a70;padding:22px 24px';
+  var h1=document.createElement('div');
+  h1.style.cssText='font-size:21px;font-weight:800;color:#fff;margin-bottom:4px';
+  h1.textContent=title;
+  var h2=document.createElement('div');
+  h2.style.cssText='font-size:13px;color:rgba(255,255,255,0.85)';
+  h2.textContent=message;
+  hdr.appendChild(h1);hdr.appendChild(h2);
+  box.appendChild(hdr);
+
+  // Body
+  var body=document.createElement('div');
+  body.style.cssText='padding:20px 24px';
+
+  actions.forEach(function(action,i){
+    var btn=document.createElement('button');
+    btn.style.cssText='width:100%;text-align:left;padding:14px 16px;margin-bottom:10px;'
+      +(i===0?'background:#0d7a70;color:#fff;border:none;':'background:#f8f9fa;color:#1a1a1a;border:1px solid #e0e0e0;')
+      +'border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px';
+    btn.onclick=function(){
+      overlay.remove();
+      try{eval(action.fn);}catch(e){console.error('nextStep action:',e);}
+    };
+    var icon=document.createElement('span');
+    icon.style.cssText='font-size:22px;width:32px;text-align:center';
+    icon.textContent=action.icon;
+    var txt=document.createElement('div');
+    txt.style.cssText='flex:1';
+    var lbl=document.createElement('div');
+    lbl.textContent=action.label;
+    txt.appendChild(lbl);
+    if(action.sub){
+      var sub=document.createElement('div');
+      sub.style.cssText='font-size:12px;font-weight:400;opacity:0.7;margin-top:2px';
+      sub.textContent=action.sub;
+      txt.appendChild(sub);
+    }
+    btn.appendChild(icon);btn.appendChild(txt);
+    if(i===0){var arr=document.createElement('span');arr.textContent='→';arr.style.cssText='font-size:18px;opacity:0.8';btn.appendChild(arr);}
+    body.appendChild(btn);
+  });
+
+  // Dismiss
+  var dis=document.createElement('button');
+  dis.style.cssText='width:100%;padding:12px;background:none;border:none;color:#999;font-size:13px;cursor:pointer;font-family:inherit';
+  dis.textContent='Dismiss — I will handle this later';
+  dis.onclick=function(){overlay.remove();};
+  body.appendChild(dis);
+
+  box.appendChild(body);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 }
 
 function toast(msg,type='ok'){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;$('toasts').appendChild(el);setTimeout(()=>el.remove(),3500);}
@@ -1036,26 +1060,6 @@ async function createFromEmail(data){
   }catch(e){toast(e.message,'err');}
 }
 
-async function pgJobs(){
-  try{
-    const jobs=await dbGet('jobs','?order=created_at.desc');
-    ALLJOBS=jobs;renderJobList(jobs);
-    $('content').innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div style="font-size:13px;color:var(--muted)">${jobs.length} jobs · ${jobs.filter(j=>j.status==='active').length} active</div>
-        <button class="btn btn-g btn-sm" onclick="AJOB&&showJobPL(AJOB.id)">📊 P&L</button><button class="btn btn-p" onclick="showJobForm()">+ New Job</button>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
-        ${!jobs.length?'<div class="empty"><div class="ei">🏗️</div><div class="et">No jobs yet</div></div>':
-        jobs.map(j=>`<div onclick="selectJob('${j.id}');goTab('schedule')" style="background:#fff;border:1.5px solid ${AJOB?.id===j.id?'var(--teal)':'var(--border)'};border-radius:var(--radius);padding:15px;cursor:pointer;transition:all 0.15s;box-shadow:var(--shadow)" onmouseover="this.style.borderColor='var(--teal)'" onmouseout="this.style.borderColor='${AJOB?.id===j.id?'var(--teal)':'var(--border)'}'">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:14px;font-weight:800">${j.job_name}</div><div style="font-size:12px;color:var(--muted)">${j.client_name}</div></div><span class="badge badge-${j.status}">${j.status}</span></div>
-          <div style="font-size:11px;color:var(--dim);margin-bottom:8px">📍 ${j.address||'No address'}</div>
-          <div style="height:5px;background:var(--border);border-radius:3px;margin-bottom:6px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,var(--teal),var(--green));width:${j.percent_complete||0}%;border-radius:3px"></div></div>
-          <div style="display:flex;gap:10px;font-size:11px;color:var(--dim)"><span>${j.current_phase||'Pre-Construction'}</span><span style="margin-left:auto;color:var(--teal);font-weight:700">${j.percent_complete||0}%</span></div>
-        </div>`).join('')}
-      </div>`;
-  }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
-}
 
 function showJobForm(){
   document.body.insertAdjacentHTML('beforeend',`
@@ -1104,21 +1108,6 @@ async function saveJob(){
 }
 
 // SCHEDULE
-async function pgSched(){
-  if(!AJOB){$('content').innerHTML=`<div class="empty"><div class="ei">📅</div><div class="et">Select a job from the sidebar</div><div style="font-size:12px;color:var(--dim)">Click any job on the left to view its schedule</div></div>`;return;}
-  try{
-    const ps=await dbGet('schedule_phases',`?job_id=eq.${AJOB.id}&order=sort_order.asc`);
-    $('content').innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div style="font-size:13px;color:var(--muted)">${ps.length} phases · ${AJOB.job_name}</div>
-        <div style="display:flex;gap:8px">${!ps.length?`<button class="btn btn-g" onclick="load13()">Load 13 Phases</button>`:''}<button class="btn btn-p" onclick="showPhaseForm()">+ Add Phase</button></div>
-      </div>
-      ${!ps.length?`<div class="empty"><div class="ei">📅</div><div class="et">No schedule yet</div><div style="font-size:12px;color:var(--dim);margin-bottom:15px">Load the default 13 construction phases</div><button class="btn btn-p" onclick="load13()">Load Default 13 Phases</button></div>`:
-      `<div class="tw"><table><thead><tr><th>#</th><th>Phase</th><th>Start</th><th>End</th><th>Status</th><th>Update</th></tr></thead><tbody>
-        ${ps.map((p,i)=>`<tr><td style="color:var(--dim)">${i+1}</td><td style="font-weight:700">${p.phase_name}</td><td>${fmtD(p.planned_start)}</td><td>${fmtD(p.planned_end)}</td><td><span class="badge badge-${p.status==='complete'?'signed':p.status==='active'?'active':'draft'}">${p.status||'pending'}</span></td><td><select onchange="updatePhase('${p.id}',this.value)" style="width:auto;padding:4px 8px;font-size:11px"><option value="pending"${p.status==='pending'?' selected':''}>Pending</option><option value="active"${p.status==='active'?' selected':''}>Active</option><option value="complete"${p.status==='complete'?' selected':''}>Complete</option></select></td></tr>`).join('')}
-      </tbody></table></div>`}`;
-  }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
-}
 
 async function load13(){if(!AJOB)return;const ps=['Pre-Construction','Demo','Foundation','Framing','Roofing','Rough MEP','Insulation','Drywall','Finish Carpentry','Tile','Paint','Finish MEP','Cabinets & Counters'];try{for(let i=0;i<ps.length;i++)await dbIns('schedule_phases',{job_id:AJOB.id,phase_name:ps[i],sort_order:i,status:i===0?'active':'pending'});toast('13 phases loaded!');pgSched();}catch(e){toast(e.message,'err');}}
 async function updatePhase(id,status){try{await dbUpd('schedule_phases',id,{status});toast('Phase updated!');}catch(e){toast(e.message,'err');}}
@@ -1126,16 +1115,6 @@ function showPhaseForm(){document.body.insertAdjacentHTML('beforeend',`<div clas
 async function savePhase(){if(!AJOB)return;try{await dbIns('schedule_phases',{job_id:AJOB.id,phase_name:$('ph-name').value,planned_start:$('ph-start').value||null,planned_end:$('ph-end').value||null,status:$('ph-status').value});toast('Phase added!');closeModal('phf');pgSched();}catch(e){toast(e.message,'err');}}
 
 // DAILY LOGS
-async function pgDaily(){
-  if(!AJOB){$('content').innerHTML=`<div class="empty"><div class="ei">📝</div><div class="et">Select a job from the sidebar</div></div>`;return;}
-  try{
-    const logs=await dbGet('daily_logs',`?job_id=eq.${AJOB.id}&order=log_date.desc`);
-    $('content').innerHTML=`
-      <div style="display:flex;justify-content:space-between;margin-bottom:16px"><div style="font-size:13px;color:var(--muted)">${logs.length} logs · ${AJOB.job_name}</div><button class="btn btn-p" onclick="showLogForm()">+ New Daily Log</button></div>
-      ${!logs.length?`<div class="empty"><div class="ei">📝</div><div class="et">No logs yet</div><button class="btn btn-p" onclick="showLogForm()">+ New Daily Log</button></div>`:
-      logs.map(l=>`<div class="logcard"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:800">📅 ${fmtD(l.log_date)}</span><span style="font-size:11px;color:var(--teal);font-weight:700;text-transform:uppercase">${l.phase||''}</span></div><div style="font-size:13px;line-height:1.6">${l.ai_summary||l.notes||''}</div><div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--dim)"><span>👷 Crew: <strong style="color:var(--text)">${l.crew_count||0}</strong></span><span>🌤️ ${l.weather||'—'}</span>${l.temperature?`<span>🌡️ ${l.temperature}</span>`:''}</div></div>`).join('')}`;
-  }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
-}
 
 function showLogForm(){
   document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="lgf"><div class="modal"><div class="mh"><div class="mt">New Daily Log</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="f2"><div class="fr"><label>Date</label><input id="lg-date" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div class="fr"><label>Phase</label><select id="lg-phase">${phases().map(p=>`<option>${p}</option>`).join('')}</select></div></div><div class="f2"><div class="fr"><label>Crew Count</label><input id="lg-crew" type="number" value="0" min="0"></div><div class="fr"><label>Weather</label><select id="lg-wx"><option>Clear</option><option>Cloudy</option><option>Rain</option><option>Snow</option><option>Wind</option></select></div></div><div class="fr"><label>Temperature</label><input id="lg-temp" placeholder="72°F"></div><div class="fr"><label>Notes *</label><textarea id="lg-notes" style="min-height:120px" placeholder="What happened today? Issues? Materials? Crew? Speak or type freely..."></textarea></div><button class="btn btn-g btn-sm" onclick="aiStructureLog()" style="margin-bottom:10px">🤖 AI Structure This Log</button><div id="lg-ai"></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveLog()">Save Log</button></div></div></div>`);
@@ -1148,12 +1127,6 @@ async function saveLog(){
 
 
 // FINANCIAL
-async function pgFin(){
-  try{
-    $('content').innerHTML=`<div class="ctabs" id="fin-tabs">${[['inv','Invoices'],['po','Purchase Orders'],['co','Change Orders'],['col','Collections']].map(([k,v],i)=>`<div class="ctab${i===0?' active':''}" onclick="finTab('${k}',this)">${v}</div>`).join('')}</div><div id="fin-body"><div class="loading"><div class="spin"></div></div></div>`;
-    finTab('inv');
-  }catch(e){$('content').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Financial error</div><div style="color:var(--dim);font-size:12px">'+e.message+'</div></div>';}
-}
 
 async function finTab(tab,el){
   document.querySelectorAll('#fin-tabs .ctab').forEach(t=>t.classList.remove('active'));if(el)el.classList.add('active');
@@ -1217,15 +1190,6 @@ function showFileForm(){document.body.insertAdjacentHTML('beforeend',`<div class
 async function saveFile(){const name=$('ff-name').value.trim();if(!name){toast('Name required','err');return;}try{await dbIns('documents',{name,category:$('ff-cat').value,file_url:$('ff-url').value||'#',visible_to_client:$('ff-vis').checked,job_id:AJOB?.id||null});toast('File saved!');closeModal('fff');pgFiles();}catch(e){toast(e.message,'err');}}
 
 // MESSAGING
-async function pgMsgs(){
-  const jf=AJOB?`?job_id=eq.${AJOB.id}&order=created_at.desc&limit=30`:'?order=created_at.desc&limit=30';
-  try{
-    const msgs=await dbGet('messages',jf);
-    $('content').innerHTML=`<div class="card" style="margin-bottom:16px"><div class="ch"><div class="ct">New Message${AJOB?` — ${AJOB.job_name}`:''}</div></div><div class="fr"><textarea id="msg-body" style="min-height:80px" placeholder="Type your message..."></textarea></div><button class="btn btn-p" onclick="sendMsg()">Send</button></div>
-      ${!msgs.length?`<div class="empty"><div class="ei">💬</div><div class="et">No messages yet</div></div>`:
-      msgs.map(m=>`<div class="logcard" style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:11px;font-weight:700">${fmtD(m.created_at)}</span><span style="font-size:10px;color:var(--dim)">${new Date(m.created_at).toLocaleTimeString()}</span></div><div style="font-size:13px">${m.body}</div></div>`).join('')}`;
-  }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
-}
 async function sendMsg(){const body=$('msg-body').value.trim();if(!body){toast('Message empty','err');return;}try{await dbIns('messages',{body,job_id:AJOB?.id||null});toast('Sent!');$('msg-body').value='';pgMsgs();}catch(e){toast(e.message,'err');}}
 
 // SUBCONTRACTORS
@@ -1301,16 +1265,6 @@ async function aiInvoiceSuggestion(){
   if(d.amount&&$('ninv-amount'))$('ninv-amount').value=d.amount;
   if(d.description&&$('ninv-desc'))$('ninv-desc').value=d.description;
   toast('AI suggests: '+fmt$(d.amount)+' — '+d.billing_type,'ok');
-}
-async function pgSubs(){
-  try{
-    const subs=await dbGet('subcontractors','?order=company_name.asc');
-    $('content').innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:16px"><button class="btn btn-p" onclick="showSubForm()">+ Add Sub</button></div>
-      ${!subs.length?`<div class="empty"><div class="ei">🤝</div><div class="et">No subcontractors yet</div></div>`:
-      `<div class="tw"><table><thead><tr><th>Company</th><th>Trade</th><th>Contact</th><th>COI Expiry</th><th>Rating</th><th>Docs</th></tr></thead><tbody>
-        ${subs.map(s=>{const d=s.coi_expiry?Math.floor((new Date(s.coi_expiry)-Date.now())/86400000):null;return`<tr><td style="font-weight:800">${s.company_name}</td><td><span class="badge badge-active">${s.trade||'General'}</span></td><td><div>${s.contact_name||'—'}</div><div style="font-size:10px;color:var(--dim)">${s.phone||''}</div></td><td style="color:${d!==null&&d<30?'var(--red)':'var(--text)'}">${fmtD(s.coi_expiry)}${d!==null&&d<30?` ⚠️ ${d}d`:''}</td><td>${s.rating?'⭐'.repeat(Math.round(s.rating)):'—'}</td><td style="font-size:11px">${s.coi_url?'COI ✅ ':'COI ❌ '}${s.w9_url?'W9 ✅':'W9 ❌'}</td></tr>`}).join('')}
-      </tbody></table></div>`}`;
-  }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
 }
 function showSubForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="sbf"><div class="modal"><div class="mh"><div class="mt">Add Subcontractor</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="f2"><div class="fr"><label>Company *</label><input id="sb-co" placeholder="Mike's Tile Co."></div><div class="fr"><label>Trade *</label><select id="sb-trade"><option>Tile</option><option>Framing</option><option>Electrical</option><option>Plumbing</option><option>HVAC</option><option>Roofing</option><option>Painting</option><option>Insulation</option><option>Drywall</option><option>Flooring</option><option>Cabinets</option><option>Concrete</option><option>Excavation</option><option>General</option></select></div></div><div class="f2"><div class="fr"><label>Contact</label><input id="sb-contact"></div><div class="fr"><label>Phone</label><input id="sb-phone"></div></div><div class="fr"><label>Email</label><input id="sb-email" type="email"></div><div class="f2"><div class="fr"><label>COI Expiry</label><input id="sb-coi" type="date"></div><div class="fr"><label>Rating (1-5)</label><input id="sb-rating" type="number" min="1" max="5"></div></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveSub()">Add Sub</button></div></div></div>`);}
 async function saveSub(){
@@ -1575,30 +1529,6 @@ async function gkDo(id,status){try{await dbUpd('gatekeeper_queue',id,{status,dec
 async function gkAI(id,title,desc,amount){const el=$(`gkai-${id}`);el.innerHTML='<div class="loading" style="padding:6px"><div class="spin"></div></div>';try{const r=await ai(`Should I approve or reject? Title: ${title}. Description: ${desc}. Amount: ${fmt$(amount)}. 2 sentences max, direct recommendation.`);el.innerHTML=`<div class="ai-box" style="margin-top:8px"><div class="ai-lbl">AI Advice</div>${r}</div>`;}catch(e){el.innerHTML='';}}
 
 // REPORTS
-async function pgReports(){
-  try{
-    const[leads,jobs,invs,cos]=await Promise.all([dbGet('leads','?select=stage,estimated_value,lead_source'),dbGet('jobs','?select=status,budget,percent_complete'),dbGet('invoices','?select=amount,amount_paid,status'),dbGet('change_orders','?select=cost_impact,status')]);
-    const rev=invs.filter(i=>i.status==='paid').reduce((s,i)=>s+i.amount,0);
-    const out=invs.filter(i=>i.status!=='paid'&&i.status!=='void').reduce((s,i)=>s+(i.amount-i.amount_paid),0);
-    const src={};leads.forEach(l=>{if(l.lead_source)src[l.lead_source]=(src[l.lead_source]||0)+1;});
-    $('content').innerHTML=`
-      <div class="stats">
-        <div class="sc g"><div class="sv">${fmt$(rev)}</div><div class="sl">Revenue Collected</div></div>
-        <div class="sc"><div class="sv">${fmt$(out)}</div><div class="sl">Outstanding AR</div></div>
-        <div class="sc"><div class="sv">${fmt$(leads.reduce((s,l)=>s+(l.estimated_value||0),0))}</div><div class="sl">Pipeline Value</div></div>
-        <div class="sc b"><div class="sv">${leads.length>0?Math.round(leads.filter(l=>l.stage==='signed').length/leads.length*100):0}%</div><div class="sl">Lead Conversion</div></div>
-        <div class="sc"><div class="sv">${fmt$(cos.reduce((s,c)=>s+(c.cost_impact||0),0))}</div><div class="sl">Total CO Value</div></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px">
-        <div class="card"><div class="ch"><div class="ct">Leads by Source</div></div>
-          ${Object.entries(src).sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="flex:1;font-size:13px">${s}</span><span style="font-weight:700;color:var(--teal)">${n}</span><div style="height:4px;width:${leads.length?Math.round(n/leads.length*60):0}px;background:var(--teal);border-radius:2px"></div></div>`).join('')||'<div style="color:var(--dim);font-size:12px">No data</div>'}
-        </div>
-        <div class="card"><div class="ch"><div class="ct">Jobs by Status</div></div>
-          ${['active','on_hold','completed'].map(s=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="badge badge-${s}">${s}</span><span style="font-size:18px;font-weight:800;flex:1">${jobs.filter(j=>j.status===s).length}</span></div>`).join('')}
-        </div>
-      </div>`;
-  }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
-}
 
 function pgNF(){$('content').innerHTML='<div class="empty"><div class="ei">🚧</div><div class="et">Coming Soon</div></div>';}
 
