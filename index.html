@@ -925,7 +925,27 @@ function showJobForm(){
 async function saveJob(){
   const name=$('j-name').value.trim(),client=$('j-client').value.trim();
   if(!name||!client){toast('Name and client required','err');return;}
-  try{await dbIns('jobs',{job_name:name,client_name:client,status:$('j-status').value,address:$('j-addr').value,budget:parseFloat($('j-budget').value)||0,start_date:$('j-start').value,current_phase:$('j-phase').value,percent_complete:0});toast('Job created!');closeModal('jf');ALLJOBS=await dbGet('jobs','?order=created_at.desc');renderJobList(ALLJOBS);pgJobs();}catch(e){toast(e.message,'err');}
+  try{await dbIns('jobs',{job_name:name,client_name:client,status:$('j-status').value,address:$('j-addr').value,budget:parseFloat($('j-budget').value)||0,start_date:$('j-start').value,current_phase:$('j-phase').value,percent_complete:0});toast('Job created!');closeModal('jf');
+    ALLJOBS=await dbGet('jobs','?order=created_at.desc');
+    renderJobList(ALLJOBS);
+    // AI auto-creates onboarding checklist in Gatekeeper
+    setTimeout(async function(){
+      try{
+        var newest=ALLJOBS[0];
+        if(newest){
+          await dbIns('gatekeeper_queue',{
+            type:'Client Onboarding',
+            title:'🏗️ New Job: '+newest.job_name,
+            description:'AI onboarding checklist for '+newest.client_name+':\n✅ Job created\n⏳ Send welcome email\n⏳ Request $5,000 deposit\n⏳ Send client survey\n⏳ Request tax exemption cert\n⏳ Schedule site visit\n⏳ Upload signed contract',
+            status:'pending',priority:'high',
+            auto_action:'Review and confirm each step'
+          });
+          await aiLogTransaction('New Job','Job created: '+newest.job_name+' for '+newest.client_name+'. Onboarding checklist sent to Gatekeeper.','high');
+        }
+      }catch(e2){console.warn('Job onboarding AI:',e2);}
+    },1500);
+    pgJobs();
+  }catch(e){toast(e.message,'err');}
 }
 
 // SCHEDULE
