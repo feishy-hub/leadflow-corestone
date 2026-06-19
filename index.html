@@ -1459,9 +1459,13 @@ async function saveNewBill(){
 }
 async function payBill(id){
   await dbUpd('bills',id,{status:'Paid',paid_at:new Date().toISOString()});
-  toast('✅ Bill marked paid','ok');
   await aiLogTransaction('Bill Paid','Bill #'+id+' paid','normal');
   pgBills();
+  nextStep('Bill Paid! ✅', 'Payment recorded. What next?', [
+    {icon:'📊', label:'Check cash flow', sub:'See money in vs money out', fn:'goTab("budget")'},
+    {icon:'📋', label:'View all bills', sub:'See remaining bills to pay', fn:'goTab("bills")'},
+    {icon:'📝', label:'Get lien waiver from sub', sub:'Required after payment', fn:'goTab("liens")'}
+  ]);
 }
 async function disputeBill(id){
   await dbUpd('bills',id,{status:'Disputed'});
@@ -1499,6 +1503,32 @@ async function jobCOs(jobId){
     }).join('')
     +'</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
+}
+
+async function gkApprove(id){
+  await dbUpd('gatekeeper_queue',id,{status:'approved',resolved_at:new Date().toISOString()});
+  var gkEl=document.getElementById('gk-count');
+  var items=await dbGet('gatekeeper_queue','?status=eq.pending');
+  if(gkEl) gkEl.textContent=items.length;
+  await pgGK();
+  nextStep('Approved! ✅', 'Action confirmed. What next?', [
+    {icon:'🔑', label:'Review more items', sub:'Back to Gatekeeper queue', fn:'goTab("gatekeeper")'},
+    {icon:'📊', label:'Dashboard overview', sub:'See full business summary', fn:'goTab("dashboard")'}
+  ]);
+}
+
+async function gkReject(id){
+  await dbUpd('gatekeeper_queue',id,{status:'rejected',resolved_at:new Date().toISOString()});
+  toast('Rejected and logged','ok');
+  await pgGK();
+}
+
+async function gkDelegate(id,note){
+  note=note||prompt('Who should handle this?');
+  if(!note) return;
+  await dbUpd('gatekeeper_queue',id,{status:'delegated',delegate_note:note});
+  toast('Delegated to: '+note,'ok');
+  await pgGK();
 }
 
 async function pgGK(){
@@ -4260,7 +4290,12 @@ async function saveNewBid(){
   if(!scope.trim()){toast('Scope required','err');return;}
   var checkedSubs=Array.from(document.querySelectorAll('#nbid-subs input:checked')).map(function(c){return c.value;});
   await dbIns('bids',{job_id:($('nbid-job')||{}).value||null,trade:($('nbid-trade')||{}).value||'General',scope_of_work:scope,invited_sub_ids:JSON.stringify(checkedSubs),bids_received:0,due_date:($('nbid-due')||{}).value||null,status:'Sent'});
-  toast('Bid package sent to '+checkedSubs.length+' subs','ok');pgBids();
+  pgBids();
+  nextStep('Bid Package Sent! 📤', 'Subs have been notified. What next?', [
+    {icon:'⏳', label:'Wait for bids to come in', sub:'Typical turnaround 3-5 days', fn:'goTab("bids")'},
+    {icon:'🤖', label:'AI rank bids when received', sub:'AI compares price, rating, timeline', fn:'aiRankBids()'},
+    {icon:'📋', label:'View bid packages', sub:'Track who has responded', fn:'goTab("bids")'}
+  ]);
 }
 async function aiRankBids(){
   toast('🤖 AI ranking bids...','ok',6000);
@@ -4540,7 +4575,12 @@ async function saveSelection(){
   var item=($('nsel-item')||{}).value||'';
   if(!item.trim()){toast('Item description required','err');return;}
   await dbIns('selections',{job_id:($('nsel-job')||{}).value||null,category:($('nsel-cat')||{}).value||'General',item_description:item,supplier:($('nsel-supplier')||{}).value||'',unit_cost:parseFloat(($('nsel-cost')||{}).value||0),lead_time:($('nsel-lead')||{}).value||'',status:($('nsel-status')||{}).value||'Pending Client'});
-  toast('Selection saved','ok');pgSelections();
+  pgSelections();
+  nextStep('Selection Saved! 🎨', 'Client choice is logged. What next?', [
+    {icon:'🎨', label:'Add another selection', sub:'Keep logging client choices', fn:'showSelForm()'},
+    {icon:'📋', label:'View all selections', sub:'See full selection sheet', fn:'goTab("selections")'},
+    {icon:'📧', label:'Send selections to client', sub:'Client reviews and approves', fn:'goTab("messages")'}
+  ]);
 }
 async function cycleSelStatus(id,current){
   var order=['Pending Client','Client Selected','Ordered','Delivered','Installed'];
@@ -4601,7 +4641,12 @@ async function saveSpec(){
   var title=($('nspec-title')||{}).value||'';var content=($('nspec-content')||{}).value||'';
   if(!title||!content){toast('Title and content required','err');return;}
   await dbIns('specifications',{job_id:($('nspec-job')||{}).value||null,section:($('nspec-section')||{}).value,title:title,content:content});
-  toast('Spec saved','ok');pgSpecs();
+  pgSpecs();
+  nextStep('Specification Saved! 📐', 'Spec is on record. What next?', [
+    {icon:'📐', label:'Add another spec', sub:'Build out the spec document', fn:'showSpecForm()'},
+    {icon:'📋', label:'View all specs', sub:'See full specification list', fn:'goTab("specs")'},
+    {icon:'📦', label:'Send to subcontractor', sub:'Share requirements with trade', fn:'goTab("messages")'}
+  ]);
 }
 async function aiGenerateSpecs(){
   if(!AJOB){toast('Select a job first','err');return;}
@@ -4667,7 +4712,12 @@ async function saveWarrantyClaim(){
   if(!desc){toast('Description required','err');return;}
   await dbIns('warranty_claims',{job_id:($('nwc-job')||{}).value||null,warranty_type:($('nwc-type')||{}).value||'Workmanship',description:desc,status:'Open'});
   await aiLogTransaction('Warranty Claim','New '+($('nwc-type')||{}).value+' claim logged: '+desc.substring(0,60),'high');
-  toast('Warranty claim logged','ok');pgWarranty();
+  pgWarranty();
+  nextStep('Warranty Claim Logged! 🔨', 'Claim is recorded. What next?', [
+    {icon:'📞', label:'Call the client now', sub:'Acknowledge and set expectations', fn:'goTab("sales")'},
+    {icon:'🔧', label:'Assign to subcontractor', sub:'Send to the trade responsible', fn:'goTab("messages")'},
+    {icon:'📋', label:'View all claims', sub:'See open warranty items', fn:'goTab("warranty")'}
+  ]);
 }
 async function aiWarrantyAnalysis(){
   var desc=($('nwc-desc')||{}).value||'';
