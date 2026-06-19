@@ -421,6 +421,8 @@ function safeJSON(str){
     return parsed || {};
   }catch(e){
     try{
+      // Try array first if it looks like one
+      if(s.trim()[0]==='['){var ma2=str.match(/[[\s\S]*]/);if(ma2){try{return JSON.parse(ma2[0]);}catch(e3){}}}
       var m = str.match(/[{][\s\S]*[}]/);
       if(m){ var p2=JSON.parse(m[0]); return p2||{}; }
     }catch(e2){}
@@ -2025,7 +2027,7 @@ async function runPlanAI(docId){
       'Project: '+jobName+'\n'+
       'Notes: '+(doc.notes||'Standard renovation')+'\n'+
       'Return JSON: {"rooms":[{"name":"room","sqft":0}],"takeoff":{"demo":{},"framing":{},"electrical":{},"plumbing":{},"flooring":{},"cabinets":{},"countertop":{},"paint":{}},"trades_needed":["trade"],"estimated_cost_range":"$X-$Y","key_assumptions":["assumption"]}',
-      'You are a construction estimator for Hudson Valley NY. Return ONLY raw JSON.',1500
+      'You are a construction estimator for Hudson Valley NY. Return ONLY raw JSON object starting with {. No markdown.',1500
     );
     var t=safeJSON(r);
     if(!t||!t.takeoff){toast('Could not analyze — upload the actual plan PDF for best results','err');return;}
@@ -4034,6 +4036,7 @@ async function saveNewBid(){
 }
 async function aiRankBids(){
   toast('🤖 AI ranking bids...','ok',6000);
+  // Use actual bids from the job if available
   var r=await ai('I have 3 bids for electrical work:\nBid A: Smith Electric — $18,500, 3 weeks, licensed, 4 reviews avg 4.2\nBid B: Jones Power — $15,200, 4 weeks, licensed, 12 reviews avg 4.8\nBid C: Fast Electric — $22,000, 2 weeks, licensed, 2 reviews avg 3.5\nRank these bids and explain. Return JSON: {"ranked":[{"contractor":"name","bid_amount":0,"rank":1,"reason":"2 sentences","risk":"low|medium|high"}],"recommendation":"1 sentence"}','Return ONLY raw JSON.',800);
   var d=safeJSON(r);if(!d){toast('AI ranking failed','err');return;}
   var html='<div style="background:var(--card);border:1px solid var(--purple);border-radius:var(--radius);padding:16px;margin-top:16px">'
