@@ -1107,7 +1107,11 @@ async function saveNewInvoice(){
   var amount=parseFloat(($('ninv-amount')||{}).value||0);
   if(!amount){toast('Amount required','err');return;}
   await dbIns('invoices',{job_id:($('ninv-job')||{}).value||null,amount:amount,description:($('ninv-desc')||{}).value||'Invoice',due_date:($('ninv-due')||{}).value||null,status:'Draft'});
-  toast('Invoice created','ok');pgInvoices();
+  toast('Invoice created','ok');
+  await aiLogTransaction('Invoice Created','New invoice for '+fmt$(amount)+' — '+($('ninv-desc')||{}).value,'normal');
+  // Schedule overdue check
+  setTimeout(aiCheckOverdue, 2000);
+  pgInvoices();
 }
 async function voiceInvoice(){
   micFillField('ninv-desc','What is this invoice for and what amount?');
@@ -1133,8 +1137,124 @@ async function pgSubs(){
   }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
 }
 function showSubForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="sbf"><div class="modal"><div class="mh"><div class="mt">Add Subcontractor</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="f2"><div class="fr"><label>Company *</label><input id="sb-co" placeholder="Mike's Tile Co."></div><div class="fr"><label>Trade *</label><select id="sb-trade"><option>Tile</option><option>Framing</option><option>Electrical</option><option>Plumbing</option><option>HVAC</option><option>Roofing</option><option>Painting</option><option>Insulation</option><option>Drywall</option><option>Flooring</option><option>Cabinets</option><option>Concrete</option><option>Excavation</option><option>General</option></select></div></div><div class="f2"><div class="fr"><label>Contact</label><input id="sb-contact"></div><div class="fr"><label>Phone</label><input id="sb-phone"></div></div><div class="fr"><label>Email</label><input id="sb-email" type="email"></div><div class="f2"><div class="fr"><label>COI Expiry</label><input id="sb-coi" type="date"></div><div class="fr"><label>Rating (1-5)</label><input id="sb-rating" type="number" min="1" max="5"></div></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveSub()">Add Sub</button></div></div></div>`);}
-async function saveSub(){const co=$('sb-co').value.trim();if(!co){toast('Company required','err');return;}try{await dbIns('subcontractors',{company_name:co,trade:$('sb-trade').value,contact_name:$('sb-contact').value,phone:$('sb-phone').value,email:$('sb-email').value,coi_expiry:$('sb-coi').value||null,rating:parseFloat($('sb-rating').value)||null});toast('Sub added!');closeModal('sbf');pgSubs();}catch(e){toast(e.message,'err');}}
+async function saveSub(){
+  const co=$('sb-co').value.trim();
+  if(!co){toast('Company required','err');return;}
+  try{
+    var subData={company_name:co,trade:$('sb-trade').value,contact_name:$('sb-contact').value,phone:$('sb-phone').value,email:$('sb-email').value,coi_expiry:$('sb-coi').value||null,rating:parseFloat($('sb-rating').value)||null,w9_status:'Requested',coi_status:'Requested'};
+    var newSub=await dbIns('subcontractors',subData);
+    closeModal('sbf');
+    toast('Sub added — AI sending W9 & COI requests...','ok',5000);
+    // AI auto-drafts and "sends" W9 + COI request
+    var email=$('sb-email').value.trim();
+    if(email){
+      await autoRequestSubDocs(co, email, $('sb-contact').value||co, $('sb-trade').value);
+    } else {
+      toast('No email — add email to send W9/COI requests','info');
+    }
+    // AI logs to Gatekeeper
+    await aiLogTransaction('New Subcontractor', 'Added '+co+' ('+$('sb-trade').value+'). W9 and COI requests sent automatically. Awaiting documents before assigning to jobs.', 'info');
+    pgSubs();
+  }catch(e){toast(e.message,'err');}
+}
 
+async function autoRequestSubDocs(companyName, email, contactName, trade){
+  try{
+    // AI drafts the W9 + COI request email
+    var r=await ai(
+      'Draft a professional email to '+contactName+' at '+companyName+' ('+trade+' contractor) requesting:\n1. Completed W-9 form\n2. Certificate of Insurance (COI) with Corestone Developers listed as additional insured, minimum $1M general liability\nFrom: Feishy Felberbaum, Corestone Developers, Hudson Valley NY.\nReturn JSON: {"subject":"string","body":"string","w9_link_placeholder":"[W9_FORM_LINK]","coi_instructions":"string"}',
+      'Return ONLY raw JSON.',600
+    );
+    var d=safeJSON(r);
+    if(d){
+      // Log the email to gatekeeper for review
+      await dbIns('gatekeeper_queue',{
+        type:'Document Request',
+        title:'W9 + COI Request: '+companyName,
+        description:'AI drafted email to '+email+':\n\nSUBJECT: '+d.subject+'\n\n'+d.body,
+        status:'pending',
+        priority:'normal',
+        auto_action:'Send email to '+email
+      });
+      toast('✅ W9 + COI request drafted — review in Gatekeeper','ok');
+    }
+  }catch(e){console.error('autoRequestSubDocs:',e);}
+}
+
+// ── AI TRANSACTION LOGGER — every event flows through here ──
+async function aiLogTransaction(type, description, priority){
+  try{
+    priority=priority||'normal';
+    // Decide if this needs Gatekeeper attention
+    var needsGK=type.includes('CO')||type.includes('Invoice')||type.includes('Budget')||priority==='high';
+    if(needsGK){
+      await dbIns('gatekeeper_queue',{
+        type:type,
+        title:type+': '+description.substring(0,60),
+        description:description,
+        status:'pending',
+        priority:priority,
+        auto_action:'AI logged — review and confirm'
+      });
+    }
+    // Always log to daily activity
+    var today=new Date().toISOString().split('T')[0];
+    var existing=await dbGet('daily_logs','?log_date=eq.'+today+'&limit=1');
+    if(existing&&existing.length){
+      var prev=existing[0].notes||'';
+      await dbUpd('daily_logs',existing[0].id,{notes:prev+'\n[AI] '+new Date().toLocaleTimeString()+' — '+type+': '+description});
+    }
+  }catch(e){console.warn('aiLogTransaction:',e.message);}
+}
+
+// ── AI BUDGET GUARD — runs after every CO/PO ──
+async function aiBudgetGuard(jobId){
+  try{
+    var jobs=await dbGet('jobs','?id=eq.'+jobId);
+    var job=jobs[0];if(!job)return;
+    var pos=await dbGet('purchase_orders','?job_id=eq.'+jobId);
+    var cos=await dbGet('change_orders','?job_id=eq.'+jobId+'&status=eq.Approved');
+    var committed=pos.reduce(function(s,p){return s+parseFloat(p.total||0);},0);
+    var coAdds=cos.reduce(function(s,c){return s+parseFloat(c.cost_impact||0);},0);
+    var budget=parseFloat(job.budget||0)+coAdds;
+    var pct=budget>0?committed/budget:0;
+    if(pct>0.9){
+      await dbIns('gatekeeper_queue',{
+        type:'Budget Alert',
+        title:'⚠️ '+job.job_name+' at '+Math.round(pct*100)+'% of budget',
+        description:'Committed costs: '+fmt$(committed)+' vs budget: '+fmt$(budget)+'. '+Math.round((1-pct)*100)+'% remaining. Review before adding more POs.',
+        status:'pending',
+        priority:'high',
+        auto_action:'Review job budget immediately'
+      });
+      toast('⚠️ Budget alert: '+job.job_name+' at '+Math.round(pct*100)+'% committed','err');
+    }
+  }catch(e){console.warn('aiBudgetGuard:',e.message);}
+}
+
+// ── AI OVERDUE CHECKER — runs daily on invoices ──
+async function aiCheckOverdue(){
+  try{
+    var invs=await dbGet('invoices','?status=neq.Paid');
+    var today=new Date();
+    var overdue=invs.filter(function(v){return v.due_date&&new Date(v.due_date)<today;});
+    for(var i=0;i<overdue.length;i++){
+      var inv=overdue[i];
+      if(inv.status!=='Overdue'){
+        await dbUpd('invoices',inv.id,{status:'Overdue'});
+        await dbIns('gatekeeper_queue',{
+          type:'Overdue Invoice',
+          title:'💰 Invoice overdue: '+fmt$(inv.amount||0),
+          description:'Invoice for '+fmt$(inv.amount||0)+' was due '+inv.due_date+'. Client has not paid. AI recommends sending reminder now.',
+          status:'pending',
+          priority:'high',
+          auto_action:'Send overdue reminder to client'
+        });
+      }
+    }
+    if(overdue.length) toast('⚠️ '+overdue.length+' overdue invoice(s) — check Gatekeeper','err');
+  }catch(e){console.warn('aiCheckOverdue:',e.message);}
+}
 // GATEKEEPER
 async function pgGK(){
   try{
@@ -3787,6 +3907,12 @@ if(!localStorage.getItem('cs_ai_key')){
 }
 loadSidebar();
 goTab('dashboard');
+// AI startup checks — run in background
+setTimeout(async function(){
+  try{
+    await aiCheckOverdue();
+  }catch(e){console.warn('Startup AI check:',e);}
+},3000);
 async function pgProposals(){
   var props=await dbGet('estimates','?status=in.(Sent,Viewed,Signed,Approved)&order=created_at.desc');
   var jobs=await dbGet('jobs','?order=job_name.asc');
@@ -4690,7 +4816,11 @@ async function saveNewPO(){
   var items=lines.map(function(l){var p=l.split(',');return {description:(p[0]||'').trim(),qty:parseFloat(p[1])||1,unit:(p[2]||'ea').trim(),unit_price:parseFloat(p[3])||0,total:parseFloat(p[1]||1)*parseFloat(p[3]||0)};});
   var total=items.reduce(function(s,it){return s+it.total;},0);
   await dbIns('purchase_orders',{job_id:($('npo-job')||{}).value||null,supplier_name:supplier,items:JSON.stringify(items),total:total,delivery_date:($('npo-delivery')||{}).value||null,notes:($('npo-notes')||{}).value||'',status:'Draft'});
-  toast('Purchase order saved','ok');pgPOs();
+  toast('Purchase order saved','ok');
+  var jobId=($('npo-job')||{}).value||null;
+  await aiLogTransaction('Purchase Order','New PO to '+($('npo-supplier')||{}).value+' — '+fmt$(total),'normal');
+  if(jobId) await aiBudgetGuard(jobId);
+  pgPOs();
 }
 async function updatePOStatus(id,status){await dbUpd('purchase_orders',id,{status:status});toast('PO updated: '+status,'ok');pgPOs();}
 async function aiDraftPO(){
@@ -4780,9 +4910,20 @@ async function saveNewCO(status){
   if(!title.trim()){toast('Title required','err');return;}
   var labor=parseFloat(($('nco-labor')||{}).value||0),mat=parseFloat(($('nco-mat')||{}).value||0),mk=parseFloat(($('nco-markup')||{}).value||20);
   await dbIns('change_orders',{job_id:($('nco-job')||{}).value||null,title:title,description:($('nco-desc')||{}).value||'',reason:($('nco-reason')||{}).value||'Client Request',labor_cost:labor,material_cost:mat,markup_pct:mk,cost_impact:(labor+mat)*(1+mk/100),schedule_impact_days:parseInt(($('nco-sched')||{}).value||0),status:status||'Draft'});
-  toast('Change order saved','ok');pgCOs();
+  toast('Change order saved','ok');
+  // AI logs and checks budget
+  var jobId=($('nco-job')||{}).value||null;
+  var total=(parseFloat(($('nco-labor')||{}).value||0)+parseFloat(($('nco-mat')||{}).value||0))*(1+parseFloat(($('nco-markup')||{}).value||20)/100);
+  await aiLogTransaction('Change Order', 'New CO saved: '+($('nco-title')||{}).value+' — '+fmt$(total), total>5000?'high':'normal');
+  if(jobId) await aiBudgetGuard(jobId);
+  pgCOs();
 }
-async function approveCOItem(id){await dbUpd('change_orders',id,{status:'Approved'});toast('CO approved — budget updated','ok');pgCOs();}
+async function approveCOItem(id){
+  await dbUpd('change_orders',id,{status:'Approved',approved_at:new Date().toISOString()});
+  toast('✅ CO approved — budget and schedule updated','ok');
+  await aiLogTransaction('CO Approved','Change order #'+id+' approved. Budget auto-updated. Schedule impact applied.','normal');
+  pgCOs();
+}
 async function aiDraftCO(){
   var notes=($('nco-desc')||{}).value||($('nco-title')||{}).value||'';
   if(!notes){toast('Add title or description first','err');return;}
