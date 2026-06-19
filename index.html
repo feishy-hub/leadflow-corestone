@@ -5348,6 +5348,7 @@ async function saveNewCO(status){
   await aiLogTransaction('Change Order', 'New CO saved: '+($('nco-title')||{}).value+' — '+fmt$(total), total>5000?'high':'normal');
   if(jobId) await aiBudgetGuard(jobId);
   pgCOs();
+  }catch(e){toast('Change order error: '+e.message,'err');console.error('saveNewCO',e);}
 }
 async function approveCOItem(id){
   await dbUpd('change_orders',id,{status:'Approved',approved_at:new Date().toISOString()});
