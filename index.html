@@ -1704,7 +1704,7 @@ async function getAutoSuggestion(situation){
   }catch(e){$('co-sug-txt').textContent='AI unavailable - use your script on the left.';$('co-sug-txt').style.color='rgba(252,165,165,0.8)';}
 }
 
-async async function quickSit(situation){
+async function quickSit(situation){
   if(quickSitCooldown)return;quickSitCooldown=true;
   lastAnalyzed=situation;
   await getAutoSuggestion(situation);
