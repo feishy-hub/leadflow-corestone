@@ -1674,12 +1674,15 @@ async function toggleRecording(){
 async function autoAnalyzeTranscript(text){
   if(liveAnalyzeCooldown)return;
   var situations={
-    price:['too expensive','too much','over budget','costs more','cheaper','lower price'],
-    deposit:['deposit','five thousand','5000','upfront','before we start','before the visit'],
-    bids:['other bids','other contractors','comparing','shop around','getting quotes'],
-    notready:['not ready','need time','think about it','not sure yet','maybe next year'],
-    timeline:['when can you start','how long','how many months','when do you'],
-    ready:["ready to move","let's do it","want to proceed","sounds good","let's go"],
+    price:['too expensive','too much','over budget','costs more','cheaper','lower price','other guy','another contractor','beat that price','match the price','high price','lot of money','that's a lot','can you do better','discount','reduce','negotiate'],
+    deposit:['deposit','five thousand','5000','upfront','before we start','before the visit','why do i have to pay','pay before','money upfront','down payment','retainer'],
+    bids:['other bids','other contractors','comparing','shop around','getting quotes','three bids','multiple quotes','somebody else','another company','also looking','other estimates'],
+    notready:['not ready','need time','think about it','not sure yet','maybe next year','call you back','get back to you','discuss with','talk to my wife','talk to my husband','have to think','not right now','budget is tight','not the right time'],
+    timeline:['when can you start','how long','how many months','when do you','start date','available','schedule','how soon','completion date','how many weeks'],
+    ready:['ready to move','let's do it','want to proceed','sounds good','let's go','when can we sign','send me the contract','move forward','go ahead','book it','schedule it'],
+    quality:['licensed','insured','references','reviews','past work','portfolio','experience','how long in business','who else have you done'],
+    permit:['permit','town','inspection','code','approved','zoning','hoa','homeowners association'],
+    scope:['can you also','while you're here','add on','additional','one more thing','what about','include','change the plan','different from'],
   };
   var matched=null;
   Object.keys(situations).forEach(function(sit){
@@ -1704,8 +1707,18 @@ async function autoAnalyzeTranscript(text){
 
 async function getAutoSuggestion(situation){
   var lead=ACTIVE_LEAD;
-  var sitMap={price:'Client says price is too high.',deposit:'Client questioning the $5,000 deposit.',bids:'Client getting multiple bids from other contractors.',notready:'Client not ready yet or needs more time.',timeline:'Client asks when we can start or how long project takes.',ready:'Client says they want to move forward.'};
-  var labels={price:'PRICE OBJECTION',deposit:'DEPOSIT QUESTION',bids:'COMPARING BIDS',notready:'NOT READY YET',timeline:'TIMELINE QUESTION',ready:'READY TO GO'};
+  var sitMap={
+    price:'Client says price is too high or wants a lower price.',
+    deposit:'Client is questioning or pushing back on the $5,000 deposit.',
+    bids:'Client is getting multiple bids from other contractors.',
+    notready:'Client is not ready yet, needs to think, or says budget is tight.',
+    timeline:'Client asks when we can start or how long the project takes.',
+    ready:'Client says they want to move forward and are ready to sign.',
+    quality:'Client is asking about licensing, insurance, references, or past work.',
+    permit:'Client asks about permits, inspections, town approvals, or HOA.',
+    scope:'Client is trying to add more work or change the scope mid-conversation.'
+  };
+  var labels={price:'💰 PRICE OBJECTION',deposit:'💳 DEPOSIT QUESTION',bids:'🔄 COMPARING BIDS',notready:'⏳ NOT READY YET',timeline:'📅 TIMELINE QUESTION',ready:'✅ READY TO GO',quality:'🏆 QUALITY/CREDENTIALS',permit:'📋 PERMIT QUESTION',scope:'🔧 SCOPE CHANGE DETECTED'};
   $('co-sug-lbl').textContent=(labels[situation]||situation.toUpperCase())+' - AI heard this, say:';
   $('co-sug-txt').textContent='AI analyzing what was said...';
   $('co-sug-txt').style.color='rgba(147,197,253,0.8)';
