@@ -847,7 +847,6 @@ async function saveLead(id=null,runAI=true){
 }
 
 async function generateLeadAI(leadId,data){
-  try{
   const prompt=`You are AI for Corestone Developers, Hudson Valley NY GC. Owner: Feishy Felberbaum. Cost-plus 20% fee. $5k deposit before site visit.
 LEAD: Name:${data.client_name||'Unknown'}|Phone:${data.phone||'?'}|Job:${data.job_type||'?'}|Budget:$${data.estimated_value||'?'}|Source:${data.lead_source||'?'}|Notes:${data.notes||'none'}
 Return ONLY this JSON with no extra text:
