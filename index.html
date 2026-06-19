@@ -435,6 +435,132 @@ function safeJSON(str){
   }
 }
 
+
+// ── AI PHOTO ANALYZER ──
+async function aiAnalyzePhoto(imageBase64, context){
+  if(!imageBase64){toast('No image to analyze','err');return null;}
+  try{
+    var r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:imageBase64}},
+          {type:'text',text:'Analyze this construction site photo for Corestone Developers.\nContext: '+(context||'General site photo')+'\nReturn JSON: {"description":"what you see","issues":["any problems spotted"],"quality":"excellent|good|fair|poor","recommendations":["action items"],"safety_concerns":["any safety issues"],"progress_estimate":"percentage if estimable","tags":["keyword tags"]}'}
+        ]}]})});
+    var data=await r.json();
+    if(!r.ok) throw new Error(data.error||'API error');
+    return safeJSON(data.content[0].text);
+  }catch(e){toast('Photo AI error: '+e.message,'err');return null;}
+}
+
+// ── AI SCOPE CHANGE DETECTOR ──
+async function aiDetectScope(text, jobId){
+  var r=await ai('Analyze this message/transcript for scope changes that should become change orders:\n"'+text+'"\nJob: '+(AJOB?AJOB.job_name:'current job')+'\nReturn JSON: {"scope_changes_detected":true,"changes":[{"description":"what changed","estimated_impact":"$X","recommended_action":"create_co|monitor|no_action"}],"co_recommended":true,"urgency":"immediate|soon|low"}',
+    'You are a construction scope change detector. Return ONLY raw JSON.',600);
+  var d=safeJSON(r);
+  if(d&&d.co_recommended&&d.changes&&d.changes.length){
+    toast('⚠️ AI detected '+d.changes.length+' potential scope change(s) — check Gatekeeper','err');
+    await dbIns('gatekeeper_queue',{type:'Scope Change Detected',title:'AI: Potential CO detected',description:d.changes.map(function(c){return c.description+' (~'+c.estimated_impact+')';}).join('\n'),status:'pending',priority:'high',auto_action:'Review and create change order if confirmed'});
+  }
+  return d;
+}
+
+// ── AI WEEKLY SUMMARY ──
+async function aiWeeklySummary(){
+  toast('🤖 Generating weekly AI summary...','ok',8000);
+  var jobs=await dbGet('jobs','?status=eq.Active');
+  var invs=await dbGet('invoices','?status=neq.Paid');
+  var cos=await dbGet('change_orders','?status=eq.Pending Client');
+  var gk=await dbGet('gatekeeper_queue','?status=eq.pending');
+  var r=await ai(
+    'Generate weekly business summary for Corestone Developers:\nActive jobs: '+jobs.length+'\nOutstanding invoices: '+invs.length+'\nPending CO approvals: '+cos.length+'\nGatekeeper items: '+gk.length+'\n\nReturn JSON: {"week_summary":"2 paragraph narrative","top_priorities":["priority1","priority2","priority3"],"cash_position":"description","risks":["risk1"],"wins":["win1"],"next_week_focus":["focus1","focus2"]}',
+    'You are Feishy\'s AI business advisor at Corestone Developers. Return ONLY raw JSON.',1000);
+  var d=safeJSON(r);
+  if(!d){toast('Summary generation failed','err');return;}
+  var html='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;max-width:800px">'
+    +'<div style="font-size:18px;font-weight:800;margin-bottom:16px">🤖 Weekly AI Summary — '+new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})+'</div>'
+    +'<div style="font-size:14px;line-height:1.8;color:var(--muted);margin-bottom:16px;padding:14px;background:var(--bg);border-radius:var(--radius-sm)">'+d.week_summary+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+    +'<div><div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--teal);margin-bottom:8px">Top Priorities</div>'+(d.top_priorities||[]).map(function(p){return '<div style="padding:8px;border-left:3px solid var(--teal);margin-bottom:6px;font-size:13px">'+p+'</div>';}).join('')+'</div>'
+    +'<div><div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--red);margin-bottom:8px">Risks</div>'+(d.risks||[]).map(function(p){return '<div style="padding:8px;border-left:3px solid var(--red);margin-bottom:6px;font-size:13px">'+p+'</div>';}).join('')+'</div>'
+    +'<div><div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--green);margin-bottom:8px">Wins This Week</div>'+(d.wins||[]).map(function(p){return '<div style="padding:8px;border-left:3px solid var(--green);margin-bottom:6px;font-size:13px">'+p+'</div>';}).join('')+'</div>'
+    +'<div><div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--amber);margin-bottom:8px">Next Week Focus</div>'+(d.next_week_focus||[]).map(function(p){return '<div style="padding:8px;border-left:3px solid var(--amber);margin-bottom:6px;font-size:13px">'+p+'</div>';}).join('')+'</div>'
+    +'</div></div>';
+  $('content').innerHTML=html;
+}
+
+// ── AI CASH FLOW FORECAST ──
+async function aiCashFlow(){
+  toast('🤖 Forecasting cash flow...','ok',6000);
+  var invs=await dbGet('invoices','?order=due_date.asc');
+  var bills=await dbGet('bills','?status=eq.Unpaid&order=due_date.asc');
+  var inflow=invs.filter(function(v){return v.status!=='Paid';}).reduce(function(s,v){return s+parseFloat(v.amount||0);},0);
+  var outflow=bills.reduce(function(s,b){return s+parseFloat(b.amount||0);},0);
+  var r=await ai(
+    'Cash flow forecast for construction business:\nExpected inflow (invoices due): $'+inflow+'\nExpected outflow (bills to pay): $'+outflow+'\nNet position: $'+(inflow-outflow)+'\n\nReturn JSON: {"net_30_days":'+(inflow-outflow)+',"health":"strong|ok|tight|critical","recommendation":"2 sentences","actions":["action1","action2"],"forecast_weeks":[{"week":"Week 1","inflow":0,"outflow":0,"net":0}]}',
+    'Return ONLY raw JSON.',800);
+  var d=safeJSON(r);
+  if(!d){toast('Cash flow AI failed','err');return;}
+  var healthColors={'strong':'var(--green)','ok':'var(--teal)','tight':'var(--amber)','critical':'var(--red)'};
+  toast('Cash position: '+(d.health||'ok').toUpperCase()+' — Net 30 days: '+fmt$(d.net_30_days||0),'ok',6000);
+  return d;
+}
+
+// ── AI RISK SCORER ──
+async function aiRiskScore(jobId){
+  var jobs=await dbGet('jobs','?id=eq.'+jobId);
+  var job=jobs[0];if(!job)return;
+  var cos=await dbGet('change_orders','?job_id=eq.'+jobId);
+  var invs=await dbGet('invoices','?job_id=eq.'+jobId+'&status=neq.Paid');
+  var r=await ai(
+    'Risk assessment for job: '+job.job_name+'\nStatus: '+job.status+'\nProgress: '+job.percent_complete+'%\nBudget: $'+job.budget+'\nChange orders: '+cos.length+'\nOutstanding invoices: '+invs.length+'\n\nReturn JSON: {"risk_score":0,"risk_level":"low|medium|high|critical","risk_factors":["factor1"],"mitigation":["action1"],"prediction":"1 sentence outcome prediction"}',
+    'Return ONLY raw JSON.',600);
+  var d=safeJSON(r);
+  if(!d){return;}
+  toast('Job risk: '+(d.risk_level||'?').toUpperCase()+' ('+d.risk_score+'/100)','ok',5000);
+  return d;
+}
+
+// ── GENERATE CONTRACT ──
+async function generateContract(jobId){
+  var jobs=await dbGet('jobs','?id=eq.'+jobId);
+  var job=jobs[0];if(!job){toast('Job not found','err');return;}
+  toast('🤖 AI generating contract...','ok',8000);
+  var r=await ai(
+    'Generate a professional construction contract for:\nContractor: Corestone Developers, Feishy Felberbaum, Hudson Valley NY\nClient: '+job.client_name+'\nJob: '+job.job_name+' at '+job.address+'\nContract value: $'+job.budget+'\nDeposit: $5,000\nStart: '+job.start_date+'\n\nReturn JSON: {"contract_title":"","parties":"","scope_summary":"3 sentences","payment_terms":["$5,000 deposit at signing","Progress billing as phases complete","Final payment upon completion"],"start_date":"","estimated_completion":"","warranty":"1 year workmanship, 2 year waterproofing","change_order_clause":"","dispute_resolution":"","contractor_license_insurance":"","signature_block":""}',
+    'You are a construction contract attorney. Return ONLY raw JSON.',1200);
+  var d=safeJSON(r);
+  if(!d){toast('Contract generation failed','err');return;}
+  // Display contract
+  var html='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:30px;max-width:760px;font-family:Georgia,serif">'
+    +'<div style="text-align:center;margin-bottom:24px"><div style="font-size:20px;font-weight:800">CONSTRUCTION CONTRACT</div><div style="font-size:14px;color:var(--muted)">Corestone Developers · Hudson Valley NY</div></div>'
+    +'<div style="margin-bottom:16px"><strong>Parties:</strong><br>'+d.parties+'</div>'
+    +'<div style="margin-bottom:16px"><strong>Scope of Work:</strong><br>'+d.scope_summary+'</div>'
+    +'<div style="margin-bottom:16px"><strong>Payment Terms:</strong><br>'+(d.payment_terms||[]).map(function(t){return '• '+t;}).join('<br>')+'</div>'
+    +'<div style="margin-bottom:16px"><strong>Warranty:</strong> '+d.warranty+'</div>'
+    +'<div style="margin-bottom:16px"><strong>Change Orders:</strong> '+d.change_order_clause+'</div>'
+    +'<div style="margin-bottom:16px"><strong>Dispute Resolution:</strong> '+d.dispute_resolution+'</div>'
+    +'<div style="margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px">'
+    +'<div><div style="border-top:1px solid var(--text);padding-top:8px">Feishy Felberbaum — Corestone Developers</div></div>'
+    +'<div><div style="border-top:1px solid var(--text);padding-top:8px">'+job.client_name+' — Client</div></div></div>'
+    +'</div>';
+  $('content').innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:16px"><button onclick="window.print()" style="padding:8px 16px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:sans-serif">🖨️ Print / Save PDF</button></div>'+html;
+  toast('Contract generated — use Print to save as PDF','ok');
+}
+
+// ── SEND CLIENT UPDATE ──
+async function sendClientUpdate(jobId){
+  var jobs=await dbGet('jobs','?id=eq.'+jobId);
+  var job=jobs[0];if(!job)return;
+  toast('🤖 AI drafting client update...','ok',5000);
+  var r=await ai(
+    'Draft a professional client progress update for:\nClient: '+job.client_name+'\nJob: '+job.job_name+'\nProgress: '+job.percent_complete+'%\nPhase: '+job.current_phase+'\nFrom: Feishy at Corestone Developers\n\nReturn JSON: {"subject":"","body":"warm professional 3 paragraph update","sms":"under 160 chars"}',
+    'Return ONLY raw JSON.',700);
+  var d=safeJSON(r);
+  if(!d){toast('Draft failed','err');return;}
+  await dbIns('messages',{job_id:jobId,recipient:job.client_name,subject:d.subject,body:d.body,type:'Client Update',status:'Draft'});
+  toast('Client update drafted — check Messages tab','ok');
+  await aiLogTransaction('Client Update','Progress update drafted for '+job.client_name+' — '+job.percent_complete+'% complete','normal');
+}
 function toast(msg,type='ok'){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;$('toasts').appendChild(el);setTimeout(()=>el.remove(),3500);}
 function closeModal(id){$(id)?.remove();}
 
@@ -1277,6 +1403,89 @@ async function aiCheckOverdue(){
     if(overdue.length) toast('⚠️ '+overdue.length+' overdue invoice(s) — check Gatekeeper','err');
   }catch(e){console.warn('aiCheckOverdue:',e.message);}
 }
+
+async function pgBills(){
+  var bills=await dbGet('bills','?order=created_at.desc');
+  if(!bills) bills=[];
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var subs=await dbGet('subcontractors','?order=company_name.asc');
+  var totalOwed=bills.filter(function(b){return b.status!=='Paid';}).reduce(function(s,b){return s+parseFloat(b.amount||0);},0);
+  var overdue=bills.filter(function(b){return b.status==='Overdue';});
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Bills &amp; Accounts Payable</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+bills.length+' bills &nbsp;·&nbsp; '+fmt$(totalOwed)+' owed &nbsp;·&nbsp; '+overdue.length+' overdue</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="micFillField(\'nbill-desc\',\'Describe this bill: vendor, what for, amount\');if($(\'bill-form\'))$(\'bill-form\').style.display=\'block\'" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Bill</button>'
+    +'<button onclick="showBillForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Add Bill</button></div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">'
+    +[{l:'Total Owed',v:totalOwed,c:'var(--red)'},{l:'Overdue',v:overdue.reduce(function(s,b){return s+parseFloat(b.amount||0);},0),c:'var(--red)'},{l:'Due This Week',v:bills.filter(function(b){var d=new Date(b.due_date);var now=new Date();return d>now&&d<new Date(now.getTime()+7*86400000)&&b.status!=='Paid';}).reduce(function(s,b){return s+parseFloat(b.amount||0);},0),c:'var(--amber)'},{l:'Paid This Month',v:bills.filter(function(b){return b.status==='Paid'&&new Date(b.paid_at||b.created_at).getMonth()===new Date().getMonth();}).reduce(function(s,b){return s+parseFloat(b.amount||0);},0),c:'var(--green)'}]
+    .map(function(item){return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:18px;font-weight:800;color:'+item.c+'">'+fmt$(item.v)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+item.l+'</div></div>';}).join('')+'</div>'
+    +'<div id="bill-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">Add Bill<button onclick="$(\'bill-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div><select id="nbill-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Vendor / Sub</div>'
+    +'<div style="display:flex;gap:4px"><input id="nbill-vendor" placeholder="Vendor name..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
+    +'<button onclick="micFillField(\'nbill-vendor\',\'Vendor or subcontractor name\')" style="padding:8px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Amount $</div><input id="nbill-amount" type="number" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Description</div>'
+    +'<div style="display:flex;gap:4px"><input id="nbill-desc" placeholder="What is this bill for?" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
+    +'<button onclick="micFillField(\'nbill-desc\',\'What is this bill for?\')" style="padding:8px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Due Date</div><input id="nbill-due" type="date" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="saveNewBill()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Bill</button>'
+    +'<button onclick="aiCheckBill()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Verify Bill</button>'
+    +'</div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 150px 120px 120px 100px">VENDOR / JOB<span>AMOUNT</span><span>DUE</span><span>STATUS</span><span>ACTIONS</span></div>';
+  if(!bills.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No bills yet.</div>';}
+  else{bills.forEach(function(b,i){
+    var job=jobs.find(function(j){return j.id===b.job_id;})||{job_name:'—'};
+    var sColors={'Unpaid':'var(--amber)','Paid':'var(--green)','Overdue':'var(--red)','Disputed':'var(--purple)'};
+    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+      +'<div><div style="font-weight:700;font-size:13px">'+b.vendor_name+'</div><div style="font-size:11px;color:var(--muted)">'+(b.description||'').substring(0,40)+' · '+job.job_name+'</div></div>'
+      +'<div style="font-weight:800;font-size:14px;color:var(--text)">'+fmt$(b.amount||0)+'</div>'
+      +'<div style="font-size:12px;color:'+(b.status==='Overdue'?'var(--red)':'var(--muted)')+'">'+(b.due_date||'—')+'</div>'
+      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[b.status]||'var(--amber)')+';color:#fff">'+(b.status||'Unpaid')+'</span></div>'
+      +'<div style="display:flex;gap:4px">'
+      +(b.status!=='Paid'?'<button onclick="payBill(\''+b.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">Pay</button>':'')
+      +'<button onclick="disputeBill(\''+b.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:4px;cursor:pointer;font-family:inherit">?</button>'
+      +'</div></div>';
+  });}
+  html+='</div>';
+  $('content').innerHTML=html;
+}
+function showBillForm(){var f=$('bill-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+async function saveNewBill(){
+  var vendor=($('nbill-vendor')||{}).value||'';var amount=parseFloat(($('nbill-amount')||{}).value||0);
+  if(!vendor||!amount){toast('Vendor and amount required','err');return;}
+  await dbIns('bills',{job_id:($('nbill-job')||{}).value||null,vendor_name:vendor,amount:amount,description:($('nbill-desc')||{}).value||'',due_date:($('nbill-due')||{}).value||null,status:'Unpaid'});
+  await aiLogTransaction('Bill Added','New bill from '+vendor+': '+fmt$(amount),'normal');
+  toast('Bill saved','ok');pgBills();
+}
+async function payBill(id){
+  await dbUpd('bills',id,{status:'Paid',paid_at:new Date().toISOString()});
+  toast('✅ Bill marked paid','ok');
+  await aiLogTransaction('Bill Paid','Bill #'+id+' paid','normal');
+  pgBills();
+}
+async function disputeBill(id){
+  await dbUpd('bills',id,{status:'Disputed'});
+  toast('Bill flagged as disputed — added to Gatekeeper','info');
+  await dbIns('gatekeeper_queue',{type:'Bill Dispute',title:'Bill disputed',description:'Bill #'+id+' flagged for review. AI will analyze.',status:'pending',priority:'high'});
+  pgBills();
+}
+async function aiCheckBill(){
+  var vendor=($('nbill-vendor')||{}).value||'';var amount=($('nbill-amount')||{}).value||'0';var desc=($('nbill-desc')||{}).value||'';
+  toast('🤖 AI verifying bill...','ok',5000);
+  var r=await ai('Verify this bill for Corestone Developers:\nVendor: '+vendor+'\nAmount: $'+amount+'\nDescription: '+desc+'\nJob: '+(AJOB?AJOB.job_name:'unknown')+'\n\nIs this amount reasonable for Hudson Valley NY 2026? Any red flags?\nReturn JSON: {"reasonable":true,"risk":"low|medium|high","reasoning":"2 sentences","recommended_action":"approve|review|dispute","notes":""}','Return ONLY raw JSON.',500);
+  var d=safeJSON(r);
+  if(!d){toast('AI check failed','err');return;}
+  toast((d.reasonable?'✅':'⚠️')+' AI: '+d.reasoning.substring(0,80),'ok',6000);
+}
+// GATEKEEPER PREP
+async function pgDashAI(){aiWeeklySummary();}
 // GATEKEEPER
 async function pgGK(){
   try{
@@ -4254,9 +4463,207 @@ async function aiSuggestTasks(){
   }catch(e){toast('AI error: '+e.message,'err');}
 }
 
-async function pgSelections(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Selections</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
-async function pgSpecs(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Specifications</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
-async function pgWarranty(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Warranty</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
+async function pgSelections(){
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var sels=await dbGet('selections','?order=created_at.desc');
+  if(!sels) sels=[];
+  var cats=['Tile & Flooring','Cabinets','Countertops','Fixtures & Plumbing','Lighting','Hardware','Paint Colors','Appliances','Windows & Doors','Exterior'];
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Client Selections</div>'
+    +'<div style="font-size:12px;color:var(--muted)">Track every finish, fixture, and material choice per job</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="voiceSelection()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Selection</button>'
+    +'<button onclick="showSelForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Add Selection</button></div></div>'
+    +'<div id="sel-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Selection<button onclick="$(\'sel-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
+    +'<select id="nsel-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">Select job...</option>'
+    +jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Category</div>'
+    +'<select id="nsel-cat" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +cats.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Status</div>'
+    +'<select id="nsel-status" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +'<option>Pending Client</option><option>Client Selected</option><option>Ordered</option><option>Delivered</option><option>Installed</option></select></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Item Description</div>'
+    +'<div style="display:flex;gap:6px"><input id="nsel-item" placeholder="e.g. 12x24 Carrara marble tile, polished" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
+    +'<button onclick="micFillField(\'nsel-item\',\'Describe the selection item, brand, model, color\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Supplier</div><input id="nsel-supplier" placeholder="Tile America, Home Depot..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Unit Cost $</div><input id="nsel-cost" type="number" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Lead Time</div><input id="nsel-lead" placeholder="e.g. 2 weeks" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="saveSelection()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Selection</button>'
+    +'<button onclick="aiSuggestSelections()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Suggest Options</button>'
+    +'</div></div>'
+    // Group by category
+    +cats.map(function(cat){
+      var catSels=sels.filter(function(s){return s.category===cat;});
+      if(!catSels.length) return '';
+      var sColors={'Pending Client':'var(--amber)','Client Selected':'var(--blue)','Ordered':'var(--teal)','Delivered':'var(--green)','Installed':'var(--green)'};
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden">'
+        +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase">'+cat+' <span style="color:var(--muted);font-weight:400">('+catSels.length+')</span></div>'
+        +catSels.map(function(s){
+          return '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">'
+            +'<div style="flex:1"><div style="font-weight:700;font-size:13px">'+s.item_description+'</div>'
+            +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(s.supplier||'')+(s.lead_time?' · '+s.lead_time:'')+' · $'+(s.unit_cost||0)+'/unit</div></div>'
+            +'<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:'+(sColors[s.status]||'var(--muted)')+';color:#fff">'+s.status+'</span>'
+            +'<button onclick="cycleSelStatus(\''+s.id+'\',\''+s.status+'\')" style="font-size:11px;padding:4px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-family:inherit">Next →</button>'
+            +'</div>';
+        }).join('')+'</div>';
+    }).join('')
+    +(sels.length===0?'<div style="padding:40px;text-align:center;color:var(--dim)">No selections yet — add your first one above.</div>':'');
+  $('content').innerHTML=html;
+}
+function showSelForm(){var f=$('sel-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+async function saveSelection(){
+  var item=($('nsel-item')||{}).value||'';
+  if(!item.trim()){toast('Item description required','err');return;}
+  await dbIns('selections',{job_id:($('nsel-job')||{}).value||null,category:($('nsel-cat')||{}).value||'General',item_description:item,supplier:($('nsel-supplier')||{}).value||'',unit_cost:parseFloat(($('nsel-cost')||{}).value||0),lead_time:($('nsel-lead')||{}).value||'',status:($('nsel-status')||{}).value||'Pending Client'});
+  toast('Selection saved','ok');pgSelections();
+}
+async function cycleSelStatus(id,current){
+  var order=['Pending Client','Client Selected','Ordered','Delivered','Installed'];
+  var next=order[(order.indexOf(current)+1)%order.length];
+  await dbUpd('selections',id,{status:next});
+  toast('Updated: '+next,'ok');pgSelections();
+}
+async function aiSuggestSelections(){
+  if(!AJOB){toast('Select a job first','err');return;}
+  toast('🤖 AI suggesting selections...','ok',6000);
+  var r=await ai('Suggest client selections for '+AJOB.job_type+' in Hudson Valley NY, mid-to-high-end budget.\nReturn JSON array: [{"category":"Tile & Flooring","item_description":"24x24 large format porcelain tile, matte finish","supplier":"Tile America or similar","unit_cost":8.50,"lead_time":"1-2 weeks","notes":"Popular choice for bathrooms"}] — 6 suggestions across different categories','Return ONLY raw JSON array.',1000);
+  var d=safeJSON(r);
+  if(!d||!Array.isArray(d)){toast('AI failed','err');return;}
+  for(var i=0;i<d.length;i++){
+    await dbIns('selections',{job_id:AJOB.id,category:d[i].category,item_description:d[i].item_description,supplier:d[i].supplier||'',unit_cost:d[i].unit_cost||0,lead_time:d[i].lead_time||'',status:'Pending Client',notes:d[i].notes||''});
+  }
+  toast('🤖 AI added '+d.length+' suggested selections','ok');pgSelections();
+}
+async function voiceSelection(){
+  micFillField('nsel-item','Describe the selection — material, brand, color, model');
+  if($('sel-form'))$('sel-form').style.display='block';
+}
+async function pgSpecs(){
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var specs=await dbGet('specifications','?order=created_at.desc');
+  if(!specs) specs=[];
+  var sections=['General Conditions','Site Work','Concrete','Masonry','Metals','Wood & Plastics','Thermal & Moisture','Doors & Windows','Finishes','Specialties','Equipment','Furnishings','Mechanical','Electrical'];
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Specifications</div>'
+    +'<div style="font-size:12px;color:var(--muted)">Technical requirements and standards per job</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="micFillField(\'nspec-content\',\'Describe this specification requirement in detail\');if($(\'spec-form\'))$(\'spec-form\').style.display=\'block\'" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Spec</button>'
+    +'<button onclick="showSpecForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Add Spec</button>'
+    +'<button onclick="aiGenerateSpecs()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Generate Specs</button></div></div>'
+    +'<div id="spec-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Specification<button onclick="$(\'spec-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div><select id="nspec-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">All Jobs</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Section</div><select id="nspec-section" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'+sections.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Title</div><input id="nspec-title" placeholder="Spec title..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Content / Requirements</div>'
+    +'<div style="display:flex;gap:6px"><textarea id="nspec-content" rows="4" placeholder="Detailed specification requirements..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
+    +'<button onclick="micFillField(\'nspec-content\',\'Describe the specification requirement in detail\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
+    +'<button onclick="saveSpec()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Spec</button></div>'
+    +(specs.length===0?'<div style="padding:40px;text-align:center;color:var(--dim)"><div style="font-size:40px;margin-bottom:12px">📋</div>No specifications yet. Add manually or use AI Generate.</div>'
+    :'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +specs.map(function(s,i){return '<div style="padding:14px 16px;border-bottom:1px solid var(--border);background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+      +'<div><span style="font-size:10px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:0.05em">'+s.section+'</span>'
+      +'<div style="font-weight:700;font-size:13px;margin-top:3px">'+s.title+'</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.6">'+s.content+'</div></div>'
+      +'<button onclick="delRecord(\''+s.id+'\',\'specifications\',pgSpecs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;margin-left:10px;font-family:inherit">✕</button>'
+      +'</div></div>';}).join('')+'</div>');
+  $('content').innerHTML=html;
+}
+function showSpecForm(){var f=$('spec-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+async function saveSpec(){
+  var title=($('nspec-title')||{}).value||'';var content=($('nspec-content')||{}).value||'';
+  if(!title||!content){toast('Title and content required','err');return;}
+  await dbIns('specifications',{job_id:($('nspec-job')||{}).value||null,section:($('nspec-section')||{}).value,title:title,content:content});
+  toast('Spec saved','ok');pgSpecs();
+}
+async function aiGenerateSpecs(){
+  if(!AJOB){toast('Select a job first','err');return;}
+  toast('🤖 AI generating specifications...','ok',8000);
+  var r=await ai('Generate construction specifications for '+AJOB.job_type+' in Hudson Valley NY.\nReturn JSON array: [{"section":"Finishes","title":"Tile Installation Standards","content":"All tile installation shall conform to TCNA guidelines. Grout joints shall be uniform at 1/8". Tile shall be back-buttered with thin-set mortar..."}] — 6 specifications','Return ONLY raw JSON array.',1200);
+  var d=safeJSON(r);
+  if(!d||!Array.isArray(d)){toast('AI failed','err');return;}
+  for(var i=0;i<d.length;i++){
+    await dbIns('specifications',{job_id:AJOB.id,section:d[i].section,title:d[i].title,content:d[i].content});
+  }
+  toast('🤖 AI generated '+d.length+' specifications','ok');pgSpecs();
+}
+async function pgWarranty(){
+  var jobs=await dbGet('jobs','?status=eq.Completed&order=job_name.asc');
+  var allJobs=await dbGet('jobs','?order=job_name.asc');
+  var claims=await dbGet('warranty_claims','?order=created_at.desc');
+  if(!claims) claims=[];
+  var open=claims.filter(function(c){return c.status!=='Resolved';});
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Warranty Tracking</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+open.length+' open claims &nbsp;·&nbsp; '+claims.length+' total</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="micFillField(\'nwc-desc\',\'Describe the warranty issue\');if($(\'wc-form\'))$(\'wc-form\').style.display=\'block\'" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Claim</button>'
+    +'<button onclick="showWCForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New Claim</button></div></div>'
+    // Warranty coverage cards
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:13px;font-weight:700;margin-bottom:8px">🔨 Workmanship</div><div style="font-size:12px;color:var(--muted)">1 Year — All labor defects</div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:13px;font-weight:700;margin-bottom:8px">💧 Waterproofing</div><div style="font-size:12px;color:var(--muted)">2 Years — Leaks and moisture</div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:13px;font-weight:700;margin-bottom:8px">🏭 Manufacturer</div><div style="font-size:12px;color:var(--muted)">Per manufacturer warranty</div></div></div>'
+    +'<div id="wc-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Warranty Claim<button onclick="$(\'wc-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div><select id="nwc-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">Select job...</option>'+allJobs.map(function(j){return '<option value="'+j.id+'">'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Warranty Type</div><select id="nwc-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option>Workmanship</option><option>Waterproofing</option><option>Manufacturer</option><option>Structural</option></select></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Issue Description</div>'
+    +'<div style="display:flex;gap:6px"><textarea id="nwc-desc" rows="3" placeholder="Client reported..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
+    +'<button onclick="micFillField(\'nwc-desc\',\'Describe the warranty issue or complaint\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="saveWarrantyClaim()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Log Claim</button>'
+    +'<button onclick="aiWarrantyAnalysis()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Analyze Claim</button></div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +(claims.length===0?'<div style="padding:40px;text-align:center;color:var(--dim)">No warranty claims — great work!</div>'
+    :'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 120px 120px 80px">CLAIM / JOB<span>TYPE</span><span>REPORTED</span><span>STATUS</span></div>'
+    +claims.map(function(c,i){
+      var job=allJobs.find(function(j){return j.id===c.job_id;})||{job_name:'?'};
+      var sColors={'Open':'var(--red)','In Progress':'var(--amber)','Resolved':'var(--green)'};
+      return '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 120px 120px 80px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+        +'<div><div style="font-weight:700;font-size:13px">'+job.job_name+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+c.description.substring(0,60)+'...</div></div>'
+        +'<div style="font-size:12px;color:var(--muted)">'+c.warranty_type+'</div>'
+        +'<div style="font-size:12px;color:var(--muted)">'+(c.created_at?new Date(c.created_at).toLocaleDateString():'?')+'</div>'
+        +'<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;background:'+(sColors[c.status]||'var(--amber)')+';color:#fff">'+(c.status||'Open')+'</span>'
+        +'</div>';
+    }).join(''))+'</div>';
+  $('content').innerHTML=html;
+}
+function showWCForm(){var f=$('wc-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+async function saveWarrantyClaim(){
+  var desc=($('nwc-desc')||{}).value||'';
+  if(!desc){toast('Description required','err');return;}
+  await dbIns('warranty_claims',{job_id:($('nwc-job')||{}).value||null,warranty_type:($('nwc-type')||{}).value||'Workmanship',description:desc,status:'Open'});
+  await aiLogTransaction('Warranty Claim','New '+($('nwc-type')||{}).value+' claim logged: '+desc.substring(0,60),'high');
+  toast('Warranty claim logged','ok');pgWarranty();
+}
+async function aiWarrantyAnalysis(){
+  var desc=($('nwc-desc')||{}).value||'';
+  if(!desc){toast('Describe the issue first','err');return;}
+  toast('🤖 AI analyzing warranty claim...','ok',6000);
+  var r=await ai('Warranty claim for construction job: "'+desc+'"\nCorestone Developers, Hudson Valley NY. 1-year workmanship, 2-year waterproofing.\nReturn JSON: {"covered":true,"warranty_type":"Workmanship","reasoning":"2 sentences","recommended_response":"2 sentences to client","fix_description":"what needs to be done","estimated_fix_cost":0,"responsible_party":"Corestone|Sub|Manufacturer|Client","urgency":"immediate|within_week|scheduled"}',
+    'Return ONLY raw JSON.',700);
+  var d=safeJSON(r);
+  if(!d){toast('AI failed','err');return;}
+  var html='<div style="margin-top:16px;padding:16px;background:var(--purple-bg);border:1px solid var(--purple);border-radius:var(--radius)">'
+    +'<div style="font-size:13px;font-weight:700;color:var(--purple);margin-bottom:10px">🤖 AI Warranty Analysis</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">'
+    +'<div style="background:var(--card);padding:10px;border-radius:var(--radius-sm);text-align:center"><div style="font-size:16px;font-weight:800;color:'+(d.covered?'var(--green)':'var(--red)') +'">'+(d.covered?'✅ Covered':'❌ Not Covered')+'</div><div style="font-size:10px;color:var(--muted)">'+d.warranty_type+'</div></div>'
+    +'<div style="background:var(--card);padding:10px;border-radius:var(--radius-sm);text-align:center"><div style="font-size:14px;font-weight:800">'+d.responsible_party+'</div><div style="font-size:10px;color:var(--muted)">Responsible</div></div>'
+    +'<div style="background:var(--card);padding:10px;border-radius:var(--radius-sm);text-align:center"><div style="font-size:14px;font-weight:800;color:var(--amber)">$'+d.estimated_fix_cost+'</div><div style="font-size:10px;color:var(--muted)">Est. fix cost</div></div></div>'
+    +'<div style="font-size:12px;margin-bottom:8px"><strong>Reasoning:</strong> '+d.reasoning+'</div>'
+    +'<div style="font-size:12px;padding:10px;background:var(--card);border-radius:var(--radius-sm)"><strong>Say to client:</strong> "'+d.recommended_response+'"</div></div>';
+  $('content').innerHTML+= html;
+}
 // ═══════════════════════════════════════════════════════
 // PHASE 2 — ESTIMATES MODULE
 // Full line-item estimating with markup, client preview, PDF
