@@ -1773,18 +1773,29 @@ function showTakeoffResults(t,docId){
 async function runPlanAI(docId){
   var docs=await dbGet('documents','?id=eq.'+docId);
   var doc=docs[0];if(!doc)return;
-  toast('🤖 Running AI takeoff...','ok',8000);
-  // For stored plans, re-analyze using the stored description or show existing
+  // If we have stored takeoff JSON, show it
   if(doc.description){
     try{
       var t=JSON.parse(doc.description);
-      showTakeoffResults(t,docId);
-    }catch(e){
-      toast('Re-upload the plan to run AI takeoff','err');
-    }
-  } else {
-    toast('Upload the plan file to run AI takeoff','err');
+      if(t&&(t.takeoff||t.rooms)){showTakeoffResults(t,docId);return;}
+    }catch(e){}
   }
+  // Otherwise run AI on the doc name/notes
+  toast('🤖 Running AI takeoff analysis...','ok',10000);
+  try{
+    var jobName=doc.name||'Construction Project';
+    var r=await ai(
+      'Analyze this construction project and generate a full takeoff estimate:\n'+
+      'Project: '+jobName+'\n'+
+      'Notes: '+(doc.notes||'Standard renovation')+'\n'+
+      'Return JSON: {"rooms":[{"name":"room","sqft":0}],"takeoff":{"demo":{},"framing":{},"electrical":{},"plumbing":{},"flooring":{},"cabinets":{},"countertop":{},"paint":{}},"trades_needed":["trade"],"estimated_cost_range":"$X-$Y","key_assumptions":["assumption"]}',
+      'You are a construction estimator for Hudson Valley NY. Return ONLY raw JSON.',1500
+    );
+    var t=safeJSON(r);
+    if(!t||!t.takeoff){toast('Could not analyze — upload the actual plan PDF for best results','err');return;}
+    await dbUpd('documents',docId,{description:JSON.stringify(t)});
+    showTakeoffResults(t,docId);
+  }catch(e){toast('Plan AI error: '+e.message,'err');}
 }
 
 async function viewPlanTakeoff(docId){
@@ -1961,6 +1972,12 @@ async function aiGenerateSchedule(){
       1500
     );
     var phases=safeJSON(r);
+    if(!phases||!Array.isArray(phases)||phases.length===0){
+      // Try extracting array directly
+      var m=r.match(/\[[\s\S]*\]/);
+      if(m){try{phases=JSON.parse(m[0]);}catch(e2){phases=[];}}
+    }
+    if(!phases||phases.length===0){toast('Schedule AI returned empty — try again','err');return;}
     for(var i=0;i<phases.length;i++){
       await dbIns('schedule',{...phases[i],job_id:AJOB.id});
     }
@@ -2729,7 +2746,7 @@ async function aiGeneratePunchList(){
   if(!AJOB){toast('Select a job first','err');return;}
   toast('🤖 AI generating punch list...','ok',10000);
   try{
-    var r=await ai('Generate a comprehensive construction punch list for this project:\nJob: '+AJOB.job_name+'\nType: '+(AJOB.job_type||'renovation')+'\nPhase: '+(AJOB.current_phase||'Punch List')+'\nProgress: '+(AJOB.percent_complete||90)+'%\n\nReturn ONLY valid JSON array:\n[{"title":"Item title","description":"Specific detail","assigned_to":"Trade responsible","priority":"urgent|high|normal","due_date":"'+new Date(Date.now()+14*86400000).toISOString().split('T')[0]+'"}]\n\nInclude 15-20 realistic items covering: paint touch-ups, fixture adjustments, door hardware, caulking, cleaning, punch-through repairs, final electrical, plumbing checks, exterior items, client-specific requests.','Return ONLY valid JSON array. No markdown.',1500);
+    var r=await ai('Generate a comprehensive construction punch list for this project:\nJob: '+AJOB.job_name+'\nType: '+(AJOB.job_type||'renovation')+'\nPhase: '+(AJOB.current_phase||'Punch List')+'\nProgress: '+(AJOB.percent_complete||90)+'%\n\nReturn ONLY valid JSON array:\n[{"title":"Item title","description":"Specific detail","assigned_to":"Trade responsible","priority":"urgent|high|normal","due_date":"'+new Date(Date.now()+14*86400000).toISOString().split('T')[0]+'"}]\n\nInclude exactly 10 items covering: paint touch-ups, fixture adjustments, door hardware, caulking, final electrical, plumbing checks.','Return ONLY raw JSON array. No markdown, no extra text.',2500);
     var items=safeJSON(r);
     for(var i=0;i<items.length;i++){
       await dbIns('punch_list',{...items[i],status:'open',job_id:AJOB.id});
