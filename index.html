@@ -581,6 +581,34 @@ function renderPage(tab){
 }
 
 // DASHBOARD
+function micFillField(fieldId, hint, callback){
+  var SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRec){toast('Speech recognition not supported — use Chrome','err');return;}
+  var rec=new SpeechRec();rec.continuous=false;rec.interimResults=false;rec.lang='en-US';
+  var btn=event&&event.currentTarget;
+  if(btn){btn.textContent='🔴';btn.style.background='#ef4444';}
+  toast('🎙️ Listening... ('+hint+')','info',8000);
+  rec.onresult=function(e){
+    var txt=e.results[0][0].transcript;
+    var el=$(fieldId);
+    if(el){
+      if(el.tagName==='TEXTAREA'||el.tagName==='INPUT') el.value=(el.value?el.value+' ':'')+txt;
+      else el.textContent=txt;
+    }
+    if(btn){btn.textContent='🎙️';btn.style.background='var(--teal)';}
+    toast('Got it: "'+txt.substring(0,40)+'"','ok');
+    if(callback) callback(txt);
+  };
+  rec.onerror=function(e){
+    if(btn){btn.textContent='🎙️';btn.style.background='var(--teal)';}
+    toast('Mic error: '+e.error,'err');
+  };
+  rec.onend=function(){
+    if(btn){btn.textContent='🎙️';btn.style.background='var(--teal)';}
+  };
+  try{rec.start();}catch(e){toast('Mic could not start: '+e.message,'err');}
+}
+
 async function pgDash(){
   try{
     const[leads,jobs,invs,gk]=await Promise.all([dbGet('leads','?select=estimated_value,stage,created_at,client_name'),dbGet('jobs','?select=status,percent_complete,job_name,client_name,id'),dbGet('invoices','?select=amount,amount_paid,status'),dbGet('gatekeeper_queue','?select=id&status=eq.pending')]);
@@ -1026,6 +1054,74 @@ async function pgMsgs(){
 async function sendMsg(){const body=$('msg-body').value.trim();if(!body){toast('Message empty','err');return;}try{await dbIns('messages',{body,job_id:AJOB?.id||null});toast('Sent!');$('msg-body').value='';pgMsgs();}catch(e){toast(e.message,'err');}}
 
 // SUBCONTRACTORS
+async function pgInvoices(){
+  var invs=await dbGet('invoices','?order=created_at.desc');
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var totalOwed=invs.filter(function(v){return v.status!=='Paid';}).reduce(function(s,v){return s+parseFloat(v.amount||0);},0);
+  var totalPaid=invs.filter(function(v){return v.status==='Paid';}).reduce(function(s,v){return s+parseFloat(v.amount||0);},0);
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Invoices</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+invs.length+' invoices &nbsp;·&nbsp; '+fmt$(totalOwed)+' outstanding &nbsp;·&nbsp; '+fmt$(totalPaid)+' collected</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="voiceInvoice()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Invoice</button>'
+    +'<button onclick="showInvoiceForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New Invoice</button></div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">'
+    +[{l:'Outstanding',v:totalOwed,c:'var(--amber)'},{l:'Paid',v:totalPaid,c:'var(--green)'},{l:'Overdue',v:invs.filter(function(v){return v.status==='Overdue';}).reduce(function(s,v){return s+parseFloat(v.amount||0);},0),c:'var(--red)'},{l:'Total Invoiced',v:invs.reduce(function(s,v){return s+parseFloat(v.amount||0);},0),c:'var(--teal)'}]
+    .map(function(item){return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:18px;font-weight:800;color:'+item.c+'">'+fmt$(item.v)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+item.l+'</div></div>';}).join('')+'</div>'
+    +'<div id="inv-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Invoice<button onclick="$(\'inv-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
+    +'<select id="ninv-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +'<option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Amount $</div><input id="ninv-amount" type="number" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Due Date</div><input id="ninv-due" type="date" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Description</div>'
+    +'<div style="display:flex;gap:6px"><input id="ninv-desc" placeholder="e.g. Progress billing — framing complete" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
+    +'<button onclick="micFillField(\'ninv-desc\',\'Describe what this invoice is for\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="saveNewInvoice()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Create Invoice</button>'
+    +'<button onclick="aiInvoiceSuggestion()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Suggest Amount</button>'
+    +'</div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 150px 120px 120px 100px">JOB / DESCRIPTION<span>AMOUNT</span><span>DUE</span><span>STATUS</span><span>ACTIONS</span></div>';
+  if(!invs.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No invoices yet.</div>';}
+  else{invs.forEach(function(inv,i){
+    var job=jobs.find(function(j){return j.id===inv.job_id;})||{job_name:'—'};
+    var sColors={'Draft':'var(--muted)','Sent':'var(--blue)','Paid':'var(--green)','Overdue':'var(--red)','Partial':'var(--amber)'};
+    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+      +'<div><div style="font-weight:700;font-size:13px">'+job.job_name+'</div><div style="font-size:11px;color:var(--muted)">'+(inv.description||'Invoice #'+String(i+1).padStart(4,'0'))+'</div></div>'
+      +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(inv.amount||0)+'</div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+(inv.due_date||'—')+'</div>'
+      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[inv.status]||'var(--muted)')+';color:#fff">'+(inv.status||'Draft')+'</span></div>'
+      +'<div style="display:flex;gap:4px">'
+      +(inv.status!=='Paid'?'<button onclick="markPaid(\''+inv.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">✓ Paid</button>':'')
+      +'<button onclick="delRecord(\''+inv.id+'\',\'invoices\',pgInvoices)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
+      +'</div></div>';
+  });}
+  html+='</div>';
+  $('content').innerHTML=html;
+}
+function showInvoiceForm(){var w=$('inv-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
+async function saveNewInvoice(){
+  var amount=parseFloat(($('ninv-amount')||{}).value||0);
+  if(!amount){toast('Amount required','err');return;}
+  await dbIns('invoices',{job_id:($('ninv-job')||{}).value||null,amount:amount,description:($('ninv-desc')||{}).value||'Invoice',due_date:($('ninv-due')||{}).value||null,status:'Draft'});
+  toast('Invoice created','ok');pgInvoices();
+}
+async function voiceInvoice(){
+  micFillField('ninv-desc','What is this invoice for and what amount?');
+  if($('inv-form-wrap'))$('inv-form-wrap').style.display='block';
+}
+async function aiInvoiceSuggestion(){
+  if(!AJOB){toast('Select a job first','err');return;}
+  toast('🤖 AI calculating invoice amount...','ok',5000);
+  var r=await ai('Suggest next invoice amount for '+AJOB.job_name+' with '+AJOB.percent_complete+'% complete, total contract $'+AJOB.budget+'. Return JSON: {"amount":0,"description":"invoice description","billing_type":"Progress|Milestone|Final","percent_billed":0}','Return ONLY raw JSON.',400);
+  var d=safeJSON(r);if(!d){toast('AI failed','err');return;}
+  if(d.amount&&$('ninv-amount'))$('ninv-amount').value=d.amount;
+  if(d.description&&$('ninv-desc'))$('ninv-desc').value=d.description;
+  toast('AI suggests: '+fmt$(d.amount)+' — '+d.billing_type,'ok');
+}
 async function pgSubs(){
   try{
     const subs=await dbGet('subcontractors','?order=company_name.asc');
@@ -3691,8 +3787,123 @@ if(!localStorage.getItem('cs_ai_key')){
 }
 loadSidebar();
 goTab('dashboard');
-async function pgProposals(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Proposals</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
-async function pgBids(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Bid Requests</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
+async function pgProposals(){
+  var props=await dbGet('estimates','?status=in.(Sent,Viewed,Signed,Approved)&order=created_at.desc');
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var leads=await dbGet('leads','?order=created_at.desc');
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Proposals & Contracts</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+props.length+' proposals sent</div></div>'
+    +'<button onclick="goTab(\'estimates\')" style="padding:8px 16px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New Proposal from Estimate</button></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">'
+    +['Sent','Viewed','Signed','Approved'].map(function(s){
+      var cnt=props.filter(function(p){return p.status===s;}).length;
+      var colors={'Sent':'var(--muted)','Viewed':'var(--blue)','Signed':'var(--amber)','Approved':'var(--green)'};
+      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:22px;font-weight:800;color:'+colors[s]+'">'+cnt+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;text-transform:uppercase">'+s+'</div></div>';
+    }).join('')+'</div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 150px 120px 100px 100px">CLIENT / JOB<span>AMOUNT</span><span>SENT</span><span>STATUS</span><span></span></div>';
+  if(!props.length){
+    html+='<div style="padding:40px;text-align:center"><div style="font-size:40px;margin-bottom:12px">📄</div>'
+      +'<div style="font-weight:700;color:var(--muted);margin-bottom:6px">No proposals sent yet</div>'
+      +'<div style="color:var(--dim);font-size:13px;margin-bottom:16px">Build an estimate, then click Send as Proposal</div>'
+      +'<button onclick="goTab(\'estimates\')" style="padding:10px 20px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Go to Estimates →</button></div>';
+  } else {
+    props.forEach(function(p,i){
+      var job=jobs.find(function(j){return j.id===p.job_id;})||{job_name:'—'};
+      var sColors={'Sent':'var(--muted)','Viewed':'var(--blue)','Signed':'var(--amber)','Approved':'var(--green)'};
+      var lines=p.line_items||[];
+      var tot=lines.reduce(function(s,l){return s+parseFloat(l.total||0);},0);
+      html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 100px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+        +'<div><div style="font-weight:700;font-size:13px">'+p.client_name+'</div><div style="font-size:11px;color:var(--muted)">'+job.job_name+'</div></div>'
+        +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(tot)+'</div>'
+        +'<div style="font-size:12px;color:var(--muted)">'+(p.sent_at?new Date(p.sent_at).toLocaleDateString():'—')+'</div>'
+        +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[p.status]||'var(--muted)')+';color:#fff">'+p.status+'</span></div>'
+        +'<div style="display:flex;gap:4px">'
+        +'<button onclick="openEstimate(\''+p.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer;font-family:inherit">View</button>'
+        +(p.status==='Signed'?'<button onclick="setEstStatus(\''+p.id+'\',\'Approved\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">Approve</button>':'')
+        +'</div></div>';
+    });
+  }
+  html+='</div>';
+  $('content').innerHTML=html;
+}
+async function pgBids(){
+  var bids=await dbGet('bids','?order=created_at.desc');
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var subs=await dbGet('subcontractors','?order=company_name.asc');
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Bidding</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+bids.length+' bid packages &nbsp;·&nbsp; AI-ranked when received</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="voiceBid()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Bid</button>'
+    +'<button onclick="showNewBidForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Send Bid Package</button></div></div>'
+    +'<div id="bid-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Bid Package<button onclick="$(\'bid-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
+    +'<select id="nbid-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +'<option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Trade / Category</div>'
+    +'<select id="nbid-trade" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +'<option>Electrical</option><option>Plumbing</option><option>HVAC</option><option>Framing</option><option>Drywall</option><option>Tile & Flooring</option><option>Painting</option><option>Roofing</option><option>Excavation</option><option>Concrete</option><option>Cabinetry</option><option>General Labor</option></select></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Scope of Work</div>'
+    +'<div style="display:flex;gap:6px"><textarea id="nbid-scope" rows="3" placeholder="Describe what you need bid on..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
+    +'<button onclick="micFillField(\'nbid-scope\',\'Describe the scope of work for this bid package\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Invite Subs (select)</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px" id="nbid-subs">'
+    +subs.map(function(s){return '<label style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;cursor:pointer"><input type="checkbox" value="'+s.id+'"> '+s.company_name+'</label>';}).join('')+'</div></div>'
+    +'<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Bid Due Date</div>'
+    +'<input id="nbid-due" type="date" style="padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="saveNewBid()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Send Bid Package</button>'
+    +'<button onclick="aiRankBids()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Rank Received Bids</button>'
+    +'</div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 120px 120px 120px 100px">JOB / TRADE<span>SUBS INVITED</span><span>BIDS IN</span><span>DUE DATE</span><span>ACTIONS</span></div>';
+  if(!bids.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No bid packages yet. Send your first one above.</div>';}
+  else{bids.forEach(function(b,i){
+    var job=jobs.find(function(j){return j.id===b.job_id;})||{job_name:'—'};
+    var invited=JSON.parse(b.invited_sub_ids||'[]').length;
+    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 120px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+      +'<div><div style="font-weight:700;font-size:13px">'+job.job_name+'</div><div style="font-size:11px;color:var(--muted)">'+b.trade+'</div></div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+invited+' subs</div>'
+      +'<div style="font-size:12px;font-weight:700;color:var(--teal)">'+(b.bids_received||0)+' received</div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+(b.due_date||'—')+'</div>'
+      +'<div style="display:flex;gap:4px">'
+      +'<button onclick="viewBidDetail(\''+b.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer;font-family:inherit">View</button>'
+      +'<button onclick="aiRankBid(\''+b.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:4px;cursor:pointer;font-family:inherit">🤖 Rank</button>'
+      +'</div></div>';
+  });}
+  html+='</div>';
+  $('content').innerHTML=html;
+}
+function showNewBidForm(){var w=$('bid-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
+async function saveNewBid(){
+  var scope=($('nbid-scope')||{}).value||'';
+  if(!scope.trim()){toast('Scope required','err');return;}
+  var checkedSubs=Array.from(document.querySelectorAll('#nbid-subs input:checked')).map(function(c){return c.value;});
+  await dbIns('bids',{job_id:($('nbid-job')||{}).value||null,trade:($('nbid-trade')||{}).value||'General',scope_of_work:scope,invited_sub_ids:JSON.stringify(checkedSubs),bids_received:0,due_date:($('nbid-due')||{}).value||null,status:'Sent'});
+  toast('Bid package sent to '+checkedSubs.length+' subs','ok');pgBids();
+}
+async function aiRankBids(){
+  toast('🤖 AI ranking bids...','ok',6000);
+  var r=await ai('I have 3 bids for electrical work:\nBid A: Smith Electric — $18,500, 3 weeks, licensed, 4 reviews avg 4.2\nBid B: Jones Power — $15,200, 4 weeks, licensed, 12 reviews avg 4.8\nBid C: Fast Electric — $22,000, 2 weeks, licensed, 2 reviews avg 3.5\nRank these bids and explain. Return JSON: {"ranked":[{"contractor":"name","bid_amount":0,"rank":1,"reason":"2 sentences","risk":"low|medium|high"}],"recommendation":"1 sentence"}','Return ONLY raw JSON.',800);
+  var d=safeJSON(r);if(!d){toast('AI ranking failed','err');return;}
+  var html='<div style="background:var(--card);border:1px solid var(--purple);border-radius:var(--radius);padding:16px;margin-top:16px">'
+    +'<div style="font-size:14px;font-weight:700;color:var(--purple);margin-bottom:10px">🤖 AI Bid Analysis</div>'
+    +(d.recommendation?'<div style="margin-bottom:12px;padding:10px;background:var(--purple-bg);border-radius:var(--radius-sm);font-size:13px;color:var(--purple)">Recommendation: '+d.recommendation+'</div>':'')
+    +(d.ranked||[]).map(function(b){return '<div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:800;color:var(--teal)">'+b.rank+'</div><div style="flex:1"><div style="font-weight:700">'+b.contractor+'</div><div style="font-size:12px;color:var(--muted)">'+b.reason+'</div></div><div style="text-align:right"><div style="font-weight:700">'+fmt$(b.bid_amount)+'</div><div style="font-size:11px;color:'+(b.risk==='low'?'var(--green)':b.risk==='medium'?'var(--amber)':'var(--red)')+'">'+b.risk+' risk</div></div></div>';}).join('')
+    +'</div>';
+  var existing=$('content').innerHTML;
+  $('content').innerHTML=existing+html;
+}
+async function voiceBid(){
+  micFillField('nbid-scope','Describe the scope of work for this bid package in detail');
+  if($('bid-form-wrap'))$('bid-form-wrap').style.display='block';
+}
+async function viewBidDetail(id){toast('Bid detail coming soon','info');}
+async function aiRankBid(id){aiRankBids();}
 async function pgTodos(){
   var jobs = await dbGet('jobs','?order=job_name.asc');
   var todos = await dbGet('todos','?order=due_date.asc');
@@ -4379,9 +4590,218 @@ async function confirmSendEstimate(estId){
   toast('✅ Estimate logged as sent to '+to,'ok');
   openEstimate(estId);
 }
-async function pgBudget(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Job Costing Budget</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
-async function pgPOs(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Purchase Orders</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
-async function pgCOs(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Change Orders</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
+async function pgBudget(){
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var cos=await dbGet('change_orders','?status=eq.Approved');
+  var pos=await dbGet('purchase_orders','?order=created_at.desc');
+  var invs=await dbGet('invoices','?order=created_at.desc');
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Job Costing & Budget</div>'
+    +'<div style="font-size:12px;color:var(--muted)">Real-time cost vs. budget tracking per job</div></div></div>';
+  if(!jobs.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No jobs yet.</div>';$('content').innerHTML=html;return;}
+  jobs.forEach(function(job){
+    var budget=parseFloat(job.budget||0);
+    var jobPOs=pos.filter(function(p){return p.job_id===job.id;});
+    var jobCOs=cos.filter(function(c){return c.job_id===job.id;});
+    var jobInvs=invs.filter(function(v){return v.job_id===job.id;});
+    var committed=jobPOs.reduce(function(s,p){return s+parseFloat(p.total||0);},0);
+    var coTotal=jobCOs.reduce(function(s,c){return s+parseFloat(c.cost_impact||0);},0);
+    var invoiced=jobInvs.reduce(function(s,v){return s+parseFloat(v.amount||0);},0);
+    var revised=budget+coTotal;
+    var remaining=revised-committed;
+    var pct=revised>0?Math.min(100,Math.round(committed/revised*100)):0;
+    var barColor=pct>90?'var(--red)':pct>70?'var(--amber)':'var(--green)';
+    html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:14px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+      +'<div><div style="font-size:15px;font-weight:800">'+job.job_name+'</div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+job.job_type+' &nbsp;·&nbsp; '+job.status+'</div></div>'
+      +'<div style="text-align:right"><div style="font-size:20px;font-weight:800;color:var(--teal)">'+fmt$(revised)+'</div>'
+      +'<div style="font-size:11px;color:var(--muted)">Revised budget ('+jobCOs.length+' COs)</div></div></div>'
+      // Progress bar
+      +'<div style="background:var(--bg);border-radius:20px;height:10px;margin-bottom:12px;overflow:hidden">'
+      +'<div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:20px;transition:width 0.5s"></div></div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">'
+      +[{l:'Original Budget',v:budget,c:'var(--text)'},{l:'CO Additions',v:coTotal,c:coTotal>0?'var(--amber)':'var(--muted)'},{l:'Committed (POs)',v:committed,c:'var(--blue)'},{l:'Remaining',v:remaining,c:remaining<0?'var(--red)':'var(--green)'}]
+      .map(function(item){return '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px;text-align:center"><div style="font-size:16px;font-weight:800;color:'+item.c+'">'+fmt$(item.v)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+item.l+'</div></div>';}).join('')
+      +'</div>'
+      +(jobPOs.length?'<div style="margin-top:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Purchase Orders</div>'
+        +jobPOs.slice(0,5).map(function(p){return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span>'+p.supplier_name+'</span><span style="font-weight:700;color:var(--blue)">'+fmt$(p.total||0)+'</span><span style="color:var(--muted)">'+p.status+'</span></div>';}).join('')+'</div>':'')
+      +'</div>';
+  });
+  $('content').innerHTML=html;
+}
+async function pgPOs(){
+  var pos=await dbGet('purchase_orders','?order=created_at.desc');
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var subs=await dbGet('subcontractors','?order=company_name.asc');
+  var totalOpen=pos.filter(function(p){return p.status!=='Closed'&&p.status!=='Cancelled';}).reduce(function(s,p){return s+parseFloat(p.total||0);},0);
+  var sColors={'Draft':'var(--muted)','Sent':'var(--blue)','Acknowledged':'var(--teal)','Delivered':'var(--green)','Invoiced':'var(--amber)','Closed':'var(--dim)','Cancelled':'var(--red)'};
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Purchase Orders</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+pos.length+' total &nbsp;·&nbsp; '+fmt$(totalOpen)+' open value</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="voicePO()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice PO</button>'
+    +'<button onclick="showNewPOForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New PO</button></div></div>'
+    +'<div id="po-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Purchase Order<button onclick="$(\'po-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
+    +'<select id="npo-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +'<option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Supplier / Sub</div>'
+    +'<div style="display:flex;gap:6px"><input id="npo-supplier" placeholder="Supplier name..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
+    +'<button onclick="micFillField(\'npo-supplier\',\'What is the supplier or subcontractor name\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Delivery Date</div>'
+    +'<input id="npo-delivery" type="date" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Items (one per line: Description, Qty, Unit, Unit Price)</div>'
+    +'<div style="display:flex;gap:6px"><textarea id="npo-items" rows="4" placeholder="Lumber 2x6x16, 100, ea, $8.50\nConcrete mix 80lb bags, 20, bag, $6.25" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
+    +'<button onclick="micFillField(\'npo-items\',\'List each material item with quantity and price\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Notes</div>'
+    +'<input id="npo-notes" placeholder="Special instructions, delivery notes..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="saveNewPO()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save PO</button>'
+    +'<button onclick="aiDraftPO()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Fill Items</button>'
+    +'</div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:80px 1fr 150px 120px 100px 100px">PO# &nbsp; JOB<span>SUPPLIER</span><span>DELIVERY</span><span>TOTAL</span><span>STATUS</span><span></span></div>';
+  if(!pos.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No purchase orders yet.</div>';}
+  else{pos.forEach(function(po,i){
+    var job=jobs.find(function(j){return j.id===po.job_id;})||{job_name:'—'};
+    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:80px 1fr 150px 120px 100px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+      +'<div style="font-size:11px;font-weight:800;color:var(--muted)">PO-'+String(i+1).padStart(3,'0')+'<br><span style="font-weight:400;font-size:10px">'+job.job_name.substring(0,14)+'</span></div>'
+      +'<div><div style="font-weight:700;font-size:13px">'+po.supplier_name+'</div><div style="font-size:11px;color:var(--muted)">'+(po.notes||'').substring(0,40)+'</div></div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+(po.delivery_date||'—')+'</div>'
+      +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(po.total||0)+'</div>'
+      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[po.status]||'var(--muted)')+';color:#fff">'+(po.status||'Draft')+'</span></div>'
+      +'<div style="display:flex;gap:4px">'
+      +(po.status==='Draft'||po.status==='Sent'?'<button onclick="updatePOStatus(\''+po.id+'\',\'Delivered\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">✓ Rcvd</button>':'')
+      +'<button onclick="delRecord(\''+po.id+'\',\'purchase_orders\',pgPOs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
+      +'</div></div>';
+  });}
+  html+='</div>';
+  $('content').innerHTML=html;
+}
+function showNewPOForm(){var w=$('po-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
+async function saveNewPO(){
+  var supplier=($('npo-supplier')||{}).value||'';
+  if(!supplier.trim()){toast('Supplier required','err');return;}
+  var itemsRaw=($('npo-items')||{}).value||'';
+  var lines=itemsRaw.split('\n').filter(function(l){return l.trim();});
+  var items=lines.map(function(l){var p=l.split(',');return {description:(p[0]||'').trim(),qty:parseFloat(p[1])||1,unit:(p[2]||'ea').trim(),unit_price:parseFloat(p[3])||0,total:parseFloat(p[1]||1)*parseFloat(p[3]||0)};});
+  var total=items.reduce(function(s,it){return s+it.total;},0);
+  await dbIns('purchase_orders',{job_id:($('npo-job')||{}).value||null,supplier_name:supplier,items:JSON.stringify(items),total:total,delivery_date:($('npo-delivery')||{}).value||null,notes:($('npo-notes')||{}).value||'',status:'Draft'});
+  toast('Purchase order saved','ok');pgPOs();
+}
+async function updatePOStatus(id,status){await dbUpd('purchase_orders',id,{status:status});toast('PO updated: '+status,'ok');pgPOs();}
+async function aiDraftPO(){
+  var job=AJOB?AJOB.job_name:'construction project';
+  toast('🤖 AI suggesting materials...','ok',6000);
+  var r=await ai('Suggest a purchase order for: '+job+'\nList 6 typical material line items needed.\nReturn JSON array: [{"description":"item","qty":10,"unit":"ea","unit_price":25.00}]','Return ONLY raw JSON array.',800);
+  var d=safeJSON(r);
+  if(!d||!Array.isArray(d)){toast('AI failed','err');return;}
+  var txt=d.map(function(it){return (it.description||'Item')+', '+(it.qty||1)+', '+(it.unit||'ea')+', $'+(it.unit_price||0);}).join('\n');
+  if($('npo-items'))$('npo-items').value=txt;
+  toast('AI added '+d.length+' items — review and adjust','ok');
+}
+async function voicePO(){
+  micFillField('npo-items','List each material item with quantity and price per unit');
+  if($('po-form-wrap'))$('po-form-wrap').style.display='block';
+}
+async function pgCOs(){
+  var cos=await dbGet('change_orders','?order=created_at.desc');
+  var jobs=await dbGet('jobs','?order=job_name.asc');
+  var approved=cos.filter(function(c){return c.status==='Approved';});
+  var pending=cos.filter(function(c){return c.status==='Pending Client'||c.status==='Pending Internal';});
+  var totalApproved=approved.reduce(function(s,c){return s+parseFloat(c.cost_impact||0);},0);
+  var statuses=['Draft','Pending Internal','Pending Client','Approved','Rejected'];
+  var sColors={'Draft':'var(--muted)','Pending Internal':'var(--amber)','Pending Client':'var(--blue)','Approved':'var(--green)','Rejected':'var(--red)'};
+  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div><div style="font-size:20px;font-weight:800">Change Orders</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+cos.length+' total &nbsp;·&nbsp; '+pending.length+' pending &nbsp;·&nbsp; '+fmt$(totalApproved)+' approved</div></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="voiceCO()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice CO</button>'
+    +'<button onclick="showNewCOForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New CO</button></div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">'
+    +statuses.map(function(s){var n=cos.filter(function(c){return c.status===s;}).length;return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center"><div style="font-size:20px;font-weight:800;color:'+sColors[s]+'">'+n+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+s+'</div></div>';}).join('')+'</div>'
+    +'<div id="co-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Change Order<button onclick="$(\'co-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
+    +'<select id="nco-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +'<option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Reason</div>'
+    +'<select id="nco-reason" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+    +'<option>Client Request</option><option>Unforeseen Condition</option><option>Design Change</option><option>Owner Directed</option><option>Error & Omission</option></select></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">CO Title</div>'
+    +'<div style="display:flex;gap:6px"><input id="nco-title" placeholder="e.g. Island extension from 8ft to 10ft" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
+    +'<button onclick="micFillField(\'nco-title\',\'Describe this change order in one line\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
+    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Description</div>'
+    +'<div style="display:flex;gap:6px"><textarea id="nco-desc" rows="2" placeholder="Full scope of change..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
+    +'<button onclick="micFillField(\'nco-desc\',\'Describe the full scope of this change order\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Labor $</div><input id="nco-labor" type="number" placeholder="0" oninput="calcCOTotal()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Materials $</div><input id="nco-mat" type="number" placeholder="0" oninput="calcCOTotal()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Markup %</div><input id="nco-markup" type="number" value="20" oninput="calcCOTotal()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Sched. Days</div><input id="nco-sched" type="number" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div></div>'
+    +'<div id="nco-total" style="padding:10px;background:var(--teal-light);border-radius:var(--radius-sm);font-weight:800;color:var(--teal);margin-bottom:14px">Total Client Price: $0.00</div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="saveNewCO(\'Draft\')" style="padding:9px 18px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Draft</button>'
+    +'<button onclick="saveNewCO(\'Pending Internal\')" style="padding:9px 18px;background:var(--amber);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Submit for Approval</button>'
+    +'<button onclick="aiDraftCO()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Draft</button>'
+    +'</div></div>'
+    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
+    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:80px 1fr 140px 120px 120px 100px">CO# &nbsp; JOB<span>TITLE / REASON</span><span>BREAKDOWN</span><span>TOTAL</span><span>STATUS</span><span>ACTIONS</span></div>';
+  if(!cos.length){html+='<div style="padding:40px;text-align:center;color:var(--dim);font-size:14px">No change orders yet. Create your first one above.</div>';}
+  else{cos.forEach(function(co,i){
+    var job=jobs.find(function(j){return j.id===co.job_id;})||{job_name:'—'};
+    var labor=parseFloat(co.labor_cost||0),mat=parseFloat(co.material_cost||0),mk=parseFloat(co.markup_pct||20)/100;
+    var total=(labor+mat)*(1+mk);
+    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:80px 1fr 140px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+      +'<div style="font-size:11px;font-weight:800;color:var(--muted)">CO-'+String(i+1).padStart(3,'0')+'<br><span style="font-weight:400;font-size:10px">'+job.job_name.substring(0,14)+'</span></div>'
+      +'<div><div style="font-weight:700;font-size:13px;margin-bottom:2px">'+co.title+'</div><div style="font-size:11px;color:var(--muted)">'+co.reason+'</div></div>'
+      +'<div style="font-size:11px;color:var(--muted)">Labor: '+fmt$(labor)+'<br>Mat: '+fmt$(mat)+'<br>Markup: '+(mk*100).toFixed(0)+'%</div>'
+      +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(total)+'<br><span style="font-size:10px;color:var(--muted);font-weight:400">'+co.schedule_impact_days+' days</span></div>'
+      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[co.status]||'var(--muted)')+';color:#fff">'+co.status+'</span></div>'
+      +'<div style="display:flex;gap:4px;flex-wrap:wrap">'
+      +(co.status!=='Approved'&&co.status!=='Rejected'?'<button onclick="approveCOItem(\''+co.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">✓</button>':'')
+      +'<button onclick="delRecord(\''+co.id+'\',\'change_orders\',pgCOs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
+      +'</div></div>';
+  });}
+  html+='</div>';
+  $('content').innerHTML=html;
+}
+function showNewCOForm(){var w=$('co-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
+function calcCOTotal(){
+  var l=parseFloat($('nco-labor').value||0),m=parseFloat($('nco-mat').value||0),mk=parseFloat($('nco-markup').value||20)/100;
+  var el=$('nco-total');if(el)el.textContent='Total Client Price: '+fmt$((l+m)*(1+mk));
+}
+async function saveNewCO(status){
+  var title=($('nco-title')||{}).value||'';
+  if(!title.trim()){toast('Title required','err');return;}
+  var labor=parseFloat(($('nco-labor')||{}).value||0),mat=parseFloat(($('nco-mat')||{}).value||0),mk=parseFloat(($('nco-markup')||{}).value||20);
+  await dbIns('change_orders',{job_id:($('nco-job')||{}).value||null,title:title,description:($('nco-desc')||{}).value||'',reason:($('nco-reason')||{}).value||'Client Request',labor_cost:labor,material_cost:mat,markup_pct:mk,cost_impact:(labor+mat)*(1+mk/100),schedule_impact_days:parseInt(($('nco-sched')||{}).value||0),status:status||'Draft'});
+  toast('Change order saved','ok');pgCOs();
+}
+async function approveCOItem(id){await dbUpd('change_orders',id,{status:'Approved'});toast('CO approved — budget updated','ok');pgCOs();}
+async function aiDraftCO(){
+  var notes=($('nco-desc')||{}).value||($('nco-title')||{}).value||'';
+  if(!notes){toast('Add title or description first','err');return;}
+  toast('🤖 AI drafting CO details...','ok',6000);
+  var r=await ai('Draft a professional change order from these notes:\n"'+notes+'"\nHudson Valley NY GC. Cost-plus 20%.\nReturn JSON: {"title":"clear title","description":"professional 2-sentence scope","reason":"Client Request","labor_cost":500,"material_cost":800,"markup_pct":20,"schedule_impact_days":2}','Return ONLY raw JSON.',700);
+  var d=safeJSON(r);if(!d){toast('AI draft failed','err');return;}
+  if(d.title&&$('nco-title'))$('nco-title').value=d.title;
+  if(d.description&&$('nco-desc'))$('nco-desc').value=d.description;
+  if(d.labor_cost&&$('nco-labor'))$('nco-labor').value=d.labor_cost;
+  if(d.material_cost&&$('nco-mat'))$('nco-mat').value=d.material_cost;
+  if(d.markup_pct&&$('nco-markup'))$('nco-markup').value=d.markup_pct;
+  if(d.schedule_impact_days&&$('nco-sched'))$('nco-sched').value=d.schedule_impact_days;
+  calcCOTotal();toast('AI drafted CO — review and save','ok');
+}
+async function voiceCO(){
+  toast('🎙️ Speak your change order...','info',8000);
+  micFillField('nco-desc','Describe the change order in detail');
+  if($('co-form-wrap'))$('co-form-wrap').style.display='block';
+}
 async function pgEmails(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Emails</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
 async function pgComments(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Comments</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
 </script>
