@@ -3027,6 +3027,8 @@ async function aiDraftMessage(){
 async function pgDashV2(){
   var el = document.getElementById('content');
   if(!el){console.error('content element missing');return;}
+  // Show something IMMEDIATELY before any async calls
+  el.innerHTML='<div style="padding:20px"><div style="font-size:20px;font-weight:800;margin-bottom:16px">Corestone OS</div><div style="color:var(--muted)">Loading...</div></div>';
   try{
     var leads=await dbGet('leads','?order=created_at.desc')||[];
     var jobs=await dbGet('jobs','?order=created_at.desc')||[];
