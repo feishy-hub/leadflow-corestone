@@ -896,6 +896,11 @@ async function saveLead(id=null,runAI=true){
   try{
     let sid;if(id){await dbUpd('leads',id,d);sid=id;}else{const r=await dbIns('leads',d);sid=r[0]?.id;}
     toast(id?'Lead updated':'Lead saved!');closeModal('lf');
+    nextStep('Lead Saved!', 'Lead is in your pipeline. What now?', [
+      {icon:'📞', label:'Call them right now', sub:'Open live call with AI coaching', fn:"(async function(){var l=await dbGet('leads','?order=created_at.desc&limit=1');if(l&&l[0])openCallMode(l[0].id);})()", primary:true},
+      {icon:'📋', label:'View lead details', sub:'See full lead info and AI script', fn:"pgSales()", primary:false},
+      {icon:'✉️', label:'Send follow-up email', sub:'AI drafts it for you', fn:"goTab('messages')", primary:false}
+    ]);
     if(runAI&&sid){toast('🤖 Generating AI script...');generateLeadAI(sid,d);}
     pgSales();
   }catch(e){toast(e.message,'err');}
@@ -1491,7 +1496,11 @@ async function saveNewBill(){
   if(!vendor||!amount){toast('Vendor and amount required','err');return;}
   await dbIns('bills',{job_id:($('nbill-job')||{}).value||null,vendor_name:vendor,amount:amount,description:($('nbill-desc')||{}).value||'',due_date:($('nbill-due')||{}).value||null,status:'Unpaid'});
   await aiLogTransaction('Bill Added','New bill from '+vendor+': '+fmt$(amount),'normal');
-  toast('Bill saved','ok');pgBills();
+  pgBills();
+  nextStep('Bill Saved!', 'Bill is logged. Anything to do now?', [
+    {icon:'💳', label:'Pay this bill now', sub:'Mark as paid immediately', fn:"pgBills()", primary:true},
+    {icon:'📊', label:'Check cash flow', sub:'See money in vs money out', fn:"goTab('budget')", primary:false}
+  ]);
   }catch(e){toast('Bill error: '+e.message,'err');console.error('saveNewBill',e);}
 }
 async function payBill(id){
@@ -5403,7 +5412,6 @@ async function saveNewCO(status){
   if(!title.trim()){toast('Title required','err');return;}
   var labor=parseFloat(($('nco-labor')||{}).value||0),mat=parseFloat(($('nco-mat')||{}).value||0),mk=parseFloat(($('nco-markup')||{}).value||20);
   await dbIns('change_orders',{job_id:($('nco-job')||{}).value||null,title:title,description:($('nco-desc')||{}).value||'',reason:($('nco-reason')||{}).value||'Client Request',labor_cost:labor,material_cost:mat,markup_pct:mk,cost_impact:(labor+mat)*(1+mk/100),schedule_impact_days:parseInt(($('nco-sched')||{}).value||0),status:status||'Draft'});
-  toast('Change order saved','ok');
   // AI logs and checks budget
   var jobId=($('nco-job')||{}).value||null;
   var total=(parseFloat(($('nco-labor')||{}).value||0)+parseFloat(($('nco-mat')||{}).value||0))*(1+parseFloat(($('nco-markup')||{}).value||20)/100);
