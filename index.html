@@ -3660,6 +3660,10 @@ async function showJobPL(jobId){
 }
 
 // ── UNIVERSAL DELETE / LOCK / EDIT HELPERS ─────────────────────
+function confirmDel(id,table,refreshFn,label){
+  if(!confirm('Delete this '+(label||'item')+'?')) return;
+  delRecord(id,table,refreshFn);
+}
 async function delRecord(table,id,refreshFn){
   await dbDel(table,id);
   toast('Deleted','ok');
@@ -5366,6 +5370,7 @@ function calcCOTotal(){
   var el=$('nco-total');if(el)el.textContent='Total Client Price: '+fmt$((l+m)*(1+mk));
 }
 async function saveNewCO(status){
+  try{
   var title=($('nco-title')||{}).value||'';
   if(!title.trim()){toast('Title required','err');return;}
   var labor=parseFloat(($('nco-labor')||{}).value||0),mat=parseFloat(($('nco-mat')||{}).value||0),mk=parseFloat(($('nco-markup')||{}).value||20);
