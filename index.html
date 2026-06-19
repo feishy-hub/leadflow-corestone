@@ -1122,7 +1122,7 @@ function showLogForm(){
 async function aiStructureLog(){const n=$('lg-notes').value;if(!n.trim()){toast('Enter notes first','err');return;}const p=$('lg-ai');p.innerHTML='<div class="loading" style="padding:10px"><div class="spin"></div></div>';try{const r=await ai(`Convert this raw site note into a clean daily log. Sections: Work Completed, Crew, Issues/Delays, Materials, Next Steps.\n\nNote: ${n}`);p.innerHTML=`<div class="ai-box"><div class="ai-lbl">AI Structured Preview</div>${r.replace(/\n/g,'<br>')}</div>`;p.dataset.s=r;}catch(e){p.innerHTML=`<div style="color:var(--red);font-size:12px">AI unavailable</div>`;}}
 async function saveLog(){
   if(!AJOB)return;const notes=$('lg-notes').value.trim();if(!notes){toast('Notes required','err');return;}
-  try{await dbIns('daily_logs',{job_id:AJOB.id,log_date:$('lg-date').value,phase:$('lg-phase').value,crew_count:parseInt($('lg-crew').value)||0,weather:$('lg-wx').value,temperature:$('lg-temp').value,notes,ai_summary:$('lg-ai').dataset.s||null});toast('Log saved!');closeModal('lgf');pgDaily();}catch(e){toast(e.message,'err');}
+  try{await dbIns('daily_logs',{job_id:AJOB.id,log_date:$('lg-date').value,phase:$('lg-phase').value,crew_count:parseInt($('lg-crew').value)||0,weather:$('lg-wx').value,temperature:$('lg-temp').value,notes,ai_summary:$('lg-ai').dataset.s||null});closeModal('lgf');pgDailyV2();nextStep('Daily Log Saved! 📋','Log is recorded. What next?',[{icon:'📸',label:'Add photos to this log',sub:'Document todays progress visually',fn:'goTab("photos")'},{icon:'📧',label:'Send update to client',sub:'AI drafts the progress message',fn:'goTab("messages")'},{icon:'🔧',label:'Log an issue or RFI',sub:'Flag something that needs attention',fn:'goTab("rfis")'}]);}catch(e){toast(e.message,'err');}
 }
 
 
@@ -1166,7 +1166,7 @@ async function finTab(tab,el){
 
 function showInvForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="ivf"><div class="modal"><div class="mh"><div class="mt">New Invoice</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="f2"><div class="fr"><label>Invoice #</label><input id="iv-num" placeholder="INV-001"></div><div class="fr"><label>Amount *</label><input id="iv-amt" type="number"></div></div><div class="fr"><label>Description</label><input id="iv-desc" placeholder="Progress billing — Phase 3"></div><div class="f2"><div class="fr"><label>Due Date</label><input id="iv-due" type="date"></div><div class="fr"><label>Status</label><select id="iv-status"><option value="draft">Draft</option><option value="sent">Sent</option></select></div></div><div class="fr" style="display:flex;align-items:center;gap:8px"><input id="iv-tax" type="checkbox"><label style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--text);margin:0">Tax exempt client</label></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveInv()">Create</button></div></div></div>`);}
 async function saveInv(){const amt=parseFloat($('iv-amt').value);if(!amt){toast('Amount required','err');return;}try{await dbIns('invoices',{invoice_number:$('iv-num').value||`INV-${Date.now().toString().slice(-4)}`,amount:amt,amount_paid:0,due_date:$('iv-due').value||null,status:$('iv-status').value,tax_exempt:$('iv-tax').checked,job_id:AJOB?.id||null});toast('Invoice created!');closeModal('ivf');finTab('inv');}catch(e){toast(e.message,'err');}}
-async function markPaid(id){try{const[i]=await dbGet('invoices',`?id=eq.${id}`);if(i)await dbUpd('invoices',id,{status:'paid',amount_paid:i.amount,paid_date:new Date().toISOString().split('T')[0]});toast('Marked as paid!');pgFin();}catch(e){toast(e.message,'err');}}
+async function markPaid(id){try{const[i]=await dbGet('invoices',`?id=eq.${id}`);if(i)await dbUpd('invoices',id,{status:'paid',amount_paid:i.amount,paid_date:new Date().toISOString().split('T')[0]});pgFinV2();nextStep('Payment Recorded! 💰','Money received. What next?',[{icon:'📝',label:'Release lien waiver',sub:'Required after final payment',fn:'goTab("liens")'},{icon:'⭐',label:'Request client review',sub:'Strike while they are happy',fn:'goTab("messages")'},{icon:'📊',label:'Job profitability report',sub:'See how this job performed',fn:'goTab("budget")'}]);}catch(e){toast(e.message,'err');}}
 async function getCallBrief(id,amount,due){const el=$(`cb-${id}`);el.innerHTML='<div class="loading" style="padding:8px"><div class="spin"></div></div>';try{const r=await ai(`Collections call brief: Invoice ${fmt$(amount)}, due ${fmtD(due)}. Tone, key talking points, what to avoid. Under 70 words.`);el.innerHTML=`<div class="ai-box" style="margin-top:8px"><div class="ai-lbl">AI Call Brief</div>${r}</div>`;}catch(e){el.innerHTML='';}}
 function showCOForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="cof"><div class="modal"><div class="mh"><div class="mt">New Change Order</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="fr"><label>Title *</label><input id="co-title" placeholder="Under-cabinet lighting addition"></div><div class="fr"><label>Description</label><textarea id="co-desc" style="min-height:70px"></textarea></div><div class="fr"><label>Reason</label><select id="co-reason"><option>Client Request</option><option>Unforeseen Condition</option><option>Design Change</option><option>Owner Directed</option></select></div><div class="f2"><div class="fr"><label>Cost Impact ($)</label><input id="co-cost" type="number"></div><div class="fr"><label>Schedule (days)</label><input id="co-days" type="number" value="0"></div></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveCO()">Create CO</button></div></div></div>`);}
 async function saveCO(){const title=$('co-title').value.trim();if(!title){toast('Title required','err');return;}const cost=parseFloat($('co-cost').value)||0;try{await dbIns('change_orders',{job_id:AJOB?.id||null,title,description:$('co-desc').value,reason:$('co-reason').value,cost_impact:cost,schedule_impact_days:parseInt($('co-days').value)||0,status:'draft'});if(cost>500)await dbIns('gatekeeper_queue',{item_type:'change_order',title:`CO Approval: ${title}`,description:`Cost: ${fmt$(cost)}`,job_id:AJOB?.id||null,amount:cost,status:'pending'});toast('CO created!'+(cost>500?' → Gatekeeper':''));closeModal('cof');finTab('co');}catch(e){toast(e.message,'err');}}
@@ -1251,6 +1251,11 @@ async function saveNewInvoice(){
   // Schedule overdue check
   setTimeout(aiCheckOverdue, 2000);
   pgInvoices();
+  nextStep('Invoice Created! 💰', 'Invoice is ready. What next?', [
+    {icon:'📧', label:'Send invoice to client', sub:'Email it for payment', fn:'goTab("messages")'},
+    {icon:'👁', label:'View all invoices', sub:'See outstanding amounts', fn:'goTab("invoices")'},
+    {icon:'📊', label:'Check job budget', sub:'See cost vs contract', fn:'goTab("budget")'}
+  ]);
   }catch(e){toast('Invoice error: '+e.message,'err');console.error('saveNewInvoice',e);}
 }
 async function voiceInvoice(){
@@ -3211,9 +3216,13 @@ async function savePunchItem(existingId){
   }
   if(existingId){await dbUpd('punch_list',existingId,data);}
   else{await dbIns('punch_list',data);}
-  toast('✅ Punch list item saved','ok');
   closeOv(document.querySelector('#punch-form .mc'));
   pgPunchList();
+  nextStep('Punch Item Added! ✅', 'Item is on the list. What next?', [
+    {icon:'➕', label:'Add another punch item', sub:'Keep building the list', fn:'document.querySelector("#punch-form .mc")&&openPunchForm&&openPunchForm()'},
+    {icon:'📧', label:'Send punch list to sub', sub:'Notify trade to fix items', fn:'goTab("messages")'},
+    {icon:'📋', label:'View full punch list', sub:'See all open items', fn:'goTab("punchlist")'}
+  ]);
 }
 
 async function completePunchItem(id){
@@ -3314,9 +3323,13 @@ async function saveRFI(){
   var desc=$('rfi-desc').value.trim();
   if(!sub||!desc){toast('Subject and description required','err');return;}
   await dbIns('rfis',{rfi_number:parseInt($('rfi-num').value)||1,subject:sub,description:desc,submitted_by:$('rfi-by').value,assigned_to:$('rfi-to').value,due_date:$('rfi-due').value,priority:$('rfi-pri').value,status:'open',job_id:AJOB?AJOB.id:null,date_submitted:$('rfi-date').value});
-  toast('✅ RFI submitted','ok');
   closeOv(document.querySelector('#rfi-form .mc'));
   pgRFIs();
+  nextStep('RFI Submitted! 📋', 'Question is logged. What next?', [
+    {icon:'⏳', label:'Wait for response', sub:'RFI is with architect or engineer', fn:'goTab("rfis")'},
+    {icon:'➕', label:'Submit another RFI', sub:'Log another question', fn:'goTab("rfis")'},
+    {icon:'📊', label:'Back to job', sub:'Continue managing the project', fn:'goTab("jobs")'}
+  ]);
 }
 
 async function closeRFI(id){
@@ -3682,9 +3695,12 @@ function confirmDel(id,table,refreshFn,label){
   delRecord(id,table,refreshFn);
 }
 async function delRecord(table,id,refreshFn){
-  await dbDel(table,id);
-  toast('Deleted','ok');
-  if(refreshFn)refreshFn();
+  try{
+    await dbDel(table,id);
+    toast('Deleted','ok');
+    if(typeof refreshFn==='function') refreshFn();
+    else if(typeof renderPage==='function') renderPage(CUR);
+  }catch(e){toast('Delete failed: '+e.message,'err');}
 }
 
 async function lockRecord(table,id,locked,refreshFn){
@@ -5326,6 +5342,11 @@ async function saveNewPO(){
   await aiLogTransaction('Purchase Order','New PO to '+($('npo-supplier')||{}).value+' — '+fmt$(total),'normal');
   if(jobId) await aiBudgetGuard(jobId);
   pgPOs();
+  nextStep('Purchase Order Saved! 📦', 'PO is logged. What next?', [
+    {icon:'💰', label:'Check job budget', sub:'See updated committed costs', fn:'goTab("budget")'},
+    {icon:'📦', label:'View all POs', sub:'Track delivery status', fn:'goTab("pos")'},
+    {icon:'➕', label:'Add another PO', sub:'Order more materials', fn:'showNewPOForm()'}
+  ]);
   }catch(e){toast('Purchase order error: '+e.message,'err');console.error('saveNewPO',e);}
 }
 async function updatePOStatus(id,status){await dbUpd('purchase_orders',id,{status:status});toast('PO updated: '+status,'ok');pgPOs();}
@@ -5423,6 +5444,11 @@ async function saveNewCO(status){
   await aiLogTransaction('Change Order', 'New CO saved: '+($('nco-title')||{}).value+' — '+fmt$(total), total>5000?'high':'normal');
   if(jobId) await aiBudgetGuard(jobId);
   pgCOs();
+  nextStep('Change Order Saved! 📋', 'CO is logged. What next?', [
+    {icon:'📤', label:'Send to client for approval', sub:'Client needs to sign off on this CO', fn:'goTab("messages")'},
+    {icon:'✅', label:'Approve it now', sub:'Already approved verbally by client', fn:'pgCOs()'},
+    {icon:'💰', label:'Check updated budget', sub:'See how this affects job cost', fn:'goTab("budget")'}
+  ]);
   }catch(e){toast('Change order error: '+e.message,'err');console.error('saveNewCO',e);}
 }
 async function approveCOItem(id){
