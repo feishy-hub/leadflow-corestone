@@ -4857,6 +4857,7 @@ async function openEstimate(id){
     '</div>',
     '</div>'
   ].join('');
+  }catch(e){toast('Estimate error: '+e.message,'err');console.error('openEstimate',e);}
 }
 
 function addLine(estId){
