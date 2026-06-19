@@ -1567,6 +1567,7 @@ async function openCallMode(leadId){
       $('co-script').innerHTML='<div style="color:#ef4444;padding:20px;text-align:center">AI error: '+e.message+'<br><br>Use situation buttons on the right.</div>';
     });
   }
+  }catch(e){toast('Call mode error: '+e.message,'err');console.error('openCallMode',e);}
 }
 
 async function toggleRecording(){
