@@ -561,6 +561,61 @@ async function sendClientUpdate(jobId){
   toast('Client update drafted — check Messages tab','ok');
   await aiLogTransaction('Client Update','Progress update drafted for '+job.client_name+' — '+job.percent_complete+'% complete','normal');
 }
+
+// ══════════════════════════════════════════════════
+// SMART NEXT STEP — appears after every action
+// ══════════════════════════════════════════════════
+function nextStep(title, message, actions){
+  // Remove any existing next step panel
+  var existing = document.getElementById('next-step-panel');
+  if(existing) existing.remove();
+
+  // Build panel
+  var panel = document.createElement('div');
+  panel.id = 'next-step-panel';
+  panel.style.cssText = 'position:fixed;bottom:20px;right:20px;width:320px;background:#fff;border:2px solid var(--teal);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.25);z-index:9999;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden;animation:slideUp 0.2s ease';
+
+  var html = '<div style="background:var(--teal);padding:12px 16px;display:flex;align-items:center;justify-content:space-between">'
+    + '<div style="font-size:13px;font-weight:800;color:#fff">✅ ' + title + '</div>'
+    + '<button onclick="document.getElementById(\'next-step-panel\').remove()" style="background:none;border:none;color:rgba(255,255,255,0.8);font-size:18px;cursor:pointer;line-height:1">×</button>'
+    + '</div>'
+    + '<div style="padding:12px 16px 6px">'
+    + '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">' + message + '</div>';
+
+  actions.forEach(function(action){
+    html += '<button onclick="document.getElementById(\'next-step-panel\').remove();' + action.fn + '" '
+      + 'style="width:100%;text-align:left;padding:10px 12px;margin-bottom:8px;background:' + (action.primary ? 'var(--teal)' : 'var(--bg)') + ';'
+      + 'color:' + (action.primary ? '#fff' : 'var(--text)') + ';'
+      + 'border:1px solid ' + (action.primary ? 'var(--teal)' : 'var(--border)') + ';'
+      + 'border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px">'
+      + '<span style="font-size:16px">' + action.icon + '</span>'
+      + '<div><div>' + action.label + '</div>'
+      + (action.sub ? '<div style="font-size:11px;opacity:0.7;font-weight:400">' + action.sub + '</div>' : '')
+      + '</div></button>';
+  });
+
+  html += '<button onclick="document.getElementById(\'next-step-panel\').remove()" '
+    + 'style="width:100%;padding:8px;margin-bottom:10px;background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;font-family:inherit">'
+    + 'Dismiss — I\'ll do this later</button></div>';
+
+  panel.innerHTML = html;
+  document.body.appendChild(panel);
+
+  // Auto-dismiss after 30 seconds if no action taken
+  setTimeout(function(){
+    var p = document.getElementById('next-step-panel');
+    if(p) p.style.opacity = '0.3';
+  }, 25000);
+}
+
+// Add slideUp animation
+if(!document.getElementById('next-step-style')){
+  var s = document.createElement('style');
+  s.id = 'next-step-style';
+  s.textContent = '@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}';
+  document.head.appendChild(s);
+}
+
 function toast(msg,type='ok'){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;$('toasts').appendChild(el);setTimeout(()=>el.remove(),3500);}
 function closeModal(id){$(id)?.remove();}
 
@@ -1015,7 +1070,12 @@ function showJobForm(){
 async function saveJob(){
   const name=$('j-name').value.trim(),client=$('j-client').value.trim();
   if(!name||!client){toast('Name and client required','err');return;}
-  try{await dbIns('jobs',{job_name:name,client_name:client,status:$('j-status').value,address:$('j-addr').value,budget:parseFloat($('j-budget').value)||0,start_date:$('j-start').value,current_phase:$('j-phase').value,percent_complete:0});toast('Job created!');closeModal('jf');
+  try{await dbIns('jobs',{job_name:name,client_name:client,status:$('j-status').value,address:$('j-addr').value,budget:parseFloat($('j-budget').value)||0,start_date:$('j-start').value,current_phase:$('j-phase').value,percent_complete:0});closeModal('jf');
+    nextStep('Job Created!', 'Job is set up. What do you want to do first?', [
+      {icon:'📋', label:'Build the estimate', sub:'Start pricing this job', fn:"goTab('estimates')", primary:true},
+      {icon:'📦', label:'Send bid packages', sub:'Get sub prices for this job', fn:"goTab('bids')", primary:false},
+      {icon:'📅', label:'Set the schedule', sub:'Map out the project timeline', fn:"goTab('schedule')", primary:false}
+    ]);
     ALLJOBS=await dbGet('jobs','?order=created_at.desc');
     renderJobList(ALLJOBS);
     // AI auto-creates onboarding checklist in Gatekeeper
@@ -1218,7 +1278,6 @@ async function saveNewInvoice(){
   var amount=parseFloat(($('ninv-amount')||{}).value||0);
   if(!amount){toast('Amount required','err');return;}
   await dbIns('invoices',{job_id:($('ninv-job')||{}).value||null,amount:amount,description:($('ninv-desc')||{}).value||'Invoice',due_date:($('ninv-due')||{}).value||null,status:'Draft'});
-  toast('Invoice created','ok');
   await aiLogTransaction('Invoice Created','New invoice for '+fmt$(amount)+' — '+($('ninv-desc')||{}).value,'normal');
   // Schedule overdue check
   setTimeout(aiCheckOverdue, 2000);
@@ -1256,7 +1315,7 @@ async function saveSub(){
     var subData={company_name:co,trade:$('sb-trade').value,contact_name:$('sb-contact').value,phone:$('sb-phone').value,email:$('sb-email').value,coi_expiry:$('sb-coi').value||null,rating:parseFloat($('sb-rating').value)||null,w9_status:'Requested',coi_status:'Requested'};
     var newSub=await dbIns('subcontractors',subData);
     closeModal('sbf');
-    toast('Sub added — AI sending W9 & COI requests...','ok',5000);
+    // Sub added
     // AI auto-drafts and "sends" W9 + COI request
     var email=$('sb-email').value.trim();
     if(email){
@@ -1267,6 +1326,11 @@ async function saveSub(){
     // AI logs to Gatekeeper
     await aiLogTransaction('New Subcontractor', 'Added '+co+' ('+$('sb-trade').value+'). W9 and COI requests sent automatically. Awaiting documents before assigning to jobs.', 'info');
     pgSubs();
+    nextStep('Subcontractor Added!', 'W9 & COI requests sent automatically. What next?', [
+      {icon:'📋', label:'Assign to a job', sub:'Add this sub to active work', fn:"goTab('jobs')", primary:true},
+      {icon:'📦', label:'Create purchase order', sub:'Order materials from this sub', fn:"goTab('pos')", primary:false},
+      {icon:'👥', label:'View all subs', sub:'See your subcontractor list', fn:"goTab('subs')", primary:false}
+    ]);
   }catch(e){toast(e.message,'err');}
 }
 
@@ -5244,7 +5308,6 @@ async function saveNewPO(){
   var items=lines.map(function(l){var p=l.split(',');return {description:(p[0]||'').trim(),qty:parseFloat(p[1])||1,unit:(p[2]||'ea').trim(),unit_price:parseFloat(p[3])||0,total:parseFloat(p[1]||1)*parseFloat(p[3]||0)};});
   var total=items.reduce(function(s,it){return s+it.total;},0);
   await dbIns('purchase_orders',{job_id:($('npo-job')||{}).value||null,supplier_name:supplier,items:JSON.stringify(items),total:total,delivery_date:($('npo-delivery')||{}).value||null,notes:($('npo-notes')||{}).value||'',status:'Draft'});
-  toast('Purchase order saved','ok');
   var jobId=($('npo-job')||{}).value||null;
   await aiLogTransaction('Purchase Order','New PO to '+($('npo-supplier')||{}).value+' — '+fmt$(total),'normal');
   if(jobId) await aiBudgetGuard(jobId);
@@ -5351,9 +5414,13 @@ async function saveNewCO(status){
 }
 async function approveCOItem(id){
   await dbUpd('change_orders',id,{status:'Approved',approved_at:new Date().toISOString()});
-  toast('✅ CO approved — budget and schedule updated','ok');
-  await aiLogTransaction('CO Approved','Change order #'+id+' approved. Budget auto-updated. Schedule impact applied.','normal');
+  await aiLogTransaction('CO Approved','Change order #'+id+' approved.','normal');
   pgCOs();
+  nextStep('Change Order Approved!', 'Budget has been updated. What next?', [
+    {icon:'📄', label:'Create invoice for this CO', sub:'Bill client for the change order', fn:"goTab('invoices')", primary:true},
+    {icon:'📱', label:'Notify client', sub:'AI drafts update message', fn:"goTab('messages')", primary:false},
+    {icon:'💰', label:'View budget', sub:'See updated job costing', fn:"goTab('budget')", primary:false}
+  ]);
 }
 async function aiDraftCO(){
   var notes=($('nco-desc')||{}).value||($('nco-title')||{}).value||'';
