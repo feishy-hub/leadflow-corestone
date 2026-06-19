@@ -705,7 +705,7 @@ function globalSearch(q){
 }
 function renderPage(tab){
   $('content').innerHTML='<div class="loading"><div class="spin"></div></div>';
-  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgPlans,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
+  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgPlans,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
 }
 
 // DASHBOARD
@@ -885,6 +885,7 @@ async function saveLead(id=null,runAI=true){
 }
 
 async function generateLeadAI(leadId,data){
+  try{
   const prompt=`You are AI for Corestone Developers, Hudson Valley NY GC. Owner: Feishy Felberbaum. Cost-plus 20% fee. $5k deposit before site visit.
 LEAD: Name:${data.client_name||'Unknown'}|Phone:${data.phone||'?'}|Job:${data.job_type||'?'}|Budget:$${data.estimated_value||'?'}|Source:${data.lead_source||'?'}|Notes:${data.notes||'none'}
 Return ONLY this JSON with no extra text:
@@ -1252,6 +1253,7 @@ async function pgInvoices(){
 }
 function showInvoiceForm(){var w=$('inv-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
 async function saveNewInvoice(){
+  try{
   var amount=parseFloat(($('ninv-amount')||{}).value||0);
   if(!amount){toast('Amount required','err');return;}
   await dbIns('invoices',{job_id:($('ninv-job')||{}).value||null,amount:amount,description:($('ninv-desc')||{}).value||'Invoice',due_date:($('ninv-due')||{}).value||null,status:'Draft'});
@@ -1260,6 +1262,7 @@ async function saveNewInvoice(){
   // Schedule overdue check
   setTimeout(aiCheckOverdue, 2000);
   pgInvoices();
+  }catch(e){toast('Invoice error: '+e.message,'err');console.error('saveNewInvoice',e);}
 }
 async function voiceInvoice(){
   micFillField('ninv-desc','What is this invoice for and what amount?');
@@ -1458,11 +1461,13 @@ async function pgBills(){
 }
 function showBillForm(){var f=$('bill-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
 async function saveNewBill(){
+  try{
   var vendor=($('nbill-vendor')||{}).value||'';var amount=parseFloat(($('nbill-amount')||{}).value||0);
   if(!vendor||!amount){toast('Vendor and amount required','err');return;}
   await dbIns('bills',{job_id:($('nbill-job')||{}).value||null,vendor_name:vendor,amount:amount,description:($('nbill-desc')||{}).value||'',due_date:($('nbill-due')||{}).value||null,status:'Unpaid'});
   await aiLogTransaction('Bill Added','New bill from '+vendor+': '+fmt$(amount),'normal');
   toast('Bill saved','ok');pgBills();
+  }catch(e){toast('Bill error: '+e.message,'err');console.error('saveNewBill',e);}
 }
 async function payBill(id){
   await dbUpd('bills',id,{status:'Paid',paid_at:new Date().toISOString()});
@@ -1549,9 +1554,18 @@ function pgNF(){$('content').innerHTML='<div class="empty"><div class="ei">🚧<
 
 // LIVE CALL MODE
 var ACTIVE_LEAD=null;
+var AJOB=null;
+var ALLJOBS=[];
+var callRec=null;
+var recog=null;
+var callTimer=null;
+var callSec=0;
+var callChunks=[];
+var autoAnalyzeTimer=null;
 var liveWords=[],liveAnalyzeCooldown=false,quickSitCooldown=false,lastAnalyzed='';
 
 async function openCallMode(leadId){
+  try{
   var results=await dbGet('leads','?id=eq.'+leadId);var lead=results[0];
   if(!lead){toast('Lead not found','err');return;}
   ACTIVE_LEAD=lead;liveWords=[];lastAnalyzed='';
@@ -1730,7 +1744,7 @@ async function getAutoSuggestion(situation){
   }catch(e){$('co-sug-txt').textContent='AI unavailable - use your script on the left.';$('co-sug-txt').style.color='rgba(252,165,165,0.8)';}
 }
 
-async function quickSit(situation){
+async async function quickSit(situation){
   if(quickSitCooldown)return;quickSitCooldown=true;
   lastAnalyzed=situation;
   await getAutoSuggestion(situation);
@@ -4786,6 +4800,7 @@ async function createEstimate(){
 }
 
 async function openEstimate(id){
+  try{
   var results = await dbGet('estimates','?id=eq.'+id);
   var est = results[0];
   if(!est){toast('Estimate not found','err');return;}
@@ -5252,6 +5267,7 @@ async function pgPOs(){
 }
 function showNewPOForm(){var w=$('po-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
 async function saveNewPO(){
+  try{
   var supplier=($('npo-supplier')||{}).value||'';
   if(!supplier.trim()){toast('Supplier required','err');return;}
   var itemsRaw=($('npo-items')||{}).value||'';
@@ -5264,6 +5280,7 @@ async function saveNewPO(){
   await aiLogTransaction('Purchase Order','New PO to '+($('npo-supplier')||{}).value+' — '+fmt$(total),'normal');
   if(jobId) await aiBudgetGuard(jobId);
   pgPOs();
+  }catch(e){toast('Purchase order error: '+e.message,'err');console.error('saveNewPO',e);}
 }
 async function updatePOStatus(id,status){await dbUpd('purchase_orders',id,{status:status});toast('PO updated: '+status,'ok');pgPOs();}
 async function aiDraftPO(){
