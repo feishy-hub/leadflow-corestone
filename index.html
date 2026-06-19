@@ -421,9 +421,13 @@ function safeJSON(str){
     return parsed || {};
   }catch(e){
     try{
-      var m = str.match(/\{[\s\S]*\}/);
+      var m = str.match(/[{][\s\S]*[}]/);
       if(m){ var p2=JSON.parse(m[0]); return p2||{}; }
     }catch(e2){}
+    try{
+      var ma = str.match(/[[\s\S]*]/);
+      if(ma){ var p3=JSON.parse(ma[0]); return p3||[]; }
+    }catch(e3){}
     console.error('safeJSON failed:',e.message);
     return {};
   }
