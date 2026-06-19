@@ -1026,7 +1026,9 @@ function showEmailScanner(){
     </div>`);
 }
 
+var scanEmail=null;
 async function processEmailPaste(){
+  scanEmail=processEmailPaste;
   const text=$('paste-email').value.trim();if(!text||text.length<20){toast('Please paste the email text first','err');return;}
   $('email-result').innerHTML='<div class="loading" style="padding:12px"><div class="spin"></div>AI reading...</div>';
   try{
