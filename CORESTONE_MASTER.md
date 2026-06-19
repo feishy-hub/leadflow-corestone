@@ -1,163 +1,146 @@
 # CORESTONE OS — MASTER DOCUMENT
 **Last Updated:** 2026-06-19
-**Repo:** feishy-hub/leadflow-corestone
 **Live URL:** https://leadflow-corestone.vercel.app
-**Stack:** Single HTML file · Vercel · GitHub auto-deploy · Anthropic API via /api/claude proxy
+**Repo:** feishy-hub/leadflow-corestone
+**Stack:** Single HTML file · Vercel auto-deploy · Anthropic API via /api/claude proxy
 
 ---
 
-## DEPLOYMENT
-- **Platform:** Vercel (NOT Lovable, NOT Base44, NOT Netlify — all abandoned)
-- **Repo:** feishy-hub/leadflow-corestone (GitHub)
-- **Auto-deploy:** Every push to main branch → live in 30-45 seconds
-- **API Proxy:** /api/claude.js (Vercel serverless function)
-- **API Key:** Set in Vercel Environment Variables as ANTHROPIC_API_KEY
-- **GitHub PAT:** Classic token only (fine-grained PATs fail) — stored in memory
-- **Database:** localStorage (dbGet/dbIns/dbUpd/dbDel helpers mirror Supabase API)
-- **File size:** ~470,000 chars (single index.html)
+## SESSION START
+Tell Claude: *"I'm Feishy, owner of Corestone Developers. Read the CORESTONE_MASTER.md file in my project files and then tell me you're ready."*
+
+---
+
+## PLATFORM
+- Vercel (NOT Lovable, NOT Base44 — both abandoned)
+- GitHub repo: feishy-hub/leadflow-corestone
+- Auto-deploys on every push to main (~30-45 seconds)
+- API proxy: /api/claude.js (Vercel serverless)
+- API key: ANTHROPIC_API_KEY in Vercel environment variables
+- GitHub PAT: Classic token only (fine-grained PATs fail)
+- Database: localStorage (mirrors Supabase-style API)
 
 ---
 
 ## CRITICAL RULES
-1. Claude pushes directly to GitHub — never ask Feishy to download/deploy manually
-2. Classic PATs only — fine-grained always fail with 403
-3. All updates in ONE push per session — never piecemeal
-4. localStorage over Supabase — no spinning/loading issues
-5. AI does everything automatically — Feishy only confirms/approves
-6. Every form has a 🎙️ mic button — speak instead of type
-7. Nothing gets removed — only additions
+1. Push directly to GitHub — never ask Feishy to do it manually
+2. Classic PAT only — fine-grained always fail with 403
+3. All changes in ONE push per session
+4. Run Node.js syntax check before EVERY push
+5. Nothing removed — only additions and fixes
+6. Every form has mic button (micFillField)
+7. Every action shows nextStep modal — nothing disappears silently
 
 ---
 
-## ARCHITECTURE
-- **Navigation:** Buildertrend-identical left sidebar, collapsible, grouped sections
-- **AI Brain:** Every transaction flows through aiLogTransaction() → daily log + Gatekeeper
-- **Mic System:** micFillField(fieldId, hint) — universal voice input on every form
-- **safeJSON():** Robust JSON parser — handles fences, smart quotes, arrays, objects
-- **AI Proxy:** /api/claude → Vercel serverless → Anthropic API (CORS safe)
+## NAVIGATION RULE (MOST IMPORTANT)
+Every single action in the app shows a nextStep() modal after it completes.
+The modal is full-screen centered, stays until user picks an option or dismisses.
+20/20 actions verified — all lead somewhere. Never a silent disappear.
 
 ---
 
-## MODULES BUILT (ALL COMPLETE — NO STUBS)
+## FILE STATS
+- Size: ~472,000 chars
+- Functions: ~270
+- Pages: 24 active (7 dead V1 versions removed)
+- Syntax: Verified clean by Node.js checker
+
+---
+
+## ALL MODULES (NO STUBS)
 
 ### SALES
-- ✅ **Leads** — Pipeline, AI scoring, email scan, call scripts, objection handling
-- ✅ **Live Call Mode** — Real-time AI coaching, situation buttons, transcript
-- ✅ **Email Scanner** — Paste Angi/Houzz email → AI extracts lead automatically
-- ✅ **Proposals** — Status tracking, Sent/Viewed/Signed/Approved pipeline
-
-### PRECONSTRUCTION  
-- ✅ **Plan Intelligence** — PDF upload, AI takeoff extraction, cost range
-- ✅ **Estimates** — Line items, markup, AI helper, categories
-- ✅ **Bidding** — Bid packages to subs, AI bid ranking, voice bid
-- ✅ **Selections** — Client selections by category, AI suggestions, status cycling
-
-### PROJECT MANAGEMENT
-- ✅ **Schedule** — Phases, Gantt, AI generate, percent complete
-- ✅ **Daily Logs** — Voice recording, AI structures log, issues, client updates
-- ✅ **Punch List** — AI generates from job scope, priority levels
-- ✅ **RFIs** — Log, AI draft, status tracking
-- ✅ **Photo Log** — Upload, AI analysis (aiAnalyzePhoto), 360° support
-- ✅ **Change Orders** — Full CO lifecycle, AI draft, voice CO, markup calculator, approve flow
-- ✅ **Specifications** — Per job, by CSI section, AI generate, voice input
+- Leads — pipeline, AI scoring, email scan, call scripts
+- Live Call Mode — real-time AI coaching, 9 situation buttons, transcript
+- Proposals — Sent/Viewed/Signed/Approved pipeline
 
 ### FINANCIAL
-- ✅ **Invoices** — AR, progress billing, AI suggest amount, Mark Paid, overdue detection
-- ✅ **Bills / AP** — Vendor bills, pay bill, AI verify, dispute flow
-- ✅ **Purchase Orders** — Line items, AI material suggestions, delivery tracking, budget guard
-- ✅ **Budget** — Real-time cost vs budget per job, PO committed, CO additions, progress bar
-- ✅ **Lien Waivers** — Auto-generation, sub payments
+- Estimates — line items, markup, AI helper
+- Change Orders — full lifecycle, AI draft, voice, markup calc
+- Purchase Orders — line items, AI materials, budget guard
+- Invoices — AR, progress billing, AI suggest, mark paid
+- Bills/AP — vendor bills, AI verify, dispute flow
+- Budget — real-time cost vs budget per job
+- Lien Waivers — auto-generation after payment
+
+### PROJECT MANAGEMENT
+- Schedule — phases, AI generate, progress bars
+- Daily Logs — voice recording, AI structures log
+- Punch List — AI generates, priority levels
+- RFIs — log, AI draft, status tracking
+- Photo Log — upload, AI analysis
+- Change Orders — CO log per job modal
 
 ### CLIENT & SUBS
-- ✅ **Subcontractors** — Directory, COI/W9 auto-request on add, rating, trade
-- ✅ **Messages** — Client/sub threads, AI draft
-- ✅ **Warranty** — Claims tracking, AI analysis (covered/not covered), responsibility
-- ✅ **Gatekeeper** — All AI-flagged items queue, approve/reject/delegate
+- Subcontractors — W9/COI status shown, auto-request on add
+- Messages — client/sub threads, AI draft
+- Selections — by category, AI suggest, status cycling
+- Specifications — AI generate, voice input
+- Warranty — claims, AI analysis, responsibility
 
 ### INTELLIGENCE
-- ✅ **Reports** — KPI dashboard, job performance
-- ✅ **AI Story Tracker** — Full job lifecycle narrative
-- ✅ **AI Weekly Summary** — Business health, priorities, risks, wins
-- ✅ **AI Cash Flow Forecast** — 30-day inflow vs outflow
-- ✅ **AI Risk Scorer** — Per job risk assessment
-- ✅ **AI Scope Detector** — Detects scope changes in messages/transcripts → auto-drafts CO
-
-### AUTOMATION (RUNS AUTOMATICALLY — NO BUTTON PRESS)
-- ✅ New sub added → W9 + COI request drafted → Gatekeeper
-- ✅ New lead → AI scores + generates call script
-- ✅ New job → Onboarding checklist in Gatekeeper
-- ✅ New CO → Budget guard check
-- ✅ New PO → Budget guard check  
-- ✅ Invoice overdue → Alert + collection draft
-- ✅ Payment received → Lien waiver flag
-- ✅ App opens → Scan all invoices for overdue
-- ✅ Daily log voice → AI structures and flags issues
-- ✅ CO approved → Budget + schedule update
+- Gatekeeper — all AI actions queue, Approve/Reject/Delegate
+- Reports — KPI dashboard
+- AI Weekly Summary — business health
+- AI Cash Flow Forecast — 30-day projection
+- AI Risk Scorer — per job
+- Generate Contract — full construction contract
 
 ---
 
-## AI FUNCTIONS (ALL TESTED LIVE)
-| Function | What it does |
-|---|---|
-| generateLeadAI | Call script, objections, questions, next action |
-| scanEmail | Extract lead from Angi/Houzz email paste |
-| analyzeCallLive | Real-time coaching during phone call |
-| runPlanAI | Extract takeoff from blueprint description |
-| takeoffToEstimate | Convert takeoff to line-item estimate |
-| aiGenerateSchedule | Full phase schedule with dates |
-| aiGeneratePunchList | End-of-job punch list |
-| aiDraftRFI | Professional RFI document |
-| aiDraftMessage | Client/sub communication |
-| aiDraftCO | Change order from voice/notes |
-| aiGenerateSpecs | Technical specifications |
-| aiSuggestSelections | Client finish suggestions |
-| aiWarrantyAnalysis | Covered/not covered + responsibility |
-| aiCheckBill | Bill reasonableness verification |
-| aiAnalyzePhoto | Photo issue detection |
-| aiDetectScope | Scope change detection in messages |
-| aiWeeklySummary | Weekly business health summary |
-| aiCashFlow | 30-day cash flow forecast |
-| aiRiskScore | Job risk assessment |
-| generateContract | Full construction contract |
-| sendClientUpdate | Progress update to client |
-| aiLogTransaction | Every transaction logged |
-| aiBudgetGuard | Budget alert at 90% committed |
-| aiCheckOverdue | Invoice overdue detection |
-| aiStructureLog | Voice log → structured report |
-| gkAI | Gatekeeper approval recommendations |
+## AI AUTOMATION (RUNS AUTOMATICALLY)
+- New sub → W9 + COI request drafted → Gatekeeper
+- New lead → AI scores + generates call script
+- New job → Onboarding checklist in Gatekeeper
+- New CO → Budget guard check
+- New PO → Budget guard check
+- Invoice overdue → Alert + collection draft
+- Payment received → Lien waiver flag
+- App opens → Scan all invoices for overdue
+- Daily log voice → AI structures and flags issues
+- CO approved → Budget + schedule update
+- Every transaction → aiLogTransaction → daily log + Gatekeeper
 
 ---
 
-## 23-STEP FULL BUSINESS SIMULATION — ALL PASSING
-Lead intake → address/zoning → scoring → call script → live coaching → plan takeoff → estimate → bids → bid ranking → proposal → schedule → daily log → issue detection → CO draft → punch list → invoice → overdue collection → lien waiver → job story → review request → 1099 → warranty → profitability report
+## NAVIGATION FLOWS (ALL 20 VERIFIED)
+Save lead → Call now / Follow-up email / View leads
+Save job → Build estimate / Send bids / Set schedule
+Approve CO → Create invoice / Notify client / Check budget
+Save CO → Send to client / Approve now / Check budget
+Create invoice → Send to client / View invoices / Check budget
+Mark paid → Release lien waiver / Request review / Job report
+Save PO → Check budget / View POs / Add another
+Save bill → Check cash flow / View bills
+Pay bill → Lien waiver / View bills / Cash flow
+Save sub → Assign to job / Create PO / View subs
+Save selection → Add another / View all / Send to client
+Save spec → Add another / View all / Send to sub
+Save warranty → Call client / Assign to sub / View claims
+Save punch item → Add another / Send to sub / View list
+Save RFI → Wait for response / Add another / Back to job
+Save daily log → Add photos / Send client update / Log issue
+Save bid → Wait for bids / AI rank / View packages
+Approve GK item → Review more / Dashboard
+Delete record → Auto-refresh current page
+End call → Back to lead detail
 
 ---
 
-## ACCOUNTS & CREDENTIALS
-- **GitHub:** feishy-hub/leadflow-corestone
-- **Vercel:** leadflow-corestone.vercel.app  
-- **Anthropic API:** Key in Vercel env vars (sk-ant-api03...)
-- **Gmail OAuth:** Client ID 760633955848-6rrcev2o7kcpj0ehelhfjvf57art33cn.apps.googleusercontent.com
-- **QBO:** Advanced plan (integration planned — last after 30 days parallel testing)
-- **n8n:** corestone-n8n.onrender.com (planned automation workflows)
-- **Test accounts:** corestone.test.client@gmail.com, corestone.test.sub@gmail.com
+## TWO-MODE WORK SYSTEM
+**Big work/planning:** This chat (claude.ai Corestone Project)
+- Start: "I'm Feishy, read CORESTONE_MASTER.md and tell me you're ready"
+
+**Bug fixes:** Claude Code (black CMD window)
+- Open: Windows+R → cmd → claude
+- Say: "My app is at github.com/feishy-hub/leadflow-corestone, file is index.html. Bug: [describe]. Fix and push to GitHub."
 
 ---
 
-## NEXT PRIORITIES (NOT YET BUILT)
-1. Email integration — real Gmail scanning (OAuth ready, not wired)
-2. QBO sync — after 30 days parallel verification
-3. n8n workflows — automated email routing
-4. GPS time tracking — clock in/out per job site
-5. Client portal — client-facing view of their job
-6. PDF export — proper PDF generation for contracts/invoices
-7. Push notifications — OneSignal integration
-8. Permit tracking module
-9. Safety / toolbox talks module
-10. Mobile optimization improvements
-
----
-
-## HOW TO START EACH SESSION
-Tell Claude: "I'm Feishy, owner of Corestone Developers. Read the CORESTONE_MASTER.md file in my project files and then tell me you're ready."
-Then Claude reads this file and is immediately up to speed on everything.
+## CREDENTIALS
+- GitHub: feishy-hub/leadflow-corestone
+- Vercel: leadflow-corestone.vercel.app
+- API key: starts with sk-ant-api03... (in Vercel env vars)
+- n8n: corestone-n8n.onrender.com
+- QBO: Advanced plan (integration deferred — 30 day parallel test first)
