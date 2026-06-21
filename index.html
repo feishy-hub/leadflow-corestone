@@ -820,31 +820,74 @@ function showMicError(msg){
 }
 
 function micFillField(fieldId, hint, callback){
-  var SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SpeechRec){toast('Speech recognition not supported — use Chrome','err');return;}
-  var rec=new SpeechRec();rec.continuous=false;rec.interimResults=false;rec.lang='en-US';
-  var btn=event&&event.currentTarget;
-  if(btn){btn.textContent='🔴';btn.style.background='#ef4444';}
-  toast('🎙️ Listening... ('+hint+')','info',8000);
-  rec.onresult=function(e){
-    var txt=e.results[0][0].transcript;
-    var el=$(fieldId);
-    if(el){
-      if(el.tagName==='TEXTAREA'||el.tagName==='INPUT') el.value=(el.value?el.value+' ':'')+txt;
-      else el.textContent=txt;
+  if(!window.SpeechRecognition && !window.webkitSpeechRecognition){
+    showMicError('Speech recognition only works in Google Chrome. Please open this app in Chrome.');
+    return;
+  }
+  if(navigator.permissions){
+    navigator.permissions.query({name:'microphone'}).then(function(perm){
+      if(perm.state==='denied'){
+        showMicError('Microphone is BLOCKED. Click the lock icon in your address bar, set Microphone to Allow, then refresh the page.');
+        return;
+      }
+      startMicRecording(fieldId, hint, callback);
+    }).catch(function(){ startMicRecording(fieldId, hint, callback); });
+  } else {
+    startMicRecording(fieldId, hint, callback);
+  }
+}
+
+function startMicRecording(fieldId, hint, callback){
+  var SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var rec = new SpeechRec();
+  rec.continuous = false;
+  rec.interimResults = true;
+  rec.lang = 'en-US';
+
+  var ind = document.createElement('div');
+  ind.id = 'mic-listen-indicator';
+  ind.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0d7a70;color:#fff;padding:12px 24px;border-radius:30px;font-size:14px;font-weight:700;z-index:9999;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif';
+  ind.innerHTML = '<div style="width:10px;height:10px;background:#ef4444;border-radius:50%;animation:blink-dot 0.8s infinite"></div><span>Listening...</span>';
+  var oldInd = document.getElementById('mic-listen-indicator');
+  if(oldInd) oldInd.remove();
+  document.body.appendChild(ind);
+
+  rec.onresult = function(e){
+    var final = '';
+    for(var i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal) final += e.results[i][0].transcript;
     }
-    if(btn){btn.textContent='🎙️';btn.style.background='var(--teal)';}
-    toast('Got it: "'+txt.substring(0,40)+'"','ok');
-    if(callback) callback(txt);
+    if(final){
+      var el = document.getElementById(fieldId);
+      if(el){
+        var cur = (el.tagName==='TEXTAREA'||el.tagName==='INPUT') ? el.value : '';
+        el.value = (cur ? cur+' ' : '') + final;
+      }
+      if(callback) callback(final);
+      toast('Got it: "'+final.substring(0,40)+'"','ok');
+    }
   };
-  rec.onerror=function(e){
-    if(btn){btn.textContent='🎙️';btn.style.background='var(--teal)';}
-    toast('Mic error: '+e.error,'err');
+
+  rec.onerror = function(e){
+    var i2=document.getElementById('mic-listen-indicator');if(i2)i2.remove();
+    if(e.error==='not-allowed'||e.error==='permission-denied'){
+      showMicError('Microphone blocked. Click the lock icon in your address bar, set Microphone to Allow, then refresh the page.');
+    } else if(e.error==='no-speech'){
+      toast('No speech detected — speak clearly and try again','err');
+    } else {
+      toast('Mic error: '+e.error,'err');
+    }
   };
-  rec.onend=function(){
-    if(btn){btn.textContent='🎙️';btn.style.background='var(--teal)';}
+
+  rec.onend = function(){
+    var i2=document.getElementById('mic-listen-indicator');if(i2)i2.remove();
   };
-  try{rec.start();}catch(e){toast('Mic could not start: '+e.message,'err');}
+
+  try{ rec.start(); }
+  catch(e){
+    var i2=document.getElementById('mic-listen-indicator');if(i2)i2.remove();
+    showMicError('Could not start microphone: '+e.message+'. Make sure you are using Chrome and have allowed mic access.');
+  }
 }
 
 // pgDash removed — using pgDashV2
