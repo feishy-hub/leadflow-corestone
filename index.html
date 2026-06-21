@@ -3360,6 +3360,42 @@ async function viewRFI(id){
 }
 
 // ── PHOTO LOG ──────────────────────────────────────────────────
+async function uploadPhoto(input){
+  if(!input||!input.files||!input.files.length) return;
+  var file=input.files[0];
+  if(!file.type.startsWith('image/')) {toast('Please select an image file','err');return;}
+  toast('Uploading photo...','ok',4000);
+  try{
+    var reader=new FileReader();
+    reader.onload=async function(e){
+      var base64=e.target.result.split(',')[1];
+      var jobId=AJOB?AJOB.id:null;
+      await dbIns('photos',{job_id:jobId,file_name:file.name,data:base64,created_at:new Date().toISOString(),notes:'',ai_analysis:null});
+      toast('Photo saved','ok');
+      // Auto AI analysis
+      if(base64){
+        toast('🤖 AI analyzing photo...','ok',5000);
+        var analysis=await aiAnalyzePhoto(base64,'Job site photo');
+        if(analysis){
+          var photos=await dbGet('photos','?order=created_at.desc&limit=1');
+          if(photos&&photos[0]) await dbUpd('photos',photos[0].id,{ai_analysis:JSON.stringify(analysis)});
+          if(analysis.issues&&analysis.issues.length){
+            toast('AI found '+analysis.issues.length+' issue(s) — check Gatekeeper','err');
+            await dbIns('gatekeeper_queue',{type:'Photo Issue',title:'AI detected issue in photo',description:analysis.issues.join(', '),status:'pending',priority:'high'});
+          }
+        }
+      }
+      pgPhotoLog();
+      nextStep('Photo Uploaded! 📸', 'Photo is saved. What next?', [
+        {icon:'📸', label:'Add another photo', sub:'Keep documenting progress', fn:'document.getElementById("photo-upload")&&document.getElementById("photo-upload").click()'},
+        {icon:'📧', label:'Send to client', sub:'Share progress photos', fn:'goTab("messages")'},
+        {icon:'📋', label:'Link to daily log', sub:'Add to todays log', fn:'goTab("daily")'}
+      ]);
+    };
+    reader.readAsDataURL(file);
+  }catch(e){toast('Upload failed: '+e.message,'err');}
+}
+
 async function pgPhotoLog(){
   var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=created_at.desc':'?order=created_at.desc&limit=50';
   try{
