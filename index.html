@@ -1556,7 +1556,7 @@ async function pgGK(){
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button style="background:var(--green-bg);color:var(--green);border:1.5px solid var(--green);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer" onclick="gkDo('${i.id}','approved')">✅ Approve</button>
           <button style="background:var(--red-bg);color:var(--red);border:1.5px solid var(--red);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer" onclick="gkDo('${i.id}','rejected')">❌ Reject</button>
-          <button class="btn btn-g btn-sm" onclick="gkAI('${i.id}','${i.title}','${(i.description||'').replace(/'/g,'').substring(0,100)}',${i.amount||0})">🤖 Ask AI</button>
+          <button onclick="gkApprove(item.id)" style="padding:7px 14px;background:var(--green);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-right:4px">Approve</button><button onclick="gkReject(item.id)" style="padding:7px 14px;background:var(--red);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-right:4px">Reject</button><button class="btn btn-g btn-sm" onclick="gkAI('${i.id}','${i.title}','${(i.description||'').replace(/'/g,'').substring(0,100)}',${i.amount||0})">🤖 Ask AI</button>
         </div>
         <div id="gkai-${i.id}"></div>
       </div>`).join('')}`;
@@ -2681,7 +2681,7 @@ async function pgJobsV2(){
       +'</div>'
       +'<div style="display:flex;gap:8px">'
       +'<input id="job-search" placeholder="Search jobs..." style="width:180px;padding:7px 11px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;font-family:inherit" oninput="filterJobsV2(this.value)">'
-      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button>'
+      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button><button onclick="aiWeeklySummary()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">AI Summary</button>'
       +'</div></div>'
       
       // Status filter tabs
@@ -3594,7 +3594,7 @@ async function pgLienWaivers(){
     $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
       +'<div><div style="font-size:18px;font-weight:800">📜 Lien Waivers</div>'
       +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+waivers.length+' total · <span style="color:'+(unsigned.length?'var(--red)':'var(--green)')+';font-weight:700">'+unsigned.length+' unsigned</span></div></div>'
-      +'<button class="btn btn-p" onclick="showLienForm()">+ Create Waiver</button></div>'
+      +'<button class="btn btn-p" onclick="generateLienWaiver()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-right:8px">AI Waiver</button><button class="btn btn-p" onclick="showLienForm()">+ Manual</button></div>'
       +(unsigned.length?'<div style="background:var(--red-bg);border:1.5px solid var(--red);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px"><strong style="color:var(--red)">⚠️ '+unsigned.length+' lien waivers not yet signed</strong> — never release final payment without a signed lien waiver from every sub.</div>':'')
       +(!waivers.length
         ?'<div class="empty"><div class="ei">📜</div><div class="et">No lien waivers yet</div><div style="font-size:12px;color:var(--dim);margin:8px 0">Create a lien waiver before releasing payment to any sub. It protects the owner from future claims.</div></div>'
