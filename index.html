@@ -789,6 +789,36 @@ function renderPage(tab){
 }
 
 // DASHBOARD
+function showMicError(msg){
+  var ex=document.getElementById('mic-error-banner');
+  if(ex) ex.remove();
+  var banner=document.createElement('div');
+  banner.id='mic-error-banner';
+  banner.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #ef4444;border-radius:12px;padding:16px 20px;z-index:9999;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);font-family:-apple-system,sans-serif';
+  var inner=document.createElement('div');
+  inner.style.cssText='display:flex;align-items:flex-start;gap:12px';
+  var icon=document.createElement('span');
+  icon.style.cssText='font-size:24px';
+  icon.textContent='🎙️';
+  var txt=document.createElement('div');
+  txt.style.cssText='flex:1';
+  var h=document.createElement('div');
+  h.style.cssText='font-weight:800;color:#ef4444;margin-bottom:6px';
+  h.textContent='Microphone Issue';
+  var p=document.createElement('div');
+  p.style.cssText='font-size:13px;color:#333;line-height:1.5';
+  p.textContent=msg;
+  var btn=document.createElement('button');
+  btn.style.cssText='margin-top:10px;padding:6px 14px;background:#ef4444;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit';
+  btn.textContent='Got it';
+  btn.onclick=function(){var b=document.getElementById('mic-error-banner');if(b)b.remove();};
+  txt.appendChild(h);txt.appendChild(p);txt.appendChild(btn);
+  inner.appendChild(icon);inner.appendChild(txt);
+  banner.appendChild(inner);
+  document.body.appendChild(banner);
+  setTimeout(function(){var b=document.getElementById('mic-error-banner');if(b)b.remove();},10000);
+}
+
 function micFillField(fieldId, hint, callback){
   var SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SpeechRec){toast('Speech recognition not supported — use Chrome','err');return;}
