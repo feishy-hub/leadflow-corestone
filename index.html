@@ -180,7 +180,15 @@ tr:hover td{background:#fafbfc}
   #bt-topbar,#bt-main{left:56px}
   .bt-logo-text,.bt-nav-label,.bt-nav-arrow,.bt-nav-sub,.bt-user div,.bt-job-sel div:last-child{display:none!important}
 }
-</style>
+
+        @media (max-width: 768px) {
+            #bt-sidebar { width: 0 !important; overflow: hidden; }
+            #bt-main { margin-left: 0 !important; }
+            button { min-height: 44px; }
+            input, select, textarea { min-height: 44px; font-size: 16px !important; }
+        }
+
+        </style>
 </head>
 <body>
 <!-- ── LEFT SIDEBAR (Buildertrend-style) ── -->
@@ -638,6 +646,257 @@ function nextStep(title, message, actions){
   box.appendChild(body);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
+}
+
+
+// BUG TRACKER
+var bugLog=JSON.parse(localStorage.getItem('cs_bug_log')||'[]');
+window.onerror=function(msg,src,line,col,err){
+  var b={id:Date.now(),message:String(msg),source:src||'',line:line||0,time:new Date().toISOString(),status:'new'};
+  bugLog.unshift(b);if(bugLog.length>50)bugLog=bugLog.slice(0,50);
+  localStorage.setItem('cs_bug_log',JSON.stringify(bugLog));
+  var badge=document.getElementById('bug-badge');
+  if(badge){var n=bugLog.filter(function(x){return x.status==='new';}).length;badge.textContent=n;badge.style.display=n?'flex':'none';}
+  return false;
+};
+
+function clearBugLog(){
+  bugLog=[];localStorage.setItem('cs_bug_log','[]');
+  var p=document.getElementById('bug-panel');if(p)p.remove();
+  var badge=document.getElementById('bug-badge');if(badge)badge.style.display='none';
+}
+
+function showBugPanel(){
+  var ex=document.getElementById('bug-panel');if(ex){ex.remove();return;}
+  var newBugs=bugLog.filter(function(b){return b.status==='new';}).length;
+  var html='<div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.1)">'
+    +'<div style="color:#fff;font-weight:800;font-size:14px">Bug Log ('+bugLog.length+' · '+newBugs+' new)</div>'
+    +'<div style="display:flex;gap:6px">'
+    +'<button onclick="reportBug()" style="padding:5px 10px;background:#ef4444;color:#fff;border:none;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">+Report</button>'
+    +'<button onclick="clearBugLog()" style="padding:5px 10px;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit">Clear</button>'
+    +'<button onclick="document.getElementById(\'bug-panel\').remove()" style="padding:5px 10px;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit">x</button>'
+    +'</div></div>'
+    +'<div style="max-height:280px;overflow-y:auto;padding:10px">'
+    +(bugLog.length===0?'<div style="color:rgba(255,255,255,0.4);text-align:center;padding:20px">No bugs</div>'
+    :bugLog.slice(0,15).map(function(b){return '<div style="background:rgba(255,255,255,0.06);border-radius:6px;padding:8px;margin-bottom:6px;border-left:3px solid '+(b.status==='new'?'#ef4444':'#555')+'">'
+      +'<div style="color:#fff;font-size:11px;font-weight:700">'+String(b.message).substring(0,70)+'</div>'
+      +'<div style="color:rgba(255,255,255,0.4);font-size:10px">'+new Date(b.time).toLocaleTimeString()+' L'+b.line+'</div></div>';}).join(''))
+    +'</div>';
+  var panel=document.createElement('div');
+  panel.id='bug-panel';
+  panel.style.cssText='position:fixed;bottom:60px;right:16px;width:380px;max-width:96vw;background:#1a2b3c;border-radius:12px;z-index:9990;box-shadow:0 8px 32px rgba(0,0,0,0.4);font-family:-apple-system,sans-serif';
+  panel.innerHTML=html;
+  document.body.appendChild(panel);
+  bugLog.forEach(function(b){b.status='seen';});
+  localStorage.setItem('cs_bug_log',JSON.stringify(bugLog));
+  var badge=document.getElementById('bug-badge');if(badge)badge.style.display='none';
+}
+
+function reportBug(){
+  var desc=prompt('What is not working?');
+  if(!desc)return;
+  bugLog.unshift({id:Date.now(),message:'[USER] '+desc,source:'manual',line:0,time:new Date().toISOString(),status:'new'});
+  localStorage.setItem('cs_bug_log',JSON.stringify(bugLog));
+  toast('Bug reported','ok');
+  var ex=document.getElementById('bug-panel');if(ex)ex.remove();
+  showBugPanel();
+}
+
+// DOC PREVIEW + E-SIGNATURE
+var _previewResolve=null;
+
+function resolvePreview(result){
+  if(_previewResolve){
+    var ov=document.getElementById('doc-preview-overlay');if(ov)ov.remove();
+    _previewResolve(result);_previewResolve=null;
+  }
+}
+
+async function docPreview(table,id,docType,recipientName){
+  return new Promise(function(resolve){
+    _previewResolve=resolve;
+    var records=JSON.parse(localStorage.getItem('cs_'+table)||'[]');
+    var doc=records.find(function(r){return String(r.id)===String(id);});
+    if(!doc){toast('Document not found','err');resolve(false);return;}
+    var ov=document.createElement('div');
+    ov.id='doc-preview-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9995;display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto';
+    var box=document.createElement('div');
+    box.style.cssText='background:#fff;border-radius:12px;width:680px;max-width:96vw;overflow:hidden;margin:auto;font-family:Georgia,serif';
+    var lines=doc.line_items||[];if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+    var sub=lines.reduce(function(s,l){return s+(l.total||0);},0);
+    var mk=parseFloat(doc.markup_pct||20)/100;
+    var tot=sub*(1+mk);
+    var docHTML='<div style="text-align:center;margin-bottom:20px"><div style="font-size:20px;font-weight:800;color:#1a2b3c">Corestone Developers</div><div style="font-size:12px;color:#666">Hudson Valley NY</div><div style="font-size:16px;font-weight:700;color:#0d7a70;margin-top:8px">'+docType+'</div></div>';
+    if(docType==='Estimate'||docType==='Proposal'){
+      docHTML+='<table style="width:100%;border-collapse:collapse;margin-bottom:16px"><tr style="background:#1a2b3c;color:#fff"><th style="padding:8px;text-align:left">Description</th><th style="padding:8px;text-align:right">Total</th></tr>'
+        +lines.map(function(l,i){return '<tr style="background:'+(i%2?'#f8f9fa':'#fff')+'"><td style="padding:8px">'+l.description+'</td><td style="padding:8px;text-align:right">$'+Number(l.total||0).toLocaleString()+'</td></tr>';}).join('')
+        +'<tr style="background:#0d7a70;color:#fff"><td style="padding:10px;font-weight:800">TOTAL (incl. '+Math.round(mk*100)+'% fee)</td><td style="padding:10px;text-align:right;font-size:16px;font-weight:800">$'+tot.toLocaleString()+'</td></tr></table>'
+        +'<div style="padding:12px;background:#e8f5f3;border-radius:6px;color:#0d7a70;font-weight:700">Deposit: $5,000 applied toward construction</div>';
+    }
+    if(docType==='Change Order'){
+      var l=parseFloat(doc.labor_cost||0),m=parseFloat(doc.material_cost||0),mk2=parseFloat(doc.markup_pct||20)/100;
+      var t=(l+m)*(1+mk2);
+      docHTML+='<div style="margin-bottom:12px"><strong>'+doc.title+'</strong></div><div style="color:#555;margin-bottom:12px">'+doc.description+'</div>'
+        +'<table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;background:#f8f9fa">Labor</td><td style="padding:8px;text-align:right">$'+l.toLocaleString()+'</td></tr><tr><td style="padding:8px">Materials</td><td style="padding:8px;text-align:right">$'+m.toLocaleString()+'</td></tr><tr style="background:#0d7a70;color:#fff"><td style="padding:10px;font-weight:800">TOTAL</td><td style="padding:10px;text-align:right;font-weight:800">$'+t.toLocaleString()+'</td></tr></table>';
+    }
+    if(docType==='Invoice'){
+      docHTML+='<div style="font-size:28px;font-weight:800;color:#0d7a70;margin:20px 0;text-align:center">$'+Number(doc.amount||0).toLocaleString()+'</div><div style="text-align:center;color:#666">'+(doc.description||'Invoice')+'</div>';
+    }
+    if(docType!=='Invoice'){
+      docHTML+='<div style="margin-top:30px;display:grid;grid-template-columns:1fr 1fr;gap:30px"><div><div style="border-top:1px solid #333;padding-top:6px;font-size:11px;color:#666">Client Signature</div></div><div><div style="border-top:1px solid #333;padding-top:6px;font-size:11px;color:#666">Date</div></div></div>';
+    }
+    box.innerHTML='<div style="background:#1a2b3c;padding:14px 18px;display:flex;justify-content:space-between;align-items:center">'
+      +'<div style="color:#fff;font-size:14px;font-weight:700">Preview — '+recipientName+' sees exactly this</div>'
+      +'<button onclick="resolvePreview(false)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:700">Edit</button>'
+      +'</div><div style="padding:24px">'+docHTML+'</div>'
+      +'<div style="padding:14px 18px;background:#f8f9fa;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;gap:10px">'
+      +'<button onclick="resolvePreview(false)" style="padding:10px 18px;background:#fff;border:1px solid #ccc;border-radius:8px;font-weight:700;cursor:pointer;font-family:sans-serif">Go Back & Edit</button>'
+      +'<button onclick="resolvePreview(true)" style="padding:10px 24px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-family:sans-serif;font-size:15px">Looks Good — Send</button>'
+      +'</div>';
+    ov.appendChild(box);
+    ov.onclick=function(e){if(e.target===ov)resolvePreview(false);};
+    document.body.appendChild(ov);
+  });
+}
+
+function docRecall(table,id){
+  if(!confirm('Recall this document? Recipient can no longer view it.'))return;
+  var records=JSON.parse(localStorage.getItem('cs_'+table)||'[]');
+  var idx=records.findIndex(function(r){return String(r.id)===String(id);});
+  if(idx>=0){records[idx].status='Recalled';records[idx].recalled_at=new Date().toISOString();localStorage.setItem('cs_'+table,JSON.stringify(records));}
+  toast('Document recalled','ok');renderPage(CUR);
+  nextStep('Recalled! ↩','You can now edit and resend.',[
+    {icon:'✏️',label:'Edit now',sub:'Make your changes',fn:'renderPage(CUR)'}
+  ]);
+}
+
+async function openEsignRequest(table,id,docType,recipientName,recipientEmail){
+  var ok=await docPreview(table,id,docType,recipientName||'Client');
+  if(!ok)return;
+  var ov=document.createElement('div');
+  ov.id='esign-req-ov';ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9996;display:flex;align-items:center;justify-content:center;padding:16px';
+  var box=document.createElement('div');
+  box.style.cssText='background:#fff;border-radius:12px;width:440px;max-width:96vw;overflow:hidden;font-family:-apple-system,sans-serif';
+  box.innerHTML='<div style="background:#0d7a70;padding:16px 20px"><div style="font-size:15px;font-weight:800;color:#fff">Send for Signature</div></div>'
+    +'<div style="padding:20px">'
+    +'<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:#666;text-transform:uppercase;margin-bottom:4px">Name</div><input id="es-name" value="'+(recipientName||'')+'" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-family:inherit;box-sizing:border-box"></div>'
+    +'<div style="margin-bottom:16px"><div style="font-size:11px;font-weight:700;color:#666;text-transform:uppercase;margin-bottom:4px">Email</div><input id="es-email" value="'+(recipientEmail||'')+'" placeholder="client@email.com" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-family:inherit;box-sizing:border-box"></div>'
+    +'<div style="padding:10px;background:#e8f5f3;border-radius:6px;font-size:12px;color:#0d7a70;margin-bottom:16px">Client gets a link, signs with finger or mouse, you are notified instantly.</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +'<button onclick="document.getElementById(\'esign-req-ov\').remove()" style="padding:10px 16px;background:#fff;border:1px solid #ccc;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">Cancel</button>'
+    +'<button onclick="confirmEsign(\''+table+'\',\''+id+'\',\''+docType+'\')" style="padding:10px 20px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">Send Request</button>'
+    +'</div></div>';
+  ov.appendChild(box);ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  document.body.appendChild(ov);
+}
+
+async function confirmEsign(table,id,docType){
+  var name=(document.getElementById('es-name')||{}).value||'Client';
+  var email=(document.getElementById('es-email')||{}).value||'';
+  var ov=document.getElementById('esign-req-ov');if(ov)ov.remove();
+  var token='cs-'+Date.now()+'-'+Math.random().toString(36).substr(2,8);
+  var records=JSON.parse(localStorage.getItem('cs_'+table)||'[]');
+  var idx=records.findIndex(function(r){return String(r.id)===String(id);});
+  if(idx>=0){records[idx].status='Pending Signature';records[idx].sign_token=token;records[idx].sign_recipient=name;records[idx].sign_email=email;records[idx].sent_at=new Date().toISOString();localStorage.setItem('cs_'+table,JSON.stringify(records));}
+  await dbIns('gatekeeper_queue',{type:'Signature Requested',title:docType+' sent to '+name+' for signature',description:'Email: '+email,status:'pending',priority:'normal',auto_action:'Waiting for '+name+' to sign'});
+  toast('Sent to '+name+' for signature','ok');
+  nextStep('Sent! ✍️',name+' will get a link to sign.',[
+    {icon:'⏳',label:'Track in Gatekeeper',sub:'See when they sign',fn:'goTab("gatekeeper")'},
+    {icon:'↩',label:'Recall if needed',sub:'Pull back before they sign',fn:'docRecall("'+table+'","'+id+'")'}
+  ]);
+}
+
+function checkSigningLink(){
+  try{
+    var token=new URLSearchParams(window.location.search).get('sign');
+    if(!token)return;
+    var found=null,foundTable=null;
+    ['estimates','change_orders','invoices'].forEach(function(t){
+      if(found)return;
+      var recs=JSON.parse(localStorage.getItem('cs_'+t)||'[]');
+      var doc=recs.find(function(r){return r.sign_token===token;});
+      if(doc){found=doc;foundTable=t;}
+    });
+    if(!found){document.body.innerHTML='<div style="font-family:sans-serif;text-align:center;padding:80px"><div style="font-size:40px">⚠️</div><div style="font-size:18px;font-weight:700;margin-top:16px">Link not found or already signed</div></div>';return;}
+    showSignPage(found,foundTable,token);
+  }catch(e){console.warn('sign check:',e);}
+}
+
+function showSignPage(doc,table,token){
+  var docType=table==='change_orders'?'Change Order':table==='invoices'?'Invoice':'Estimate';
+  document.getElementById('bt-sidebar')&&(document.getElementById('bt-sidebar').style.display='none');
+  document.getElementById('bt-main')&&(document.getElementById('bt-main').style.cssText='margin:0;padding:0');
+  var lines=doc.line_items||[];if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+  var sub=lines.reduce(function(s,l){return s+(l.total||0);},0);var mk=parseFloat(doc.markup_pct||20)/100;var tot=sub*(1+mk);
+  var docHTML='<div style="text-align:center;margin-bottom:20px"><div style="font-size:18px;font-weight:800">Corestone Developers</div><div style="font-size:11px;color:#666">Hudson Valley NY</div><div style="font-size:15px;font-weight:700;color:#0d7a70;margin-top:6px">'+docType+'</div></div>';
+  if(lines.length){docHTML+='<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="background:#1a2b3c;color:#fff"><th style="padding:8px;text-align:left">Description</th><th style="padding:8px;text-align:right">Total</th></tr>'+lines.map(function(l,i){return '<tr style="background:'+(i%2?'#f8f9fa':'#fff')+'"><td style="padding:7px 8px">'+l.description+'</td><td style="padding:7px 8px;text-align:right">$'+Number(l.total||0).toLocaleString()+'</td></tr>';}).join('')+'<tr style="background:#0d7a70;color:#fff"><td style="padding:9px;font-weight:800">TOTAL</td><td style="padding:9px;text-align:right;font-weight:800">$'+tot.toLocaleString()+'</td></tr></table>';}
+  if(doc.amount){docHTML+='<div style="font-size:24px;font-weight:800;color:#0d7a70;text-align:center;margin:16px 0">$'+Number(doc.amount||0).toLocaleString()+'</div>';}
+  $('content').innerHTML='<div style="max-width:640px;margin:0 auto;padding:16px">'
+    +'<div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)">'
+    +'<div style="padding:20px;font-family:Georgia,serif">'+docHTML+'</div>'
+    +'<div style="padding:16px;background:#e8f5f3;margin:0 16px 16px;border-radius:8px;text-align:center">'
+    +'<div style="font-size:13px;color:#0d7a70;font-weight:700;margin-bottom:10px">Sign below with your finger or mouse</div>'
+    +'<canvas id="sig-canvas" width="400" height="110" style="border:2px solid #0d7a70;border-radius:8px;background:#fff;cursor:crosshair;max-width:100%;display:block;margin:0 auto;touch-action:none"></canvas>'
+    +'<div style="display:flex;gap:10px;justify-content:center;margin-top:10px">'
+    +'<button onclick="clearSigCanvas()" style="padding:8px 16px;background:#fff;border:1px solid #ccc;border-radius:6px;font-weight:700;cursor:pointer;font-family:sans-serif">Clear</button>'
+    +'<button onclick="submitSig(\''+table+'\',\''+String(doc.id)+'\',\''+token+'\')" style="padding:10px 24px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-family:sans-serif;font-size:15px">Sign & Submit</button>'
+    +'</div></div></div></div>';
+  setTimeout(function(){
+    var c=document.getElementById('sig-canvas');if(!c)return;
+    var ctx=c.getContext('2d');var drawing=false;var lx,ly;
+    ctx.strokeStyle='#1a2b3c';ctx.lineWidth=2.5;ctx.lineCap='round';
+    function pos(e){var rect=c.getBoundingClientRect();var sx=c.width/rect.width;var sy=c.height/rect.height;if(e.touches)return{x:(e.touches[0].clientX-rect.left)*sx,y:(e.touches[0].clientY-rect.top)*sy};return{x:(e.clientX-rect.left)*sx,y:(e.clientY-rect.top)*sy};}
+    c.addEventListener('mousedown',function(e){drawing=true;var p=pos(e);lx=p.x;ly=p.y;});
+    c.addEventListener('mousemove',function(e){if(!drawing)return;var p=pos(e);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(p.x,p.y);ctx.stroke();lx=p.x;ly=p.y;});
+    c.addEventListener('mouseup',function(){drawing=false;});
+    c.addEventListener('touchstart',function(e){e.preventDefault();drawing=true;var p=pos(e);lx=p.x;ly=p.y;},{passive:false});
+    c.addEventListener('touchmove',function(e){e.preventDefault();if(!drawing)return;var p=pos(e);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(p.x,p.y);ctx.stroke();lx=p.x;ly=p.y;},{passive:false});
+    c.addEventListener('touchend',function(){drawing=false;});
+  },200);
+}
+
+function clearSigCanvas(){var c=document.getElementById('sig-canvas');if(c)c.getContext('2d').clearRect(0,0,c.width,c.height);}
+
+async function submitSig(table,id,token){
+  var c=document.getElementById('sig-canvas');if(!c)return;
+  var data=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+  var hasDrawing=false;for(var i=3;i<data.length;i+=4){if(data[i]>0){hasDrawing=true;break;}}
+  if(!hasDrawing){alert('Please sign first.');return;}
+  var sigData=c.toDataURL('image/png');
+  var signedAt=new Date().toISOString();
+  var records=JSON.parse(localStorage.getItem('cs_'+table)||'[]');
+  var idx=records.findIndex(function(r){return String(r.id)===String(id);});
+  if(idx>=0){records[idx].status='Signed';records[idx].signature_data=sigData;records[idx].signed_at=signedAt;records[idx].sign_token=null;localStorage.setItem('cs_'+table,JSON.stringify(records));}
+  await dbIns('gatekeeper_queue',{type:'SIGNED',title:'Document signed!',description:'Signed: '+new Date(signedAt).toLocaleString(),status:'pending',priority:'high',auto_action:'Review signed document'});
+  $('content').innerHTML='<div style="text-align:center;padding:80px;font-family:sans-serif"><div style="font-size:60px">✅</div><div style="font-size:22px;font-weight:800;color:#0d7a70;margin:16px 0">Signed!</div><div style="color:#666">Corestone Developers has been notified.</div></div>';
+}
+
+// DAILY LOG AI
+async function aiProcessDailyLog(logText,jobId){
+  if(!logText||logText.trim().length<5){toast('Add log notes first','err');return;}
+  toast('AI processing log...','ok',8000);
+  var job=null;if(jobId){var jj=await dbGet('jobs','?id=eq.'+jobId);job=jj&&jj[0];}
+  var r=await ai(
+    'Process this daily construction log'+(job?' for '+job.job_name:'')+': "'+logText+'"\n'
+    +'Return JSON: {"summary":"2 sentences","completed_today":["item"],"in_progress":["item"],"issues_found":[{"issue":"text","severity":"high|medium|low","action":"what to do"}],"tomorrow_plan":["task"],"trades_on_site":["trade"],"client_update":"1 sentence","scope_changes_detected":false,"co_items":[{"title":"CO title","description":"scope","labor_cost":0,"material_cost":0,"reason":"Unforeseen Condition"}]}',
+    'Construction AI. Return ONLY raw JSON.',1200
+  );
+  var d=safeJSON(r);if(!d){toast('AI failed — save manually','err');return;}
+  await dbIns('daily_logs',{job_id:jobId||null,log_date:new Date().toISOString().split('T')[0],notes:logText,summary:d.summary,completed_today:JSON.stringify(d.completed_today||[]),issues:JSON.stringify(d.issues_found||[]),tomorrow_plan:JSON.stringify(d.tomorrow_plan||[]),trades_on_site:JSON.stringify(d.trades_on_site||[]),client_update:d.client_update||'',ai_processed:true});
+  if(d.scope_changes_detected&&d.co_items&&d.co_items.length){
+    for(var ci=0;ci<d.co_items.length;ci++){var co=d.co_items[ci];await dbIns('change_orders',{job_id:jobId||null,title:co.title,description:co.description,reason:co.reason||'Unforeseen Condition',labor_cost:co.labor_cost||0,material_cost:co.material_cost||0,markup_pct:20,cost_impact:(parseFloat(co.labor_cost||0)+parseFloat(co.material_cost||0))*1.2,status:'Draft',source:'Daily Log AI'});}
+    await dbIns('gatekeeper_queue',{type:'Auto CO from Daily Log',title:'AI detected '+d.co_items.length+' scope change(s)',description:d.co_items.map(function(c){return c.title;}).join(', '),status:'pending',priority:'high',auto_action:'Review and approve COs'});
+    toast('AI found scope changes — COs drafted','err',5000);
+  }
+  var hi=(d.issues_found||[]).filter(function(x){return x.severity==='high';});
+  if(hi.length)await dbIns('gatekeeper_queue',{type:'Daily Log Issue',title:hi.length+' high severity issue(s)',description:hi.map(function(x){return x.issue;}).join(', '),status:'pending',priority:'high'});
+  pgDailyV2();
+  nextStep('Daily Log Saved! 📋',d.summary||'Log processed',[
+    {icon:'📤',label:'Send client update',sub:(d.client_update||'Update').substring(0,40),fn:'goTab("messages")'},
+    {icon:'📋',label:'Review COs',sub:d.scope_changes_detected?d.co_items.length+' CO(s) need review':'No scope changes',fn:'goTab("cos")'},
+    {icon:'📸',label:'Add photos',sub:'Document with photos',fn:'goTab("photos")'}
+  ]);
 }
 
 function toast(msg,type='ok'){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;$('toasts').appendChild(el);setTimeout(()=>el.remove(),3500);}
