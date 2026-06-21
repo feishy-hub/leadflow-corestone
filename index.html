@@ -1223,7 +1223,7 @@ async function pgInvoices(){
     +'<div style="display:flex;gap:8px">'
     +'<button onclick="saveNewInvoice()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Create Invoice</button>'
     +'<button onclick="aiInvoiceSuggestion()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Suggest Amount</button>'
-    +'</div></div>'
+    +'<button onclick="toggleVoiceRec()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Log</button>'+'<button onclick="aiStructureLog()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Structure</button>'+'</div></div>'
     +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
     +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 150px 120px 120px 100px">JOB / DESCRIPTION<span>AMOUNT</span><span>DUE</span><span>STATUS</span><span>ACTIONS</span></div>';
   if(!invs.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No invoices yet.</div>';}
@@ -3563,6 +3563,29 @@ function stopVoiceAndClose(){
 }
 
 // ── LIEN WAIVERS ──────────────────────────────────────────────
+async function generateLienWaiver(subId, jobId, amount){
+  var subs=await dbGet('subcontractors','?id=eq.'+(subId||''));
+  var jobs=await dbGet('jobs','?id=eq.'+(jobId||AJOB&&AJOB.id||''));
+  var sub=subs&&subs[0]||{company_name:'Subcontractor'};
+  var job=jobs&&jobs[0]||{job_name:'Project',address:''};
+  toast('🤖 Generating lien waiver...','ok',5000);
+  var r=await ai(
+    'Generate an unconditional lien waiver upon final payment for:\n'+
+    'Sub: '+sub.company_name+'\nJob: '+job.job_name+' at '+job.address+'\n'+
+    'Amount paid: $'+(amount||0)+'\nOwner/GC: Corestone Developers, Feishy Felberbaum\n'+
+    'Return JSON: {"waiver_title":"Unconditional Lien Waiver Upon Final Payment","sub_name":"'+sub.company_name+'","job_address":"'+job.address+'","amount_paid":'+(amount||0)+',"effective_date":"'+new Date().toLocaleDateString()+'","waiver_text":"Full professional lien waiver text 3 sentences","notarization_required":true}',
+    'Return ONLY raw JSON.',600
+  );
+  var d=safeJSON(r);
+  if(!d){toast('Waiver generation failed','err');return;}
+  nextStep('Lien Waiver Generated! 📝', 'Waiver is ready. What next?', [
+    {icon:'🖨️', label:'Print / Save as PDF', sub:'Use browser print to save', fn:'window.print()'},
+    {icon:'📧', label:'Send to subcontractor', sub:'Email the signed waiver', fn:'goTab("messages")'},
+    {icon:'📋', label:'View all waivers', sub:'See lien waiver log', fn:'goTab("liens")'}
+  ]);
+  toast('Lien waiver ready — print to save as PDF','ok');
+}
+
 async function pgLienWaivers(){
   var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=created_at.desc':'?order=created_at.desc';
   try{
