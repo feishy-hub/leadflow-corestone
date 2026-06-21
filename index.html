@@ -1541,7 +1541,7 @@ async function gkDelegate(id,note){
 async function pgGK(){
   try{
     const items=await dbGet('gatekeeper_queue','?status=eq.pending&order=created_at.desc');
-    $('gk-count').textContent=items.length;
+    var gkEl=document.getElementById('gk-count');if(gkEl)gkEl.textContent=items.length;
     $('content').innerHTML=`<div style="font-size:13px;color:var(--muted);margin-bottom:16px">${items.length} decision${items.length!==1?'s':''} waiting for your approval</div>
       ${!items.length?`<div class="empty"><div class="ei">✅</div><div class="et">All clear — no pending decisions</div></div>`:
       items.map(i=>`<div class="gkcard">
