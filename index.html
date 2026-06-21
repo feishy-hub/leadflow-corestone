@@ -2590,7 +2590,8 @@ async function pgReportsV2(){
     var avgProgress=activeJobs.length?Math.round(activeJobs.reduce(function(s,j){return s+(j.percent_complete||0);},0)/activeJobs.length):0;
     var coValue=cos.reduce(function(s,c){return s+(c.cost_impact||0);},0);
     
-    $('content').innerHTML='<div style="font-size:18px;font-weight:800;margin-bottom:16px">📊 Reports</div>'
+    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+'<div style="font-size:18px;font-weight:800">Reports & Analytics</div>'+'<div style="display:flex;gap:8px">'+'<button onclick="aiWeeklySummary()" style="padding:7px 12px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">AI Summary</button>'+'<button onclick="aiCashFlow()" style="padding:7px 12px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">Cash Flow</button>'+'</div></div>'
+    +'<div style="font-size:18px;font-weight:800;margin-bottom:16px">📊 Reports</div>'
     
     // KPI cards
     +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">'
