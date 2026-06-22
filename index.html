@@ -351,6 +351,21 @@ tr:hover td{background:#fafbfc}
 <div id="quick-add-overlay" style="display:none"></div>
 
 <script>
+// ── AUTO VERSION CHECK — clears old data when code updates ──
+var CS_VERSION = '2.1';
+var stored_version = localStorage.getItem('cs_version');
+if(stored_version !== CS_VERSION) {
+  // New version — clear old seed data that may have broken formats
+  var keys_to_clear = ['leads','jobs','estimates','todos','change_orders',
+    'invoices','bills','purchase_orders','subcontractors','daily_logs',
+    'gatekeeper_queue','budget_items','files','messages','selections',
+    'specs','rfis','warranty_items','punch_list','bids','proposals'];
+  keys_to_clear.forEach(function(k){ localStorage.removeItem(k); });
+  localStorage.setItem('cs_version', CS_VERSION);
+  console.log('Corestone OS updated to v'+CS_VERSION+' — data refreshed');
+}
+
+
 // ERROR LOG
 var _EL=[];
 function logErr(src,e){
