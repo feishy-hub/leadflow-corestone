@@ -1292,9 +1292,9 @@ async function generateLeadAI(leadId,data){
   const prompt=`You are AI for Corestone Developers, Hudson Valley NY GC. Owner: Feishy Felberbaum. Cost-plus 20% fee. $5k deposit before site visit.
 LEAD: Name:${data.client_name||'Unknown'}|Phone:${data.phone||'?'}|Job:${data.job_type||'?'}|Budget:$${data.estimated_value||'?'}|Source:${data.lead_source||'?'}|Notes:${data.notes||'none'}
 Return ONLY this JSON with no extra text:
-{"call_script":"Write a 250 word word-for-word phone script. Greet by name, mention source, ask discovery questions, pitch cost-plus transparency and full management, mention $5k deposit goes toward construction, soft close.","objection_responses":{"too_expensive":"2 sentence response","deposit_concern":"2 sentence response","getting_other_bids":"2 sentence response","not_ready_yet":"2 sentence response"},"qualification_questions":["Q1","Q2","Q3","Q4"],"ai_next_action":"One sentence next step","followup_email_subject":"Subject line","followup_email_body":"3 sentence follow up email"}`;
+{"call_script":"150 word phone script: greet by name, mention source, ask 2 discovery questions, pitch cost-plus 20% transparency, mention $5k deposit applies toward construction, soft close","objection_responses":{"too_expensive":"1 sentence","deposit_concern":"1 sentence","getting_other_bids":"1 sentence","not_ready_yet":"1 sentence"},"qualification_questions":["Q1","Q2","Q3","Q4"],"ai_next_action":"One sentence next step","followup_email_subject":"Subject line","followup_email_body":"2 sentence follow up email"}`;
   try{
-    const r=await ai(prompt,'Return ONLY raw JSON. No markdown, no extra text.',2000);
+    const r=await ai(prompt,'Return ONLY raw JSON. No markdown, no extra text.',3000);
     const d=safeJSON(r);
     if(!d||!d.call_script){throw new Error('AI returned empty — please try again');}
     await dbUpd('leads',leadId,{ai_call_script:d.call_script,ai_objections:JSON.stringify(d.objection_responses),ai_questions:JSON.stringify(d.qualification_questions),ai_address_intel:d.address_intelligence,ai_red_flags:JSON.stringify(d.red_flags),ai_next_action:d.ai_next_action,ai_followup_email_subject:d.followup_email_subject,ai_followup_email_body:d.followup_email_body,ai_sentiment:d.sentiment_score,ai_priority:d.priority});
