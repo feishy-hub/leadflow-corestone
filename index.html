@@ -312,7 +312,7 @@ tr:hover td{background:#fafbfc}
 <!-- ── TOP HEADER BAR ── -->
 <div id="bt-topbar">
   <div class="bt-topbar-left">
-    <button class="bt-sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
+    <button class="bt-sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">☰</button><button onclick="showErrLog()" style="position:relative;background:transparent;border:none;cursor:pointer;font-size:15px;padding:4px 6px;margin-left:4px" title="Error Log">&#9888;<span id="err-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#e63946;color:#fff;font-size:9px;font-weight:800;border-radius:8px;padding:1px 4px">0</span></button>
     <div id="bt-breadcrumb">Dashboard</div>
   </div>
   <div class="bt-topbar-center">
@@ -351,6 +351,31 @@ tr:hover td{background:#fafbfc}
 <div id="quick-add-overlay" style="display:none"></div>
 
 <script>
+// ERROR LOG
+var _EL=[];
+function logErr(src,e){
+  _EL.unshift({t:new Date().toLocaleTimeString(),src:src,msg:e&&e.message?e.message:String(e),stack:e&&e.stack?e.stack.split('\n').slice(0,3).join(' | '):''});
+  if(_EL.length>50)_EL.pop();
+  var b=document.getElementById('err-badge');
+  if(b){b.textContent=_EL.length;b.style.display='inline-block';}
+  console.error('[CS]',src,e);
+}
+function showErrLog(){
+  var ex=document.getElementById('err-panel');if(ex){ex.remove();return;}
+  var el=document.createElement('div');el.id='err-panel';
+  el.style.cssText='position:fixed;bottom:0;left:0;right:0;max-height:50vh;background:#1a1a2e;color:#e0e0e0;z-index:99999;overflow-y:auto;font-family:monospace;font-size:12px;border-top:3px solid #e63946';
+  var rows=_EL.length?_EL.map(function(e){return '<div style="padding:8px 14px;border-bottom:1px solid #222"><span style="color:#f4a261">['+e.t+']</span> <span style="color:#e63946;font-weight:700">'+e.src+'</span>: <span style="color:#fff">'+e.msg+'</span>'+(e.stack?'<div style="color:#888;font-size:11px">'+e.stack+'</div>':'')+'</div>';}).join(''):'<div style="padding:20px;text-align:center;color:#888">No errors yet</div>';
+  el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#0d0d1a;border-bottom:1px solid #333"><span style="font-weight:800;color:#e63946">ERROR LOG ('+_EL.length+')</span><div style="display:flex;gap:8px"><button onclick="copyErrLog()" style="background:#2a9d8f;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer">Copy All</button><button onclick="closeOv(this)" style="background:#e63946;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer">Close</button></div></div>'+rows;
+  document.body.appendChild(el);
+}
+function copyErrLog(){
+  var txt=_EL.map(function(e){return '['+e.t+'] '+e.src+': '+e.msg+(e.stack?'\n'+e.stack:'');}).join('\n---\n');
+  navigator.clipboard.writeText(txt).then(function(){toast('Copied — paste to Claude','ok');});
+}
+window.addEventListener('error',function(e){logErr('UNCAUGHT',e.error||{message:e.message});});
+window.addEventListener('unhandledrejection',function(e){logErr('PROMISE',e.reason||{message:'Promise rejected'});});
+
+
 // ── LOCAL STORAGE DB (no internet needed, saves in this browser) ──
 let CUR='dashboard',AJOB=null,ALLJOBS=[];
 let salesView='today';
@@ -1274,7 +1299,7 @@ Return ONLY this JSON with no extra text:
     if(!d||!d.call_script){throw new Error('AI returned empty — please try again');}
     await dbUpd('leads',leadId,{ai_call_script:d.call_script,ai_objections:JSON.stringify(d.objection_responses),ai_questions:JSON.stringify(d.qualification_questions),ai_address_intel:d.address_intelligence,ai_red_flags:JSON.stringify(d.red_flags),ai_next_action:d.ai_next_action,ai_followup_email_subject:d.followup_email_subject,ai_followup_email_body:d.followup_email_body,ai_sentiment:d.sentiment_score,ai_priority:d.priority});
     toast('✅ AI script ready — open the lead');
-  }catch(e){toast('AI error: '+e.message,'err');}
+  }catch(e){logErr('generateLeadAI',e);toast('AI error: '+e.message+' — tap warning icon','err');}
 }
 
 async function leadDetail(id){
