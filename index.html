@@ -353,6 +353,7 @@ tr:hover td{background:#fafbfc}
 <script>
 // ── LOCAL STORAGE DB (no internet needed, saves in this browser) ──
 let CUR='dashboard',AJOB=null,ALLJOBS=[];
+let salesView='today';
 const $=id=>document.getElementById(id);
 const fmt$=n=>n?'$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0}):'$0';
 const fmtD=d=>d?new Date(d).toLocaleDateString('en-US'):'—';
