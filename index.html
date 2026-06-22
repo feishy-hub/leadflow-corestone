@@ -1980,18 +1980,22 @@ async function openCallMode(leadId){
   callSec=0;clearInterval(callTimer);
   callTimer=setInterval(function(){callSec++;var m=Math.floor(callSec/60),s=callSec%60;$('co-timer').textContent=m+':'+(s<10?'0':'')+s;},1000);
   if(lead.ai_call_script){
-    var lines=lead.ai_call_script.split('\n').filter(function(l){return l.trim();});
-    var secs=[{l:'Opening',c:'#93c5fd'},{l:'Discovery Questions',c:'#fcd34d'},{l:'Company Pitch',c:'#6ee7b7'},{l:'The $5,000 Deposit',c:'#c4b5fd'},{l:'Soft Close',c:'#86efac'}];
-    var per=Math.ceil(lines.length/secs.length);
-    $('co-script').innerHTML=secs.map(function(sec,i){
-      var chunk=lines.slice(i*per,(i+1)*per).join('\n');
+    // Split script into paragraphs — each paragraph is one section
+    var paras=lead.ai_call_script.split(/\n\n+/).filter(function(p){return p.trim().length>10;});
+    if(!paras.length) paras=[lead.ai_call_script];
+    var secLabels=['Opening','Discovery','Company Pitch','$5k Deposit','Soft Close'];
+    var secColors=['#93c5fd','#fcd34d','#6ee7b7','#c4b5fd','#86efac'];
+    $('co-script').innerHTML=paras.map(function(para,i){
+      var label=secLabels[i]||('Part '+(i+1));
+      var color=secColors[i]||'#fff';
       var isOpen=i===0;
-      return '<div style="margin-bottom:12px">'
-        +'<div onclick="toggleScriptSec(this)" style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.08);color:'+sec.c+';padding:8px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;user-select:none">'
-        +sec.l
-        +'<span style="font-size:14px;transition:transform 0.2s">'+(isOpen?'▲':'▼')+'</span>'
+      var cleanPara=para.trim().replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return '<div style="margin-bottom:10px">'
+        +'<div onclick="toggleScriptSec(this)" style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.08);color:'+color+';padding:8px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;user-select:none">'
+        +label
+        +'<span>'+(isOpen?'&#9650;':'&#9660;')+'</span>'
         +'</div>'
-        +'<div style="font-size:15px;line-height:2.1;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:12px 4px;'+(isOpen?'':'display:none')+'">'+chunk+'</div>'
+        +'<div style="font-size:14px;line-height:2.0;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:14px 8px;'+(isOpen?'':'display:none')+'">'+cleanPara+'</div>'
         +'</div>';
     }).join('');
   }else{
@@ -6405,34 +6409,29 @@ async function addToGatekeeper(type,title,description,priority,recommendation){
 }
 
 
-async function detectCommitments(transcript){
-  if(!transcript||transcript.length<40) return;
-  try{
-    var r=await ai('Extract commitments from this construction sales call transcript. Return ONLY valid JSON with no extra text: {"commitments":[{"who":"feishy|client","what":"commitment in 8 words max"}],"checklist":{"costplus":false,"deposit":false,"permits":false,"timeline":false,"budget":false,"nextstep":false}}\nTRANSCRIPT: '+transcript.slice(-500),'Return ONLY valid JSON.',400);
-    var d=safeJSON(r);
-    if(!d) return;
-    if(d.checklist){
-      Object.keys(d.checklist).forEach(function(k){
-        if(d.checklist[k]){
-          var el=document.getElementById('chk-'+k);
-          if(el){el.style.background='rgba(134,239,172,0.2)';el.style.color='#86efac';}
-        }
-      });
-    }
-    if(d.commitments&&d.commitments.length){
-      var box=document.getElementById('co-commitments');
-      var list=document.getElementById('co-commit-list');
-      if(box&&list){
-        box.style.display='block';
-        d.commitments.forEach(function(c){
-          if(list.textContent.indexOf(c.what)<0){
-            list.innerHTML+='<div>'+(c.who==='feishy'?'You':'Client')+': '+c.what+'</div>';
-          }
-        });
-        if(ACTIVE_LEAD&&ACTIVE_LEAD.id) dbUpd('leads',ACTIVE_LEAD.id,{call_commitments:(list.innerText||'')});
+function detectCommitments(transcript){
+  if(!transcript||transcript.length<10) return;
+  var t=transcript.toLowerCase();
+  // Keyword-based checklist — instant, no AI needed, no credits used
+  var checks={
+    'costplus': ['cost plus','cost-plus','20%','20 percent','management fee','transparent','every invoice','you see every'],
+    'deposit':  ['5000','five thousand','deposit','$5k','five grand','applies toward','goes toward'],
+    'permits':  ['permit','permits','we handle','we pull','zoning','building department','inspections'],
+    'timeline': ['start','begin','timeline','schedule','months','weeks','spring','fall','summer','winter','next year','this year'],
+    'budget':   ['budget','price','cost','estimate','range','afford','invest','spend','square foot'],
+    'nextstep': ['send you','follow up','next step','proposal','meeting','visit','call back','schedule a']
+  };
+  Object.keys(checks).forEach(function(key){
+    var found=checks[key].some(function(word){return t.indexOf(word)>=0;});
+    if(found){
+      var el=document.getElementById('chk-'+key);
+      if(el&&el.style.color!=='#86efac'){
+        el.style.background='rgba(134,239,172,0.2)';
+        el.style.color='#86efac';
+        el.style.borderColor='rgba(134,239,172,0.4)';
       }
     }
-  }catch(e){}
+  });
 }
 
 
