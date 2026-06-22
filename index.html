@@ -1301,7 +1301,6 @@ async function leadDetail(id){
               ${lead.phone?`<a href="tel:${lead.phone}" class="btn btn-p btn-sm">📞 ${lead.phone}</a>`:''}
               ${lead.email?`<a href="mailto:${lead.email}" class="btn btn-g btn-sm">✉️ Email</a>`:''}
               <button class="btn btn-g btn-sm" onclick="closeModal('ld');openCallMode('${lead.id}')">🎙️ Live Call Mode</button>
-              <button class="btn btn-g btn-sm" onclick="showClientIntelligence('${lead.id}')">Intelligence</button>
               <button class="btn btn-g btn-sm" onclick="showClientIntelligence('${lead.id}')">🧠 Intelligence</button>
               <button class="btn btn-g btn-sm" onclick="closeModal('ld');showLeadForm(${JSON.stringify(lead).replace(/"/g,'&quot;')})">✏️ Edit</button>
               <button class="btn btn-g btn-sm" onclick="toJob('${lead.id}','${lead.client_name}',${lead.estimated_value||0})">🏗️ Convert to Job</button>
