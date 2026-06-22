@@ -1985,7 +1985,14 @@ async function openCallMode(leadId){
     var per=Math.ceil(lines.length/secs.length);
     $('co-script').innerHTML=secs.map(function(sec,i){
       var chunk=lines.slice(i*per,(i+1)*per).join('\n');
-      return '<div style="margin-bottom:24px"><div class="script-sec-lbl" style="background:rgba(255,255,255,0.08);color:'+sec.c+'">'+sec.l+'</div><div style="font-size:15px;line-height:2.1;color:rgba(255,255,255,0.92);white-space:pre-wrap">'+chunk+'</div></div>';
+      var isOpen=i===0;
+      return '<div style="margin-bottom:12px">'
+        +'<div onclick="toggleScriptSec(this)" style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.08);color:'+sec.c+';padding:8px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;user-select:none">'
+        +sec.l
+        +'<span style="font-size:14px;transition:transform 0.2s">'+(isOpen?'▲':'▼')+'</span>'
+        +'</div>'
+        +'<div style="font-size:15px;line-height:2.1;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:12px 4px;'+(isOpen?'':'display:none')+'">'+chunk+'</div>'
+        +'</div>';
     }).join('');
   }else{
     $('co-script').innerHTML='<div style="padding:20px;text-align:center"><div class="spin" style="margin:0 auto 12px"></div><div style="color:rgba(255,255,255,0.5);font-size:13px">Generating your script...</div></div>';
@@ -2034,6 +2041,7 @@ async function toggleRecording(){
           for(var i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';}
           if(final.trim()){
             liveWords.push(final.trim());
+            if(liveWords.length%6===0){detectCommitments(liveWords.join(' '));}
             var box=$('co-transcript');
             box.innerHTML=liveWords.slice(-6).map(function(t){return'<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'+t+'</div>';}).join('');
             box.scrollTop=box.scrollHeight;
@@ -6425,6 +6433,16 @@ async function detectCommitments(transcript){
       }
     }
   }catch(e){}
+}
+
+
+function toggleScriptSec(headerEl){
+  var body = headerEl.nextElementSibling;
+  var arrow = headerEl.querySelector('span');
+  if(!body) return;
+  var isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if(arrow) arrow.textContent = isOpen ? '▼' : '▲';
 }
 
 </script>
