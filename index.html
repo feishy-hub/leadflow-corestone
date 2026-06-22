@@ -1993,9 +1993,9 @@ async function openCallMode(leadId){
       return '<div style="margin-bottom:10px">'
         +'<div onclick="toggleScriptSec(this)" style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.08);color:'+color+';padding:8px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;user-select:none">'
         +label
-        +'<span>'+(isOpen?'&#9650;':'&#9660;')+'</span>'
+        +'<span data-sec-arrow>'+(isOpen?'&#9650;':'&#9660;')+'</span>'
         +'</div>'
-        +'<div style="font-size:14px;line-height:2.0;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:14px 8px;'+(isOpen?'':'display:none')+'">'+cleanPara+'</div>'
+        +'<div data-sec-body style="font-size:14px;line-height:2.0;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:14px 8px;'+(isOpen?'':'display:none')+'">'+cleanPara+'</div>'
         +'</div>';
     }).join('');
   }else{
@@ -6435,13 +6435,24 @@ function detectCommitments(transcript){
 }
 
 
+// Script section toggle — closes others, opens clicked
 function toggleScriptSec(headerEl){
-  var body = headerEl.nextElementSibling;
-  var arrow = headerEl.querySelector('span');
-  if(!body) return;
-  var isOpen = body.style.display !== 'none';
-  body.style.display = isOpen ? 'none' : 'block';
-  if(arrow) arrow.textContent = isOpen ? '▼' : '▲';
+  var parent = headerEl.parentElement.parentElement; // co-script div
+  var allSecs = parent.querySelectorAll('[data-sec-body]');
+  var allArrows = parent.querySelectorAll('[data-sec-arrow]');
+  var thisBody = headerEl.nextElementSibling;
+  var thisArrow = headerEl.querySelector('[data-sec-arrow]');
+  var isAlreadyOpen = thisBody && thisBody.style.display !== 'none';
+  // Close all
+  allSecs.forEach(function(b){ b.style.display='none'; });
+  allArrows.forEach(function(a){ a.textContent='&#9660;'; });
+  // Open this one (unless it was already open - toggle off)
+  if(!isAlreadyOpen && thisBody){
+    thisBody.style.display='block';
+    if(thisArrow) thisArrow.textContent='&#9650;';
+    // Scroll to top of section
+    thisBody.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
 }
 
 </script>
