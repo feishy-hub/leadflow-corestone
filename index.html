@@ -1980,37 +1980,71 @@ async function openCallMode(leadId){
   callSec=0;clearInterval(callTimer);
   callTimer=setInterval(function(){callSec++;var m=Math.floor(callSec/60),s=callSec%60;$('co-timer').textContent=m+':'+(s<10?'0':'')+s;},1000);
   if(lead.ai_call_script){
-    // Split script into paragraphs — each paragraph is one section
+    // Build script sections using DOM — no HTML entity issues
     var paras=lead.ai_call_script.split(/\n\n+/).filter(function(p){return p.trim().length>10;});
+    if(!paras.length) paras=lead.ai_call_script.split(/\n/).filter(function(p){return p.trim().length>20;});
     if(!paras.length) paras=[lead.ai_call_script];
     var secLabels=['Opening','Discovery','Company Pitch','$5k Deposit','Soft Close'];
     var secColors=['#93c5fd','#fcd34d','#6ee7b7','#c4b5fd','#86efac'];
-    $('co-script').innerHTML=paras.map(function(para,i){
+    var scriptEl=$('co-script');
+    scriptEl.innerHTML='';
+    paras.forEach(function(para,i){
       var label=secLabels[i]||('Part '+(i+1));
       var color=secColors[i]||'#fff';
       var isOpen=i===0;
-      var cleanPara=para.trim().replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return '<div style="margin-bottom:10px">'
-        +'<div onclick="toggleScriptSec(this)" style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.08);color:'+color+';padding:8px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;user-select:none">'
-        +label
-        +'<span data-sec-arrow>'+(isOpen?'&#9650;':'&#9660;')+'</span>'
-        +'</div>'
-        +'<div data-sec-body style="font-size:14px;line-height:2.0;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:14px 8px;'+(isOpen?'':'display:none')+'">'+cleanPara+'</div>'
-        +'</div>';
-    }).join('');
+      // Wrapper
+      var wrapper=document.createElement('div');
+      wrapper.style.marginBottom='10px';
+      // Header button
+      var hdr=document.createElement('div');
+      hdr.style.cssText='display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.08);color:'+color+';padding:8px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;user-select:none';
+      // Label text
+      var lbl=document.createElement('span');
+      lbl.textContent=label;
+      // Arrow
+      var arrow=document.createElement('span');
+      arrow.textContent=isOpen?'▲':'▼';
+      arrow.style.cssText='font-size:12px;margin-left:8px';
+      hdr.appendChild(lbl);
+      hdr.appendChild(arrow);
+      // Body
+      var body=document.createElement('div');
+      body.style.cssText='font-size:14px;line-height:2.0;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:14px 8px';
+      body.style.display=isOpen?'block':'none';
+      body.textContent=para.trim();
+      // Click handler
+      hdr.addEventListener('click',function(){
+        // Close all sections
+        var allBodies=scriptEl.querySelectorAll('.sec-body');
+        var allArrows=scriptEl.querySelectorAll('.sec-arrow');
+        allBodies.forEach(function(b){b.style.display='none';});
+        allArrows.forEach(function(a){a.textContent='▼';});
+        // Open this one
+        var isAlreadyOpen=body.style.display==='block';
+        if(!isAlreadyOpen){
+          body.style.display='block';
+          arrow.textContent='▲';
+        }
+      });
+      body.className='sec-body';
+      arrow.className='sec-arrow';
+      wrapper.appendChild(hdr);
+      wrapper.appendChild(body);
+      scriptEl.appendChild(wrapper);
+    });
   }else{
     $('co-script').innerHTML='<div style="padding:20px;text-align:center"><div class="spin" style="margin:0 auto 12px"></div><div style="color:rgba(255,255,255,0.5);font-size:13px">Generating your script...</div></div>';
     ai('Write a 200 word word-for-word phone script for Feishy at Corestone Developers calling '+lead.client_name+' about their '+(lead.job_type||'project')+'. Budget $'+(lead.estimated_value||'unknown')+'. Include: friendly opening, 2 discovery questions, pitch cost-plus transparency, mention $5k deposit goes toward construction, soft close. Plain text only.',
       'You are a construction sales coach. Return plain conversational script text only. No JSON, no headers.',1200)
     .then(function(txt){
       if(!txt){$('co-script').innerHTML='<div style="color:rgba(255,255,255,0.4);padding:20px;text-align:center">Could not load — use situation buttons</div>';return;}
-      var lines=txt.split('\n').filter(function(l){return l.trim();});
-      var secs=[{l:'Opening',c:'#93c5fd'},{l:'Discovery',c:'#fcd34d'},{l:'Pitch',c:'#6ee7b7'},{l:'Deposit',c:'#c4b5fd'},{l:'Close',c:'#86efac'}];
-      var per=Math.max(1,Math.ceil(lines.length/secs.length));
-      $('co-script').innerHTML=secs.map(function(sec,i){
-        var chunk=lines.slice(i*per,(i+1)*per).join('\n');
-        return '<div style="margin-bottom:20px"><div style="font-size:9px;font-weight:800;letter-spacing:0.1em;color:'+sec.c+';margin-bottom:5px;text-transform:uppercase">'+sec.l+'</div><div style="font-size:14px;line-height:2;color:rgba(255,255,255,0.92);white-space:pre-wrap">'+chunk+'</div></div>';
-      }).join('');
+      // Show full script as one readable block
+      var scriptEl=$('co-script');
+      scriptEl.innerHTML='';
+      var block=document.createElement('div');
+      block.style.cssText='font-size:14px;line-height:2.1;color:rgba(255,255,255,0.92);white-space:pre-wrap;padding:8px';
+      block.textContent=txt;
+      scriptEl.appendChild(block);
     }).catch(function(e){
       $('co-script').innerHTML='<div style="color:#ef4444;padding:20px;text-align:center">AI error: '+e.message+'<br><br>Use situation buttons on the right.</div>';
     });
