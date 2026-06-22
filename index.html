@@ -1385,7 +1385,7 @@ async function processEmailPaste(){
   }catch(e){$('email-result').innerHTML=`<div style="color:var(--red);font-size:12px;margin-top:7px">Could not read email: ${e.message}</div>`;}
 }
 
-async function createFromEmail(data){
+async async function createFromEmail(data){
   if(!data) data=window._emailLead;
   if(!data){toast('No lead data found','err');return;}
   toast('Creating lead...');
