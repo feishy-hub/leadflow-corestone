@@ -1981,9 +1981,11 @@ async function openCallMode(leadId){
   callTimer=setInterval(function(){callSec++;var m=Math.floor(callSec/60),s=callSec%60;$('co-timer').textContent=m+':'+(s<10?'0':'')+s;},1000);
   if(lead.ai_call_script){
     // Build script sections using DOM — no HTML entity issues
-    var paras=lead.ai_call_script.split(/\n\n+/).filter(function(p){return p.trim().length>10;});
-    if(!paras.length) paras=lead.ai_call_script.split(/\n/).filter(function(p){return p.trim().length>20;});
-    if(!paras.length) paras=[lead.ai_call_script];
+    // Handle both real newlines and escaped \n\n from localStorage
+    var rawScript=lead.ai_call_script.replace(/\\n/g,'\n');
+    var paras=rawScript.split(/\n\n+/).filter(function(p){return p.trim().length>10;});
+    if(paras.length<2) paras=rawScript.split(/\n/).filter(function(p){return p.trim().length>20;});
+    if(!paras.length) paras=[rawScript];
     var secLabels=['Opening','Discovery','Company Pitch','$5k Deposit','Soft Close'];
     var secColors=['#93c5fd','#fcd34d','#6ee7b7','#c4b5fd','#86efac'];
     var scriptEl=$('co-script');
@@ -6489,6 +6491,25 @@ function toggleScriptSec(headerEl){
   }
 }
 
+
+function nextScriptSec(){
+  var scriptEl=document.getElementById('co-script');
+  if(!scriptEl) return;
+  var bodies=scriptEl.querySelectorAll('.sec-body');
+  var arrows=scriptEl.querySelectorAll('.sec-arrow');
+  if(!bodies.length) return;
+  // Find currently open section
+  var currentIdx=-1;
+  bodies.forEach(function(b,i){ if(b.style.display!=='none') currentIdx=i; });
+  // Close all
+  bodies.forEach(function(b){ b.style.display='none'; });
+  arrows.forEach(function(a){ a.textContent='▼'; });
+  // Open next (wrap around)
+  var nextIdx=(currentIdx+1)%bodies.length;
+  bodies[nextIdx].style.display='block';
+  if(arrows[nextIdx]) arrows[nextIdx].textContent='▲';
+}
+
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
@@ -6518,7 +6539,10 @@ function toggleScriptSec(headerEl){
   <div style="display:grid;grid-template-columns:1fr 370px;flex:1;overflow:hidden;">
     <!-- LEFT: SCRIPT -->
     <div style="display:flex;flex-direction:column;overflow:hidden;border-right:1px solid rgba(255,255,255,0.07);">
-      <div style="padding:7px 14px;background:rgba(255,255,255,0.04);border-bottom:1px solid rgba(255,255,255,0.07);font-size:9px;font-weight:800;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.14em">YOUR SCRIPT</div>
+      <div style="padding:7px 14px;background:rgba(255,255,255,0.04);border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.14em">YOUR SCRIPT</span>
+        <button onclick="nextScriptSec()" style="background:rgba(255,255,255,0.1);color:#86efac;border:1px solid rgba(134,239,172,0.3);padding:3px 10px;border-radius:4px;font-size:10px;font-weight:800;cursor:pointer;font-family:inherit">NEXT ▶</button>
+      </div>
       <div id="co-script" style="flex:1;overflow-y:auto;padding:18px;font-size:15px;line-height:2.2;color:rgba(255,255,255,0.92);"><em style="color:rgba(255,255,255,0.3);font-size:13px">Preparing your script...</em></div>
       <div style="padding:7px 14px;border-top:1px solid rgba(255,255,255,0.07);background:rgba(0,0,0,0.2);flex-shrink:0;">
         <div style="font-size:9px;font-weight:800;color:rgba(255,255,255,0.3);text-transform:uppercase;margin-bottom:4px">Live Transcript</div>
