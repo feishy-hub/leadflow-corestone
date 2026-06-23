@@ -6526,6 +6526,164 @@ function nextScriptSec(){
   if(arrows[nextIdx]) arrows[nextIdx].textContent='▲';
 }
 
+
+// DEPOSIT RECEIVED — triggers all automations
+async function markDepositReceived(leadId){
+  if(!confirm('Mark $5,000 deposit as received?\n\nThis will automatically:\n- Send client survey\n- Send bids to all subs\n- Start permit process\n- Request electric upgrade')) return;
+  toast('Processing deposit — starting automations...','ok',5000);
+  try{
+    await dbUpd('leads',leadId,{deposit_received:true,deposit_date:new Date().toISOString(),stage:'proposal'});
+    var leads=await dbGet('leads','?id=eq.'+leadId)||[];
+    var lead=leads[0]; if(!lead) return;
+    await addToGatekeeper('survey','Send Client Survey: '+lead.client_name,'Deposit received. Send 3-tier selections survey — Exterior, Interior, Outdoor/Deck.','high','Client selects Standard/Premium/Luxury per category. Selections feed into all sub bid packages automatically.');
+    await autoSendBidsToAllSubs(lead);
+    await addToGatekeeper('electric_upgrade','Electric Upgrade Application: '+lead.client_name,'Submit electric service upgrade for: '+(lead.address||'address on file')+'. Must go out same day as deposit.','high','Draft letter to electric utility. Property address, owner name, planned scope. Takes 4-8 weeks — start immediately.');
+    await startPermitProcess(lead);
+    toast('Deposit recorded — 4 automations started. Check Gatekeeper.','ok',6000);
+    pgSales();
+  }catch(e){logErr('markDepositReceived',e);toast('Error: '+e.message,'err');}
+}
+
+async function autoSendBidsToAllSubs(lead){
+  try{
+    var subs=await dbGet('subcontractors','?order=company_name.asc')||[];
+    if(!subs.length){await addToGatekeeper('bid_send','Send Bid Packages: '+lead.client_name,'No subs in system. Add subs first.','high','Add subcontractors, then send bids.');return;}
+    var prefs=lead.client_preferences?JSON.parse(lead.client_preferences):[];
+    var prefText=prefs.length?prefs.join(', '):'See client survey';
+    var trades={};
+    subs.forEach(function(s){var tr=s.trade_specialty||'General';if(!trades[tr])trades[tr]=[];trades[tr].push(s);});
+    for(var trade in trades){
+      await dbIns('bids',{lead_id:lead.id,job_name:lead.client_name+' — '+(lead.job_type||'Construction'),address:lead.address||'TBD',scope:getBidScopeForTrade(trade,lead,prefText),trade:trade,subs:trades[trade].map(function(s){return s.company_name;}).join(', '),status:'sent',sent_date:new Date().toISOString(),client_preferences:prefText});
+    }
+    toast('Bid packages sent to '+Object.keys(trades).length+' trades','ok');
+  }catch(e){logErr('autoSendBidsToAllSubs',e);}
+}
+
+function getBidScopeForTrade(trade,lead,clientPrefs){
+  var t=trade.toLowerCase();
+  var base='Project: '+lead.client_name+' | Job: '+(lead.job_type||'Construction')+' | Address: '+(lead.address||'TBD')+'\nClient Specifications: '+clientPrefs+'\n\n';
+  if(t.includes('elec')) return base+'SCOPE: Full electrical rough and finish. Include panel upgrade if needed. Quote per sqft and per fixture.';
+  if(t.includes('plumb')) return base+'SCOPE: Full plumbing rough and finish. Include fixture count. Quote per fixture and labor rate.';
+  if(t.includes('hvac')||t.includes('heat')) return base+'SCOPE: Full HVAC system. Include equipment and labor. Specify energy efficiency ratings.';
+  if(t.includes('frame')||t.includes('carp')) return base+'SCOPE: Framing and carpentry. Quote labor per sqft. Materials separate.';
+  if(t.includes('tile')||t.includes('floor')) return base+'SCOPE: Tile and flooring. Client spec: '+clientPrefs+'. Labor per sqft, materials separate.';
+  if(t.includes('cabinet')||t.includes('kitchen')) return base+'SCOPE: Cabinets and millwork. Client preference: '+clientPrefs+'. Include installation. Quote with and without countertops.';
+  if(t.includes('paint')) return base+'SCOPE: Interior and exterior painting. Quote per sqft. Specify coats.';
+  if(t.includes('roof')) return base+'SCOPE: Roofing. Include tearoff if needed. Quote per sqft. Specify warranty.';
+  return base+'SCOPE: '+trade+' work as required. Break out labor and materials separately. Include timeline.';
+}
+
+async function startPermitProcess(lead){
+  try{
+    var addr=lead.address||'';
+    var county='Ulster';
+    if(/monticello|fallsburg|liberty|narrowsburg|sullivan/i.test(addr)) county='Sullivan';
+    if(/poughkeepsie|rhinebeck|beacon|dutchess/i.test(addr)) county='Dutchess';
+    var r=await ai('You are a permit expert for '+county+' County NY. Job: '+(lead.job_type||'Construction')+' at '+addr+'. Return ONLY valid JSON: {"permits_required":["permit1"],"documents_needed":["doc1"],"info_needed_from_client":["info1"],"timeline_estimate":"X weeks","special_flags":["flag1"],"notes":"requirements"}','Return ONLY valid JSON.',600);
+    var data=safeJSON(r)||{permits_required:['Building Permit'],documents_needed:['Survey','Drawings'],info_needed_from_client:['Lot dimensions'],timeline_estimate:'8-12 weeks',special_flags:[],notes:'Contact local building department'};
+    await dbUpd('leads',lead.id,{permit_data:JSON.stringify(data),permit_started:new Date().toISOString()});
+    var desc='PERMITS: '+data.permits_required.join(', ')+'\n\nDOCUMENTS NEEDED:\n'+data.documents_needed.map(function(d){return '\u2610 '+d;}).join('\n')+'\n\nNEED FROM CLIENT:\n'+data.info_needed_from_client.map(function(i){return '\u2610 '+i;}).join('\n')+'\n\nTIMELINE: '+data.timeline_estimate+(data.special_flags.length?'\n\nFLAGS: '+data.special_flags.join(', '):'')+'\n\n'+data.notes;
+    await addToGatekeeper('permit_start','Start Permit Process: '+lead.client_name,desc,'high','Gather all documents. Contact '+county+' County building dept. Timeline: '+data.timeline_estimate);
+  }catch(e){logErr('startPermitProcess',e);}
+}
+
+async function captureClientPreference(leadId,text){
+  if(!text||text.length<10) return;
+  try{
+    var keywords=['want','like','prefer','love','need','quartz','granite','marble','tile','hardwood','vinyl','carpet','white','black','gray','modern','traditional','farmhouse','custom'];
+    var lower=text.toLowerCase();
+    if(!keywords.some(function(k){return lower.indexOf(k)>=0;})) return;
+    var leads=await dbGet('leads','?id=eq.'+leadId)||[];
+    if(!leads.length) return;
+    var existing=leads[0].client_preferences?JSON.parse(leads[0].client_preferences):[];
+    var t=text.slice(0,100);
+    if(existing.indexOf(t)<0){existing.push(t);await dbUpd('leads',leadId,{client_preferences:JSON.stringify(existing)});}
+  }catch(e){}
+}
+
+function showClientSurvey(leadId){
+  var el=document.createElement('div');
+  el.className='ov';el.id='survey-ov';el.style.zIndex='1000';
+  var cats={
+    'Exterior':{'Siding':['Vinyl','Hardie Board','Stone/Stucco'],'Roof':['Asphalt','Metal Seam','Clay Tile'],'Front Door':['Fiberglass','Black Steel','Custom Wood'],'Windows':['Standard','Triple-Pane','Custom Clad']},
+    'Interior':{'Cabinets':['White Shaker','Flat Panel','Two-Tone Custom'],'Countertops':['Laminate','Quartz','Marble'],'Flooring':['LVP','Engineered Hardwood','Solid Hardwood'],'Appliances':['30" Standard','36" Pro','Wolf/Sub-Zero'],'Tile':['Ceramic 12x12','Porcelain 24x24','Natural Stone'],'Shower':['Basic','Rain Head','Rain+Body Jets']},
+    'Outdoor/Deck':{'Decking':['Treated Lumber','Composite','Exotic Hardwood'],'Railing':['Painted Wood','Cable Rail','Glass Panel'],'Lighting':['Basic Post','Low Voltage','Smart Integrated']}
+  };
+  var tiers=['Standard','Premium','Luxury'];
+  var colors=['var(--muted)','var(--teal)','#8b5cf6'];
+  var bgs=['rgba(0,0,0,0.04)','var(--teal-bg)','rgba(139,92,246,0.08)'];
+  var html='<div class="modal" style="max-width:760px;margin:auto"><div class="mh"><div class="mt">Client Selection Survey</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb" style="max-height:75vh;overflow-y:auto"><div style="font-size:13px;color:var(--muted);margin-bottom:16px">Client selects Standard/Premium/Luxury for each item. Selections automatically feed into sub bid packages.</div>';
+  Object.keys(cats).forEach(function(cat){
+    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid var(--teal)">'+cat+'</div>';
+    Object.keys(cats[cat]).forEach(function(item){
+      var opts=cats[cat][item];
+      html+='<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">'+item+'</div><div style="display:flex;gap:6px;flex-wrap:wrap">';
+      opts.forEach(function(opt,i){
+        html+='<label style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;background:'+bgs[i]+';border:1px solid '+colors[i]+';cursor:pointer;font-size:11px;font-weight:600;color:'+colors[i]+'">'
+          +'<input type="radio" name="sv_'+cat+'_'+item+'" value="'+tiers[i]+':'+opt+'" style="margin:0"> '+tiers[i]+'</label>';
+      });
+      html+='</div></div>';
+    });
+    html+='</div>';
+  });
+  html+='<div style="margin-top:8px"><div style="font-size:12px;font-weight:700;margin-bottom:5px">Special Requests / Client Notes:</div><textarea id="survey-notes" style="width:100%;min-height:60px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;box-sizing:border-box" placeholder="Accessibility needs, special preferences, budget focus areas..."></textarea></div>';
+  html+='<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-p" onclick="saveSurveyResults(\''+leadId+'\')" style="flex:1">Save & Feed to Bid Packages</button><button class="btn btn-g" onclick="closeOv(this)">Cancel</button></div></div></div>';
+  el.innerHTML=html;
+  document.body.appendChild(el);
+}
+
+async function saveSurveyResults(leadId){
+  var sels={};
+  document.querySelectorAll('#survey-ov input[type=radio]:checked').forEach(function(r){sels[r.name]=r.value;});
+  var notes=document.getElementById('survey-notes')?document.getElementById('survey-notes').value:'';
+  try{
+    await dbUpd('leads',leadId,{survey_selections:JSON.stringify(sels),survey_notes:notes,survey_completed:new Date().toISOString()});
+    var prefs=Object.values(sels);if(notes) prefs.push(notes);
+    await dbUpd('leads',leadId,{client_preferences:JSON.stringify(prefs)});
+    closeOv(document.getElementById('survey-ov'));
+    toast('Survey saved — selections feed into bid packages','ok');
+    var summary=Object.values(sels).slice(0,4).join(', ');
+    await addToGatekeeper('survey_complete','Survey Complete: '+leadId,summary+(notes?'\nNotes: '+notes:''),'normal','Review and confirm selections are in bid packages.');
+  }catch(e){logErr('saveSurveyResults',e);toast('Error: '+e.message,'err');}
+}
+
+async function showBidComparison(leadOrJobId){
+  var bids=await dbGet('bids','?lead_id=eq.'+leadOrJobId)||[];
+  if(!bids.length) bids=await dbGet('bids','?job_id=eq.'+leadOrJobId)||[];
+  if(!bids.length){toast('No bids yet','err');return;}
+  var byTrade={};
+  bids.forEach(function(b){var t=b.trade||'General';if(!byTrade[t])byTrade[t]=[];byTrade[t].push(b);});
+  var el=document.createElement('div');el.className='ov';el.id='bidcomp-ov';el.style.zIndex='1000';
+  var html='<div class="modal" style="max-width:860px;margin:auto"><div class="mh"><div class="mt">Bid Comparison — All Trades</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb" style="max-height:75vh;overflow-y:auto">';
+  Object.keys(byTrade).forEach(function(trade){
+    var tb=byTrade[trade].sort(function(a,b){return (a.amount||999999)-(b.amount||999999);});
+    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase;margin-bottom:8px">'+trade+'</div><table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:var(--teal);color:#fff"><th style="padding:7px;text-align:left">Sub</th><th style="padding:7px;text-align:right">Amount</th><th style="padding:7px;text-align:center">Status</th><th style="padding:7px">Notes</th><th style="padding:7px;text-align:center">Award</th></tr>';
+    tb.forEach(function(b,i){
+      var low=i===0&&b.amount>0;
+      html+='<tr style="border-bottom:1px solid var(--border)'+(low?';background:rgba(134,239,172,0.08)':'')+'"><td style="padding:7px;font-weight:600">'+(low?'⭐ ':'')+(b.subs||'TBD')+'</td><td style="padding:7px;text-align:right;font-weight:700;color:'+(low?'var(--green)':'inherit')+'">'+(b.amount?fmt$(b.amount):'Pending')+'</td><td style="padding:7px;text-align:center"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:'+(b.status==='received'?'var(--green-bg)':'rgba(0,0,0,0.05)')+'">'+(b.status||'sent')+'</span></td><td style="padding:7px;color:var(--muted)">'+(b.notes||'—')+'</td><td style="padding:7px;text-align:center">'+(b.awarded?'<span style="color:var(--green);font-weight:700;font-size:11px">Awarded</span>':'<button onclick="awardBid(\''+b.id+'\')" style="background:var(--teal);color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit">Award</button>')+'</td></tr>';
+    });
+    html+='</table></div>';
+  });
+  html+='<button onclick="aiRankAllBids(\''+leadOrJobId+'\')" class="btn btn-p" style="width:100%;margin-top:8px">🤖 AI Rank All Bids & Flag Overpriced</button></div></div>';
+  el.innerHTML=html;document.body.appendChild(el);
+}
+
+async function awardBid(bidId){
+  try{await dbUpd('bids',bidId,{awarded:true,awarded_date:new Date().toISOString()});await addToGatekeeper('bid_awarded','Bid Awarded — generate PO','Sub selected. Generate PO for awarded sub.','normal','Create PO for this sub.');toast('Bid awarded','ok');var ov=document.getElementById('bidcomp-ov');if(ov)ov.remove();}catch(e){toast(e.message,'err');}
+}
+
+async function aiRankAllBids(refId){
+  var bids=await dbGet('bids','?lead_id=eq.'+refId)||[];
+  if(!bids.length) bids=await dbGet('bids','?job_id=eq.'+refId)||[];
+  var subs=await dbGet('subcontractors','')||[];
+  var ctx=bids.map(function(b){var s=subs.find(function(x){return x.company_name===b.subs;});return b.trade+': '+(b.subs||'?')+' bid '+(b.amount?fmt$(b.amount):'pending')+(s&&s.notes?' | History: '+s.notes:'');}).join('\n');
+  toast('AI analyzing bids...','ok',5000);
+  try{
+    var r=await ai('Construction bid analyst for Corestone Developers Hudson Valley NY. Analyze bids and flag overpriced items based on Hudson Valley market rates.\n\nBIDS:\n'+ctx+'\n\nFor each trade: recommend winner, flag if overpriced (and by how much), note any concerns.','Be specific. Compare to Hudson Valley rates per trade.',1200);
+    if(r){await addToGatekeeper('bid_analysis','AI Bid Analysis',r,'high','Review and award bids based on AI recommendations.');toast('AI analysis in Gatekeeper','ok');}
+  }catch(e){logErr('aiRankAllBids',e);}
+}
+
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
