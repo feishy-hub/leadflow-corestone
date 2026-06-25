@@ -1,6 +1,6 @@
 # CORESTONE OS — COMPLETE MASTER DOCUMENT
 ## Everything. Every session. Every detail. Nothing lost.
-### Last updated: OS #5 — June 22, 2026
+### Last updated: OS #7 — June 25, 2026
 
 ---
 
@@ -580,7 +580,7 @@ Company name, contact, phone, email, license, trade specialties
 - Two-mode workflow: this chat for builds, Claude Code for bug fixes
 - Claude Code set up in VS Code
 
-### Session OS #5 (June 22 — today)
+### Session OS #5 (June 22)
 - VS Code + Claude Code fully operational
 - Git repo connected locally
 - Daily Briefing built and wired to dashboard
@@ -596,8 +596,100 @@ Company name, contact, phone, email, license, trade specialties
 - Script sections fixed (DOM-based, real paragraphs)
 - Keyword checklist detection (instant, no AI credits)
 
+### Session OS #6 (June 24)
+- **Documentation and audit only — no code implemented**
+- Full pipeline audit document produced (OS6_Pipeline_Audit.docx)
+- Complete execution package: 10 sections + 6 handoff files (SYSTEM_MAP.md, MASTER_INDEX.md, GAP_REPORT.md, WORKFLOW_MAP.md, NEXT_ACTIONS.md, FEATURE_REGISTER.csv)
+- Business Brain vision specification (OS6_BusinessBrain_Vision.docx)
+- Takeoff and estimating gap analysis (OS6_Takeoff_Gap_Analysis.docx)
+- Live call platform architecture review (OS6_CallCenter_Architecture.docx)
+- Knowledge propagation audit (OS6_KnowledgePropagation.docx)
+- **CRITICAL BUG: Gatekeeper approval is a silent no-op** — changes status only, executes nothing
+- **CRITICAL BUG: takeoffToEstimate() never saves to estimates table**
+- **CRITICAL BUG: calcEstTotal() applies 8% tax to labor, subs, permits — incorrect under NY law**
+- **CRITICAL BUG: callIntel object never written to database — lost on call end**
+- **CRITICAL BUG: post-call AI analysis extracts 12 arrays but saves only 4 — rest dumped as unqueryable text**
+- **CRITICAL BUG: survey_selections has zero downstream consumers — no module reads it**
+- **ARCHITECTURAL FINDING: System operates as separate disconnected tools, not one connected OS**
+- Feishy named most differentiated capabilities: Organizational Memory, Business Brain, Pattern Recognition, Scope Creep Detection, Subcontractor Intelligence
+- Takeoff gap confirmed: current AI produces general summaries, not structured takeoffs (cubic yards, rebar LF, outlet counts, window/door schedules)
+- Master doc was not updated after this session — corrected in OS #7
+
+### Session OS #7 (June 25)
+- Master document updated to reflect OS #6 audit findings
+- New Development Directive locked in permanently (see DEVELOPMENT DIRECTIVE section)
+- Architecture Review Board (ChatGPT) established as independent reviewer
+- Claude role defined as Implementation Team + architectural contributor
+- No code touched this session — foundation locked before building resumes
+
 ---
 
+
+---
+
+## DEVELOPMENT DIRECTIVE — LOCKED OS #7 (June 25, 2026)
+
+### Team Structure
+- **Owner / Vision:** Feishy Felberbaum
+- **Architecture Review Board:** ChatGPT (independent reviewer — challenges assumptions, identifies gaps, reviews before and after each phase)
+- **Implementation Team + Architectural Contributor:** Claude
+
+This structure is intentional. One AI does not both design and approve its own work.
+
+### Claude's Role Before Every Major Implementation
+Think across all roles simultaneously:
+- Senior Software Architect
+- Construction Company Owner
+- CTO
+- QA Director
+- Product Designer
+- Enterprise Software Engineer
+
+Before writing any code, ask:
+- What is missing?
+- What could break?
+- What should be reusable / a shared component?
+- What should become a system-wide standard?
+- What settings should exist?
+- What permissions should exist?
+- What audit trail should exist?
+- What AI opportunities exist?
+- What manual workflow should also exist?
+- What downstream modules are affected (Leads → Takeoff → Estimates → Bids → Contracts → Jobs → Purchasing → Bills → Invoices → Daily Logs → Reports → Business Brain → Gatekeeper)?
+
+If improvements are discovered — recommend them BEFORE implementation.
+
+### Development Standards (Non-Negotiable)
+- AI-first, manual always available
+- Single source of truth — data entered once, propagated everywhere
+- No dead buttons
+- No demo logic in production paths
+- No hidden broken workflows
+- Consistent UI, status handling, search, communication, approval, audit logging, permissions
+- Reusable components instead of duplicated code
+
+### Every Major Workflow Must Support Both
+1. Automatic AI workflow
+2. Manual workflow
+Manual changes update the same underlying data — AI and manual stay synchronized always.
+
+### Every Business Object Must Support
+Internal comments, team discussion, client communication, vendor/sub communication, AI notes, attachments, mentions, related tasks, history, settings
+
+### After Every Implementation Phase — Claude Returns
+1. What was implemented
+2. What files changed
+3. What architectural decisions were made
+4. What new recommendations were identified
+5. What concerns were discovered
+6. What should the Architecture Review Board review before continuing
+
+### The Master Document
+- This document is the single source of truth
+- Every implementation session must update it
+- Nothing exists in the software that is not documented here
+
+---
 ## UI STANDARDS — NEVER CHANGE THESE
 
 - **Theme:** Buildertrend-inspired light theme with teal navigation
@@ -646,6 +738,6 @@ Read the master doc. Tell me you are ready. Then audit the system and tell me wh
 
 ---
 
-*This document captures everything from OS #1 through OS #5.*
+*This document captures everything from OS #1 through OS #7.*
 *Nothing is lost. Everything is here.*
-*Last updated: June 22, 2026*
+*Last updated: June 25, 2026*
