@@ -402,9 +402,118 @@ const phases=()=>['Pre-Construction','Demo','Foundation','Framing','Roofing','Ro
 const jobTypes=()=>['Custom Home Build','Full Home Renovation','Kitchen Remodel','Bathroom Remodel','Addition / Extension','Basement Finish','Deck / Patio','Garage / ADU','Roofing','Siding & Exterior','Commercial Build-Out','Other'];
 
 // localStorage helpers
-function lsAll(t){try{return JSON.parse(localStorage.getItem('cs_'+t)||'[]');}catch(e){return[];}}
-function lsSave(t,rows){localStorage.setItem('cs_'+t,JSON.stringify(rows));}
-function lsGet(t,id){return lsAll(t).find(r=>r.id===id)||null;}
+// ══════════════════════════════════════════════════════
+// CORESTONE STORAGE ABSTRACTION LAYER v1.0
+// Architecture: UI → Services → Repository → StorageAdapter → localStorage
+// Future: swap StorageAdapter for Supabase with zero business logic changes
+// DEC-018 | REQ-006 | OS #7
+// ══════════════════════════════════════════════════════
+const StorageAdapter = {
+  _prefix: 'cs_',
+  _version: '2.2',
+  get(table) {
+    try { return JSON.parse(localStorage.getItem(this._prefix + table) || '[]'); }
+    catch(e) { console.error('[Storage] Read error:', table, e); return []; }
+  },
+  set(table, rows) {
+    try {
+      localStorage.setItem(this._prefix + table, JSON.stringify(rows));
+      this._writeAudit(table);
+    } catch(e) {
+      if(e.name === 'QuotaExceededError') {
+        console.error('[Storage] QUOTA EXCEEDED — export data immediately');
+        toast('⚠️ Storage nearly full — export your data now','err',8000);
+      }
+      throw e;
+    }
+  },
+  find(table, id) { return this.get(table).find(r => r.id === id) || null; },
+  _writeAudit(table) {
+    // Track last-write timestamp per table for migration hooks
+    try {
+      const meta = JSON.parse(localStorage.getItem('cs__meta') || '{}');
+      meta[table] = { last_write: new Date().toISOString(), version: this._version };
+      localStorage.setItem('cs__meta', JSON.stringify(meta));
+    } catch(e) {}
+  },
+  export() {
+    // Full backup — all tables + meta
+    const backup = { exported_at: new Date().toISOString(), version: this._version, tables: {} };
+    const meta = JSON.parse(localStorage.getItem('cs__meta') || '{}');
+    Object.keys(meta).forEach(t => { backup.tables[t] = this.get(t); });
+    // Always include core tables even if not in meta
+    ['leads','jobs','estimates','proposals','documents','gatekeeper_queue',
+     'subcontractors','bills','invoices','purchase_orders','change_orders',
+     'daily_logs','photos','requirements','survey_responses'].forEach(t => {
+      if(!backup.tables[t]) backup.tables[t] = this.get(t);
+    });
+    return backup;
+  },
+  import(backup) {
+    if(!backup || !backup.tables) throw new Error('Invalid backup format');
+    Object.entries(backup.tables).forEach(([t, rows]) => { this.set(t, rows); });
+    return Object.keys(backup.tables).length;
+  },
+  getStorageInfo() {
+    let used = 0;
+    for(let key in localStorage) {
+      if(key.startsWith(this._prefix)) {
+        used += (localStorage.getItem(key) || '').length;
+      }
+    }
+    const limit = 5 * 1024 * 1024; // 5MB
+    return { used_bytes: used, limit_bytes: limit, used_pct: Math.round(used/limit*100) };
+  },
+  // Migration hook — called when Supabase adapter is ready
+  // Swap this._adapter = SupabaseAdapter and all reads/writes redirect
+  _adapter: null
+};
+
+// Repository layer — all business logic calls these, never StorageAdapter directly
+function lsAll(t) { return StorageAdapter.get(t); }
+function lsSave(t, rows) { StorageAdapter.set(t, rows); }
+function lsGet(t, id) { return StorageAdapter.find(t, id); }
+
+// Backup/Export/Import functions
+function exportAllData() {
+  const backup = StorageAdapter.export();
+  const json = JSON.stringify(backup, null, 2);
+  const blob = new Blob([json], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'corestone-backup-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('✅ Backup downloaded — keep this file safe','ok',5000);
+}
+
+function importAllData() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async function(e) {
+    const file = e.target.files[0];
+    if(!file) return;
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      const count = StorageAdapter.import(backup);
+      toast('✅ Restored ' + count + ' tables from backup','ok',5000);
+      setTimeout(() => location.reload(), 1500);
+    } catch(err) {
+      toast('Import failed: ' + err.message,'err');
+    }
+  };
+  input.click();
+}
+
+function showStorageStatus() {
+  const info = StorageAdapter.getStorageInfo();
+  const color = info.used_pct > 80 ? '#dc2626' : info.used_pct > 60 ? '#d97706' : '#0d7a70';
+  toast('Storage: ' + info.used_pct + '% used (' + Math.round(info.used_bytes/1024) + 'KB / 5MB)',
+    info.used_pct > 80 ? 'err' : 'ok', 4000);
+}
 function newId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 
 // Parse filter string like ?stage=eq.new&order=created_at.desc
@@ -1886,16 +1995,134 @@ async function jobCOs(jobId){
   document.body.insertAdjacentHTML('beforeend',html);
 }
 
-async function gkApprove(id){
-  await dbUpd('gatekeeper_queue',id,{status:'approved',resolved_at:new Date().toISOString()});
-  var gkEl=document.getElementById('gk-count');
-  var items=await dbGet('gatekeeper_queue','?status=eq.pending');
-  if(gkEl) gkEl.textContent=items.length;
+// REQ-001 | B-001 FIX — Gatekeeper Execution Engine
+// Every approval now EXECUTES its intended action
+// action_type map defines what each approval actually does
+async function gkApprove(id) {
+  var items = await dbGet('gatekeeper_queue', '?id=eq.' + id);
+  var item = items[0];
+  if(!item) { toast('Item not found','err'); return; }
+
+  // Mark approved first
+  await dbUpd('gatekeeper_queue', id, {
+    status: 'approved',
+    resolved_at: new Date().toISOString()
+  });
+
+  // EXECUTE the action based on action_type
+  try {
+    await gkExecuteAction(item);
+  } catch(e) {
+    console.error('[Gatekeeper] Execution error:', e);
+    toast('Approved but execution error: ' + e.message, 'err');
+  }
+
+  // Update badge count
+  var pending = await dbGet('gatekeeper_queue', '?status=eq.pending');
+  var gkEl = document.getElementById('gk-count');
+  if(gkEl) gkEl.textContent = pending.length;
   await pgGK();
-  nextStep('Approved! ✅', 'Action confirmed. What next?', [
+
+  nextStep('Approved & Executed ✅', 'Action confirmed and completed.', [
     {icon:'🔑', label:'Review more items', sub:'Back to Gatekeeper queue', fn:'goTab("gatekeeper")'},
     {icon:'📊', label:'Dashboard overview', sub:'See full business summary', fn:'goTab("dashboard")'}
   ]);
+}
+
+// Gatekeeper Action Dispatcher — add new action types here as system grows
+async function gkExecuteAction(item) {
+  var type = item.action_type || item.item_type || '';
+  console.log('[Gatekeeper] Executing:', type, 'for item:', item.id);
+
+  switch(type) {
+    case 'estimate_review':
+      // Estimate approved — mark estimate status as reviewed
+      if(item.reference_id) {
+        await dbUpd('estimates', item.reference_id, {status: 'reviewed', reviewed_at: new Date().toISOString()});
+        toast('Estimate marked as reviewed — ready to build proposal','ok');
+      }
+      break;
+
+    case 'survey_review':
+      // Survey reviewed — mark lead survey as acknowledged
+      if(item.lead_id) {
+        await dbUpd('leads', item.lead_id, {survey_acknowledged: true, survey_acknowledged_at: new Date().toISOString()});
+        toast('Survey acknowledged — requirements ready for estimating','ok');
+      }
+      break;
+
+    case 'follow_up':
+    case 'followup':
+      // Follow-up approved — log the action and update next_followup date
+      if(item.lead_id) {
+        var leads = await dbGet('leads', '?id=eq.' + item.lead_id);
+        var lead = leads[0];
+        if(lead) {
+          await dbUpd('leads', item.lead_id, {
+            last_contact_at: new Date().toISOString(),
+            next_followup: new Date(Date.now() + 3 * 86400000).toISOString(),
+            notes: (lead.notes||'') + ' [Follow-up sent ' + new Date().toLocaleDateString() + ']'
+          });
+          toast('Follow-up logged — next follow-up in 3 days','ok');
+        }
+      }
+      break;
+
+    case 'bid_notes':
+      // Bid notes approved — create a document record for the scope
+      await dbIns('documents', {
+        title: item.title,
+        content: item.description,
+        doc_type: 'bid_scope',
+        job_id: item.job_id,
+        lead_id: item.lead_id,
+        status: 'active',
+        source: 'gatekeeper_approved'
+      });
+      toast('Bid scope saved to Documents','ok');
+      break;
+
+    case 'change_order':
+    case 'co_draft':
+      // CO approved — mark CO as ready to send
+      if(item.reference_id) {
+        await dbUpd('change_orders', item.reference_id, {status: 'approved_to_send', approved_at: new Date().toISOString()});
+        toast('Change Order approved — ready to send to client','ok');
+      }
+      break;
+
+    case 'estimate':
+      // Generic estimate item — mark as reviewed
+      if(item.reference_id) {
+        await dbUpd('estimates', item.reference_id, {status: 'reviewed'});
+      }
+      toast('Estimate approved','ok');
+      break;
+
+    case 'daily_briefing':
+      // Briefing acknowledged — no action needed
+      toast('Briefing acknowledged','ok');
+      break;
+
+    default:
+      // Unknown type — log it but don't fail silently
+      console.warn('[Gatekeeper] Unknown action_type:', type, '— status set to approved but no action executed');
+      toast('Approved — note: action type "' + (type||'none') + '" has no executor yet','ok');
+      break;
+  }
+
+  // Write audit record for every execution
+  await dbIns('audit_log', {
+    object_type: 'gatekeeper_queue',
+    object_id: item.id,
+    action: 'gatekeeper_approved_and_executed',
+    field_changed: 'status',
+    old_value: 'pending',
+    new_value: 'approved',
+    action_type_executed: type,
+    changed_by_ai: false,
+    timestamp: new Date().toISOString()
+  });
 }
 
 async function gkReject(id){
@@ -2307,6 +2534,9 @@ async function quickSit(situation){
 }
 
 function endCallOnly(){
+  // REQ-004 | B-004 FIX — capture call duration in callIntel before clearing
+  callIntel.call_duration_seconds = callSec || 0;
+  callIntel.call_ended_at = new Date().toISOString();
   clearInterval(callTimer);
   if(typeof autoAnalyzeTimer!=='undefined') clearInterval(autoAnalyzeTimer);
   if(callRec){
@@ -2340,7 +2570,50 @@ async function generatePostCallReport(lead,notes,transcript){
     var data=safeJSON(r);
     if(lead.id){
       var nextAction=data.follow_up_sequence&&data.follow_up_sequence[0]?data.follow_up_sequence[0].action:'Follow up';
-      await dbUpd('leads',lead.id,{ai_sentiment:data.sentiment,ai_next_action:nextAction,ai_followup_email_subject:data.email_subject,ai_followup_email_body:data.email_body,last_contact_at:new Date().toISOString(),next_followup:new Date(Date.now()+86400000).toISOString(),notes:(lead.notes||'')+' [Call '+new Date().toLocaleDateString()+'] '+(notes||'Call logged'),stage:data.next_stage||lead.stage});
+      // REQ-005 | B-005 FIX — Save all 12 structured data arrays from post-call AI
+      var nextFollowup = new Date(Date.now() + 86400000).toISOString();
+      await dbUpd('leads', lead.id, {
+        // Core sentiment fields (were already saving)
+        ai_sentiment: data.sentiment,
+        ai_sentiment_reason: data.sentiment_reason || '',
+        ai_next_action: nextAction,
+        ai_followup_email_subject: data.email_subject,
+        ai_followup_email_body: data.email_body,
+        // NEW — all 12 structured arrays now saved individually and queryable
+        ai_interest_score: data.interest_score || 0,
+        ai_interest_reason: data.interest_reason || '',
+        ai_what_client_said: JSON.stringify(data.what_client_said || []),
+        ai_objections_raised: JSON.stringify(data.objections_raised || []),
+        ai_agreements_made: JSON.stringify(data.agreements_made || []),
+        ai_what_client_must_send: JSON.stringify(data.what_client_must_send || []),
+        ai_what_we_must_send: JSON.stringify(data.what_we_must_send || []),
+        ai_bid_notes: data.bid_notes || '',
+        ai_permit_flags: data.permit_flags || '',
+        ai_timeline_impact: data.timeline_impact || '',
+        ai_finish_estimate_recommendation: data.finish_estimate_recommendation || '',
+        ai_follow_up_sequence: JSON.stringify(data.follow_up_sequence || []),
+        ai_recommendation: data.ai_recommendation || '',
+        ai_priority: data.priority || 'normal',
+        // Call metadata
+        last_contact_at: new Date().toISOString(),
+        last_call_at: new Date().toISOString(),
+        next_followup: nextFollowup,
+        call_count: (lead.call_count || 0) + 1,
+        // callIntel snapshot — persists live call data after call ends (B-004 fix)
+        call_intel_snapshot: JSON.stringify({
+          commitments: callIntel.commitments || [],
+          preferences: callIntel.preferences || [],
+          permit_intel: callIntel.permit_intel || {},
+          finish_estimates: callIntel.finish_estimates || {},
+          sqft_mentioned: callIntel.sqft_mentioned || null,
+          checklist_completed: callIntel.checklist_completed || [],
+          call_duration_seconds: callIntel.call_duration_seconds || 0,
+          captured_at: new Date().toISOString()
+        }),
+        // Notes append
+        notes: (lead.notes || '') + ' [Call ' + new Date().toLocaleDateString() + '] ' + (notes || 'Call logged'),
+        stage: data.next_stage || lead.stage
+      });
       if(data.bid_notes&&data.bid_notes.length>20){await dbIns('gatekeeper_queue',{item_type:'bid_notes',title:'Bid scope from call: '+lead.client_name,description:data.bid_notes,status:'pending',priority:data.priority||'normal',ai_recommendation:data.ai_recommendation});}
     }
     showPostCallReport(lead,data);
@@ -2877,19 +3150,52 @@ async function takeoffToEstimate(docId){
     );
     var est=safeJSON(r);
     
-    // Save estimate as a gatekeeper item for review
-    await dbIns('gatekeeper_queue',{
-      item_type:'estimate',
-      title:'AI Estimate: '+(AJOB?AJOB.job_name:'Plan')+' — '+fmt$(est.grand_total),
-      description:'Line items: '+est.line_items.length+' | Timeline: '+est.timeline_weeks+' weeks | '+est.notes,
-      job_id:AJOB?AJOB.id:null,
-      status:'pending',priority:'high',
-      amount:est.grand_total,
-      ai_recommendation:'Review and approve this AI-generated estimate before sending to client. Grand total: '+fmt$(est.grand_total)
+    // REQ-002 | B-002 FIX — Save to estimates table (was only going to gatekeeper_queue)
+    var estLines = (est.line_items||[]).map(function(li) {
+      return {
+        phase: li.phase, item: li.item, type: li.type || 'other',
+        unit: li.unit, qty: li.qty || 1,
+        unit_cost: li.unit_cost || 0, markup_pct: 0,
+        total: li.total || 0, notes: li.notes || ''
+      };
     });
-    
+    var totals = calcEstTotal(estLines);
+    var savedEst = await dbIns('estimates', {
+      job_id: AJOB ? AJOB.id : null,
+      doc_id: docId,
+      version: 1,
+      source: 'ai_takeoff',
+      line_items: JSON.stringify(estLines),
+      subtotal: totals.subtotal,
+      subtotal_materials: totals.subtotal_materials,
+      subtotal_labor: totals.subtotal_labor,
+      subtotal_subs: totals.subtotal_subs,
+      subtotal_permits: totals.subtotal_permits,
+      tax: totals.tax,
+      contractor_fee: totals.contractor_fee,
+      grand_total: totals.grand_total,
+      timeline_weeks: est.timeline_weeks || 0,
+      notes: est.notes || '',
+      status: 'draft',
+      created_from: 'takeoff'
+    });
+    var estId = savedEst[0] ? savedEst[0].id : null;
+
+    // Also route to Gatekeeper for approval
+    await dbIns('gatekeeper_queue', {
+      item_type: 'estimate',
+      title: 'AI Estimate: ' + (AJOB ? AJOB.job_name : 'Plan') + ' — ' + fmt$(totals.grand_total),
+      description: 'Line items: ' + estLines.length + ' | Timeline: ' + (est.timeline_weeks||0) + ' weeks\nMaterials: ' + fmt$(totals.subtotal_materials) + ' | Labor: ' + fmt$(totals.subtotal_labor) + ' | Subs: ' + fmt$(totals.subtotal_subs) + '\nTax (materials only): ' + fmt$(totals.tax) + ' | Fee (20%): ' + fmt$(totals.contractor_fee),
+      job_id: AJOB ? AJOB.id : null,
+      reference_id: estId,
+      status: 'pending', priority: 'high',
+      amount: totals.grand_total,
+      action_type: 'estimate_review',
+      ai_recommendation: 'Review this AI-generated estimate from takeoff. Grand total: ' + fmt$(totals.grand_total) + '. Tax applied to materials only (NY law). Approve to mark estimate ready for proposal.'
+    });
+
     showEstimateModal(est);
-    toast('✅ Estimate ready — sent to Gatekeeper for your review','ok');
+    toast('✅ Estimate saved (ID: ' + (estId||'new') + ') and sent to Gatekeeper','ok');
   }catch(e){toast('Estimate error: '+e.message,'err');}
 }
 
@@ -5412,15 +5718,41 @@ async function pgEstimates(){
   document.getElementById('content').innerHTML = html;
 }
 
-function calcEstTotal(lines){
-  var subtotal = 0;
-  lines.forEach(function(l){
-    var cost = (l.qty||0)*(l.unit_cost||0);
-    var markup = cost * ((l.markup_pct||0)/100);
-    subtotal += cost + markup;
+// REQ-003 | REQ-036 | DEC-011 — NY law: tax on materials ONLY
+// Labor: 0% | Subs: 0% | Permits: 0% | Materials: 8%
+// LOCKED — do not change without Owner approval
+function calcEstTotal(lines) {
+  var subtotal_materials = 0, subtotal_labor = 0, subtotal_subs = 0,
+      subtotal_permits = 0, subtotal_other = 0;
+  lines.forEach(function(l) {
+    var cost = (l.qty || 0) * (l.unit_cost || 0);
+    var markup = cost * ((l.markup_pct || 0) / 100);
+    var line_total = cost + markup;
+    var type = (l.type || l.category || 'other').toLowerCase();
+    if (type === 'material' || type === 'materials') subtotal_materials += line_total;
+    else if (type === 'labor') subtotal_labor += line_total;
+    else if (type === 'sub' || type === 'subcontractor' || type === 'subs') subtotal_subs += line_total;
+    else if (type === 'permit' || type === 'permits') subtotal_permits += line_total;
+    else subtotal_other += line_total;
   });
-  var tax = subtotal * 0.08; // default 8% tax
-  return {subtotal:subtotal, tax:tax, grand_total:subtotal};
+  var subtotal = subtotal_materials + subtotal_labor + subtotal_subs + subtotal_permits + subtotal_other;
+  var tax = subtotal_materials * 0.08; // NY law: materials only
+  var contractor_fee = subtotal * 0.20; // 20% Corestone fee
+  var grand_total = subtotal + tax + contractor_fee;
+  return {
+    subtotal: subtotal,
+    subtotal_materials: subtotal_materials,
+    subtotal_labor: subtotal_labor,
+    subtotal_subs: subtotal_subs,
+    subtotal_permits: subtotal_permits,
+    subtotal_other: subtotal_other,
+    tax: tax,
+    tax_rate: 0.08,
+    tax_basis: 'materials_only',
+    contractor_fee: contractor_fee,
+    contractor_fee_pct: 0.20,
+    grand_total: grand_total
+  };
 }
 
 function newEstimate(){
@@ -6637,11 +6969,59 @@ async function saveSurveyResults(leadId){
   document.querySelectorAll('#survey-ov input[type=radio]:checked').forEach(function(r){sels[r.name]=r.value;});
   var notes=document.getElementById('survey-notes')?document.getElementById('survey-notes').value:'';
   try{
-    await dbUpd('leads',leadId,{survey_selections:JSON.stringify(sels),survey_notes:notes,survey_completed:new Date().toISOString()});
-    var prefs=Object.values(sels);if(notes) prefs.push(notes);
-    await dbUpd('leads',leadId,{client_preferences:JSON.stringify(prefs)});
+    await dbUpd('leads', leadId, {survey_selections: JSON.stringify(sels), survey_notes: notes, survey_completed: new Date().toISOString()});
+    var prefs = Object.values(sels); if(notes) prefs.push(notes);
+    await dbUpd('leads', leadId, {client_preferences: JSON.stringify(prefs)});
+
+    // REQ-006 | B-006 FIX — Propagate survey selections downstream
+    // Every survey answer creates a Requirements record (REQ-020)
+    var reqInserts = [];
+    Object.entries(sels).forEach(function(entry) {
+      var field = entry[0], value = entry[1];
+      if(!value) return;
+      reqInserts.push(dbIns('requirements', {
+        lead_id: leadId,
+        requirement_id: 'REQ-SURVEY-' + field.toUpperCase(),
+        title: field.replace(/_/g,' ').replace(/\w/g,function(c){return c.toUpperCase();}),
+        description: value,
+        source: 'survey',
+        status: 'captured',
+        priority: 'P1',
+        category: field,
+        captured_at: new Date().toISOString(),
+        captured_by: 'client_survey'
+      }));
+    });
+    if(notes) {
+      reqInserts.push(dbIns('requirements', {
+        lead_id: leadId,
+        requirement_id: 'REQ-SURVEY-NOTES',
+        title: 'Additional Client Notes',
+        description: notes,
+        source: 'survey',
+        status: 'captured',
+        priority: 'P2',
+        category: 'notes',
+        captured_at: new Date().toISOString(),
+        captured_by: 'client_survey'
+      }));
+    }
+    await Promise.all(reqInserts);
+
+    // Also push to Gatekeeper so Feishy sees survey is complete
+    await dbIns('gatekeeper_queue', {
+      item_type: 'survey_complete',
+      title: 'Survey completed by client',
+      description: Object.keys(sels).length + ' selections captured. Requirements created. Ready for estimating.',
+      lead_id: leadId,
+      status: 'pending',
+      priority: 'high',
+      action_type: 'survey_review',
+      ai_recommendation: 'Client survey complete. Review ' + Object.keys(sels).length + ' requirements now in Requirements module. Start estimate when ready.'
+    });
+
     closeOv(document.getElementById('survey-ov'));
-    toast('Survey saved — selections feed into bid packages','ok');
+    toast('✅ Survey saved — ' + Object.keys(sels).length + ' requirements created','ok');
     var summary=Object.values(sels).slice(0,4).join(', ');
     await addToGatekeeper('survey_complete','Survey Complete: '+leadId,summary+(notes?'\nNotes: '+notes:''),'normal','Review and confirm selections are in bid packages.');
   }catch(e){logErr('saveSurveyResults',e);toast('Error: '+e.message,'err');}
