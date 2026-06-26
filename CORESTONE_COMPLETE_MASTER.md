@@ -627,6 +627,37 @@ Company name, contact, phone, email, license, trade specialties
 
 ---
 
+
+---
+
+## MANDATORY PRE-IMPLEMENTATION RULE — LOCKED OS #7
+
+Before ANY code is written, read ALL of the following:
+
+1. `CORESTONE_BLUEPRINT.md` — Master Architecture
+2. `CORESTONE_REQUIREMENTS.md` — Requirement Inventory
+3. `CORESTONE_DECISIONS.md` — Decision Log
+4. `CORESTONE_LEDGER.md` — Implementation Ledger
+5. `CORESTONE_OPEN.md` — Open Questions and Risks
+6. `CORESTONE_RELEASES.md` — Release Notes
+
+Then generate a **PHASE IMPACT REPORT** showing:
+- Goal
+- Requirements affected (REQ-IDs)
+- Modules affected
+- Objects affected
+- Workflow impact
+- Risk
+- Dependencies
+- Architecture changes
+- Open concerns
+- Recommendation
+
+**No implementation until Impact Report is reviewed and approved.**
+**Nothing may be implemented without a REQ-ID.**
+**Nothing may be removed silently.**
+
+---
 ## DEVELOPMENT DIRECTIVE — LOCKED OS #7 (June 25, 2026)
 
 ### Team Structure
