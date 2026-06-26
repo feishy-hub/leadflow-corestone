@@ -110,16 +110,29 @@ Breaking changes are flagged in red (marked BREAKING).
 
 ---
 
+
+### IMP-008 — OS #7 (June 25, 2026) — Foundation Fixes + Storage Abstraction
+| Field | Value |
+|---|---|
+| REQ-IDs | REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-006 |
+| Files Changed | index.html |
+| Database Changes | New tables written to: estimates (from takeoff), requirements (from survey), audit_log (from Gatekeeper), gatekeeper_queue (action_type field now required for execution) |
+| UI Changes | None visible — all internal fixes |
+| Workflow Changes | Gatekeeper approvals now execute real actions. Tax calculation is legally correct. Survey creates requirements. Call data persists. |
+| Breaking Changes | None |
+| Open Concerns | Gatekeeper action_type dispatcher has 7 action types. New action types must be added to gkExecuteAction() as system grows. |
+| Implemented By | Claude |
+
 ## KNOWN BROKEN IMPLEMENTATIONS
 
 | IMP-ID | What Was Built | What Is Broken | Fix Required |
 |---|---|---|---|
-| IMP-003 | Gatekeeper | Approval changes status only — nothing executes | REQ-001 |
-| IMP-004 | takeoffToEstimate() | Never saves to estimates table | REQ-002 |
-| IMP-002 | calcEstTotal() | Tax applied to labor, subs, permits | REQ-003 |
-| IMP-005 | callIntel | Never written to database | REQ-004 |
-| IMP-005 | Post-call save | Saves 4 of 12 arrays only | REQ-005 |
-| IMP-001 | survey_selections | No downstream consumers | REQ-006 |
+| IMP-008 | Gatekeeper | FIXED — execution engine wired | REQ-001 ✅ |
+| IMP-008 | takeoffToEstimate() | FIXED — saves to estimates table | REQ-002 ✅ |
+| IMP-008 | calcEstTotal() | FIXED — materials only, NY law | REQ-003 ✅ |
+| IMP-008 | callIntel | FIXED — snapshot saved on call end | REQ-004 ✅ |
+| IMP-008 | Post-call save | FIXED — all 12 arrays saved | REQ-005 ✅ |
+| IMP-008 | survey_selections | FIXED — creates Requirements records + Gatekeeper | REQ-006 ✅ |
 
 ---
 
