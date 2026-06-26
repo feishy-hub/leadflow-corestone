@@ -225,6 +225,8 @@ tr:hover td{background:#fafbfc}
         <div class="bt-nav-sub-item" id="btn-sales" onclick="goTab('sales')">Leads</div>
         <div class="bt-nav-sub-item" id="btn-proposals" onclick="goTab('proposals')">Proposals</div>
         <div class="bt-nav-sub-item" id="btn-bids" onclick="goTab('bids')">Bid Requests</div>
+        <div class="bt-nav-sub-item" id="btn-requirements" onclick="goTab('requirements')">📋 Requirements</div>
+        <div class="bt-nav-sub-item" id="btn-survey" onclick="goTab('survey')">📝 Surveys</div>
       </div>
     </div>
 
@@ -1194,7 +1196,7 @@ function globalSearch(q){
 function renderPage(tab){
   // Only show spinner for tabs that take time — not dashboard
   if(tab!=='dashboard') $('content').innerHTML='<div class="loading"><div class="spin"></div></div>';
-  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgPlans,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
+  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,requirements:pgRequirements,survey:pgSurveyMgr,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgPlans,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
 }
 
 // DASHBOARD
@@ -1451,6 +1453,8 @@ async function leadDetail(id){
               ${lead.email?`<a href="mailto:${lead.email}" class="btn btn-g btn-sm">✉️ Email</a>`:''}
               <button class="btn btn-g btn-sm" onclick="closeModal('ld');openCallMode('${lead.id}')">🎙️ Live Call Mode</button>
               <button class="btn btn-g btn-sm" onclick="showClientIntelligence('${lead.id}')">🧠 Intelligence</button>
+              <button class="btn btn-g btn-sm" onclick="viewLeadRequirements('${lead.id}')">📋 Requirements</button>
+              <button class="btn btn-g btn-sm" onclick="sendSurveyLink('${lead.id}')">📝 Survey</button>
               <button class="btn btn-g btn-sm" onclick="closeModal('ld');showLeadForm(${JSON.stringify(lead).replace(/"/g,'&quot;')})">✏️ Edit</button>
               <button class="btn btn-g btn-sm" onclick="toJob('${lead.id}','${lead.client_name}',${lead.estimated_value||0})">🏗️ Convert to Job</button>
               <button class="btn btn-d btn-sm" onclick="delLead('${lead.id}','${lead.client_name}')">🗑️ Delete</button>
@@ -7025,6 +7029,294 @@ async function saveSurveyResults(leadId){
     var summary=Object.values(sels).slice(0,4).join(', ');
     await addToGatekeeper('survey_complete','Survey Complete: '+leadId,summary+(notes?'\nNotes: '+notes:''),'normal','Review and confirm selections are in bid packages.');
   }catch(e){logErr('saveSurveyResults',e);toast('Error: '+e.message,'err');}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REQUIREMENTS ENGINE — pgRequirements (REQ-012, REQ-019 through REQ-024)
+// Shows all requirements across all leads/jobs — and embedded in lead view
+// OQ-012 decision: Both — own tab + embedded in Lead
+// ═══════════════════════════════════════════════════════════════
+async function pgRequirements() {
+  var reqs = await dbGet('requirements', '');
+  var leads = await dbGet('leads', '');
+  var leadMap = {};
+  leads.forEach(function(l) { leadMap[l.id] = l; });
+
+  var statusColors = {
+    captured: '#6b7280', reviewed: '#d97706', confirmed: '#0d7a70',
+    in_estimate: '#7c3aed', in_proposal: '#1d4ed8', implemented: '#16a34a',
+    change_order: '#dc2626'
+  };
+  var sourceIcons = { survey: '📝', call: '📞', manual: '✏️', email: '📧', log: '📋' };
+
+  var byStatus = {};
+  reqs.forEach(function(r) {
+    var s = r.status || 'captured';
+    if(!byStatus[s]) byStatus[s] = [];
+    byStatus[s].push(r);
+  });
+
+  var html = '<div style="padding:20px;max-width:1200px">';
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+  html += '<div><h2 style="margin:0;font-size:20px;font-weight:700">📋 Requirements Engine</h2>';
+  html += '<div style="font-size:12px;color:var(--muted);margin-top:3px">Every client requirement from every source — one place. ' + reqs.length + ' total.</div></div>';
+  html += '<div style="display:flex;gap:8px">';
+  html += '<button class="btn btn-p" onclick="addRequirementManual()" style="font-size:12px;padding:6px 14px">+ Add Requirement</button>';
+  html += '<button class="btn" onclick="goTab(&quot;requirements&quot;)" style="font-size:12px;padding:6px 14px">&#8635; Refresh</button>';
+  html += '</div></div>';
+
+  // Stats bar
+  var statuses = ['captured','reviewed','confirmed','in_estimate','in_proposal','implemented','change_order'];
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">';
+  statuses.forEach(function(s) {
+    var count = (byStatus[s]||[]).length;
+    if(!count) return;
+    html += '<div style="background:' + (statusColors[s]||'#6b7280') + '20;border:1px solid ' + (statusColors[s]||'#6b7280') + ';border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;color:' + (statusColors[s]||'#6b7280') + '">' + count + ' ' + s.replace(/_/g,' ').toUpperCase() + '</div>';
+  });
+  html += '</div>';
+
+  if(!reqs.length) {
+    html += '<div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">📋</div><div style="font-size:16px;font-weight:600;margin-bottom:8px">No requirements yet</div><div style="font-size:13px">Requirements are created from surveys, calls, and daily logs automatically.</div></div>';
+  } else {
+    // Group by lead
+    var byLead = {};
+    reqs.forEach(function(r) {
+      var key = r.lead_id || r.job_id || 'unassigned';
+      if(!byLead[key]) byLead[key] = [];
+      byLead[key].push(r);
+    });
+
+    Object.entries(byLead).forEach(function(entry) {
+      var leadId = entry[0], leadReqs = entry[1];
+      var lead = leadMap[leadId];
+      var clientName = lead ? lead.client_name : 'Unassigned';
+
+      html += '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;margin-bottom:16px;overflow:hidden">';
+      html += '<div style="background:var(--teal-bg);padding:10px 16px;display:flex;align-items:center;justify-content:space-between">';
+      html += '<div style="font-weight:700;font-size:13px;color:var(--teal)">' + clientName;
+      if(lead) html += ' <span style="font-weight:400;color:var(--muted);font-size:11px">— ' + (lead.job_type||'') + ' | ' + (lead.address||'') + '</span>';
+      html += '</div>';
+      html += '<div style="font-size:11px;color:var(--muted)">' + leadReqs.length + ' requirements</div>';
+      html += '</div>';
+
+      html += '<div style="padding:12px 16px">';
+      leadReqs.forEach(function(r) {
+        var sc = statusColors[r.status] || '#6b7280';
+        var si = sourceIcons[r.source] || '📌';
+        html += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="editRequirement(&quot;' + r.id + '&quot;)">';
+        html += '<div style="font-size:16px;margin-top:1px">' + si + '</div>';
+        html += '<div style="flex:1">';
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">';
+        html += '<span style="font-weight:700;font-size:12px">' + (r.title||r.category||'Requirement') + '</span>';
+        html += '<span style="background:' + sc + '20;color:' + sc + ';border:1px solid ' + sc + ';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">' + (r.status||'captured').replace(/_/g,' ').toUpperCase() + '</span>';
+        html += '<span style="font-size:10px;color:var(--muted)">' + (r.priority||'') + '</span>';
+        html += '</div>';
+        html += '<div style="font-size:12px;color:var(--muted)">' + (r.description||'') + '</div>';
+        if(r.captured_at) html += '<div style="font-size:10px;color:var(--muted);margin-top:3px">Captured: ' + new Date(r.captured_at).toLocaleDateString() + ' via ' + (r.source||'manual') + '</div>';
+        html += '</div>';
+        html += '<select onchange="updateReqStatus(&quot;' + r.id + '&quot;,this.value)" style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:#fff" onclick="event.stopPropagation()">';
+        ['captured','reviewed','confirmed','in_estimate','in_proposal','implemented','change_order'].forEach(function(s) {
+          html += '<option value="' + s + '"' + (r.status===s?' selected':'') + '>' + s.replace(/_/g,' ') + '</option>';
+        });
+        html += '</select>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    });
+  }
+
+  html += '</div>';
+  document.getElementById('content').innerHTML = html;
+}
+
+async function updateReqStatus(reqId, newStatus) {
+  await dbUpd('requirements', reqId, { status: newStatus, updated_at: new Date().toISOString() });
+  await dbIns('audit_log', { object_type: 'requirements', object_id: reqId, action: 'status_changed', new_value: newStatus, timestamp: new Date().toISOString() });
+  toast('Requirement updated → ' + newStatus.replace(/_/g,' '),'ok');
+}
+
+function addRequirementManual() {
+  var leads = dbGet('leads','').then(function(leads) {
+    var opts = leads.map(function(l) { return '<option value="' + l.id + '">' + l.client_name + ' — ' + (l.job_type||'') + '</option>'; }).join('');
+    var el = document.createElement('div');
+    el.className = 'ov'; el.id = 'req-add-ov'; el.style.zIndex = '1001';
+    el.innerHTML = '<div class="modal" style="max-width:520px"><div class="mh"><div class="mt">Add Requirement</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb">' +
+      '<div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700">Client / Lead</label><select id="req-lead-sel" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px"><option value="">— Unassigned —</option>' + opts + '</select></div>' +
+      '<div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700">Title</label><input id="req-title" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box" placeholder="e.g. Double-hung windows"></div>' +
+      '<div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700">Description</label><textarea id="req-desc" style="width:100%;min-height:60px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box" placeholder="Full detail of the requirement..."></textarea></div>' +
+      '<div style="display:flex;gap:10px;margin-bottom:10px">' +
+      '<div style="flex:1"><label style="font-size:12px;font-weight:700">Category</label><input id="req-cat" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box" placeholder="windows, flooring, etc"></div>' +
+      '<div style="flex:1"><label style="font-size:12px;font-weight:700">Priority</label><select id="req-pri" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px"><option value="P1">P1 — Must Have</option><option value="P2">P2 — Should Have</option><option value="P3">P3 — Nice to Have</option></select></div>' +
+      '</div>' +
+      '<button class="btn btn-p" style="width:100%" onclick="saveManualRequirement()">Save Requirement</button>' +
+      '</div></div>';
+    document.body.appendChild(el);
+  });
+}
+
+async function saveManualRequirement() {
+  var leadId = document.getElementById('req-lead-sel').value;
+  var title = document.getElementById('req-title').value.trim();
+  var desc = document.getElementById('req-desc').value.trim();
+  var cat = document.getElementById('req-cat').value.trim();
+  var pri = document.getElementById('req-pri').value;
+  if(!title) { toast('Title required','err'); return; }
+  await dbIns('requirements', {
+    lead_id: leadId || null,
+    title: title, description: desc, category: cat,
+    source: 'manual', status: 'captured', priority: pri,
+    captured_at: new Date().toISOString(), captured_by: 'owner_manual'
+  });
+  closeOv(document.getElementById('req-add-ov'));
+  toast('✅ Requirement saved','ok');
+  await pgRequirements();
+}
+
+async function editRequirement(reqId) {
+  var reqs = await dbGet('requirements', '?id=eq.' + reqId);
+  var r = reqs[0]; if(!r) return;
+  // Simple inline status update — full edit modal can be Phase 1.2
+  toast('Use the status dropdown to update. Full edit coming in Phase 1.2.','ok', 3000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SURVEY MANAGER — pgSurveyMgr (REQ-013 through REQ-018)
+// Manage all surveys: send, track, view responses
+// OQ-013 decision: Magic Link (now) + Portal login (Phase 2)
+// ═══════════════════════════════════════════════════════════════
+async function pgSurveyMgr() {
+  var leads = await dbGet('leads', '');
+  var surveyed = leads.filter(function(l) { return l.survey_completed; });
+  var pending = leads.filter(function(l) { return l.deposit_status && !l.survey_completed; });
+  var unsent = leads.filter(function(l) { return !l.deposit_status && !l.survey_completed; });
+
+  var html = '<div style="padding:20px;max-width:1100px">';
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+  html += '<div><h2 style="margin:0;font-size:20px;font-weight:700">📝 Survey Manager</h2>';
+  html += '<div style="font-size:12px;color:var(--muted);margin-top:3px">Track and send client surveys. Survey triggers on deposit. Magic Link — no login required.</div></div>';
+  html += '</div>';
+
+  // Stats
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">';
+  var stats = [
+    { label: 'Completed', count: surveyed.length, color: '#0d7a70', icon: '✅' },
+    { label: 'Deposit Paid — Survey Pending', count: pending.length, color: '#d97706', icon: '⏳' },
+    { label: 'No Deposit Yet', count: unsent.length, color: '#6b7280', icon: '⭕' },
+  ];
+  stats.forEach(function(s) {
+    html += '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">';
+    html += '<div style="font-size:28px;margin-bottom:4px">' + s.icon + '</div>';
+    html += '<div style="font-size:24px;font-weight:800;color:' + s.color + '">' + s.count + '</div>';
+    html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + s.label + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  // Pending surveys — action needed
+  if(pending.length) {
+    html += '<div style="margin-bottom:20px"><div style="font-size:13px;font-weight:700;color:var(--teal);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">⏳ Ready to Send</div>';
+    pending.forEach(function(l) {
+      html += '<div style="background:#fff;border:1px solid #d97706;border-radius:8px;padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">';
+      html += '<div><div style="font-weight:700;font-size:13px">' + l.client_name + '</div>';
+      html += '<div style="font-size:11px;color:var(--muted)">' + (l.job_type||'') + ' | ' + (l.address||'') + ' | Deposit: ✅</div></div>';
+      html += '<div style="display:flex;gap:8px">';
+      html += '<button class="btn btn-p" onclick="sendSurveyLink(&quot;' + l.id + '&quot;)" style="font-size:12px;padding:6px 14px">📧 Send Survey</button>';
+      html += '<button class="btn" onclick="showClientSurvey(&quot;' + l.id + '&quot;)" style="font-size:12px;padding:6px 14px">👁 Preview</button>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  // Completed surveys
+  if(surveyed.length) {
+    html += '<div style="margin-bottom:20px"><div style="font-size:13px;font-weight:700;color:var(--teal);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">✅ Completed Surveys</div>';
+    surveyed.forEach(function(l) {
+      var selCount = 0;
+      try { selCount = Object.keys(JSON.parse(l.survey_selections||'{}')).length; } catch(e){}
+      html += '<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">';
+      html += '<div><div style="font-weight:700;font-size:13px">' + l.client_name + '</div>';
+      html += '<div style="font-size:11px;color:var(--muted)">Completed: ' + new Date(l.survey_completed).toLocaleDateString() + ' | ' + selCount + ' selections | ' + (l.survey_notes?'Notes: yes':'No notes') + '</div></div>';
+      html += '<div style="display:flex;gap:8px">';
+      html += '<button class="btn" onclick="viewSurveyResults(&quot;' + l.id + '&quot;)" style="font-size:12px;padding:6px 14px">📋 View Results</button>';
+      html += '<button class="btn" onclick="viewLeadRequirements(&quot;' + l.id + '&quot;)" style="font-size:12px;padding:6px 14px">📌 Requirements</button>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  if(!leads.length) {
+    html += '<div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">📝</div><div style="font-size:15px;font-weight:600">No leads yet</div><div style="font-size:12px;margin-top:6px">Surveys are triggered automatically when a lead pays the $5,000 deposit.</div></div>';
+  }
+
+  html += '</div>';
+  document.getElementById('content').innerHTML = html;
+}
+
+// Send survey via Magic Link (REQ-015)
+async function sendSurveyLink(leadId) {
+  var leads = await dbGet('leads', '?id=eq.' + leadId);
+  var lead = leads[0]; if(!lead) return;
+  // Generate Magic Link token
+  var token = 'srv_' + leadId + '_' + Date.now().toString(36);
+  await dbUpd('leads', leadId, { survey_token: token, survey_sent_at: new Date().toISOString() });
+  // In production this would send via email/n8n — for now show the link
+  var link = window.location.origin + '?survey=' + token;
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'survey-link-ov'; el.style.zIndex = '1001';
+  el.innerHTML = '<div class="modal" style="max-width:520px"><div class="mh"><div class="mt">Survey Link — ' + lead.client_name + '</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb">' +
+    '<div style="background:var(--teal-bg);border:1px solid var(--teal);border-radius:8px;padding:14px;margin-bottom:14px">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:6px">MAGIC LINK — No login required</div>' +
+    '<div style="font-size:12px;word-break:break-all;background:#fff;padding:8px;border-radius:5px;border:1px solid var(--border)">' + link + '</div></div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">📧 Share this link with ' + lead.client_name + ' by text or email. They open it and complete the survey — no account needed.<br><br>When complete, requirements auto-create and Gatekeeper notifies you.</div>' +
+    '<div style="display:flex;gap:8px">' +
+    '<button class="btn btn-p" style="flex:1" onclick="navigator.clipboard.writeText(&quot;' + link + '&quot;).then(function(){toast(\'Link copied!\',\'ok\');})">📋 Copy Link</button>' +
+    '<button class="btn" style="flex:1" onclick="showClientSurvey(&quot;' + leadId + '&quot;)">👁 Open Survey</button>' +
+    '</div></div></div>';
+  document.body.appendChild(el);
+  await addToGatekeeper('survey_sent', 'Survey sent: ' + lead.client_name, 'Magic Link survey sent. Awaiting completion.', 'normal', 'Follow up if not completed in 48 hours.');
+  toast('Survey link ready — copy and send to client','ok');
+}
+
+async function viewSurveyResults(leadId) {
+  var leads = await dbGet('leads', '?id=eq.' + leadId);
+  var lead = leads[0]; if(!lead) return;
+  var sels = {}; try { sels = JSON.parse(lead.survey_selections||'{}'); } catch(e){}
+  var reqs = await dbGet('requirements', '?lead_id=eq.' + leadId);
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'survey-results-ov'; el.style.zIndex = '1001';
+  var rows = Object.entries(sels).map(function(e) {
+    return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">' + e[0].replace(/sv_/g,'').replace(/_/g,' ') + '</span><span style="font-weight:700">' + e[1] + '</span></div>';
+  }).join('');
+  el.innerHTML = '<div class="modal" style="max-width:560px"><div class="mh"><div class="mt">Survey Results — ' + lead.client_name + '</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb" style="max-height:70vh;overflow-y:auto">' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Completed: ' + new Date(lead.survey_completed).toLocaleDateString() + ' | ' + Object.keys(sels).length + ' selections | ' + reqs.length + ' requirements created</div>' +
+    (rows || '<div style="color:var(--muted);font-size:12px">No selections recorded</div>') +
+    (lead.survey_notes ? '<div style="margin-top:12px;background:var(--teal-bg);border-radius:6px;padding:10px"><div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:4px">CLIENT NOTES</div><div style="font-size:12px">' + lead.survey_notes + '</div></div>' : '') +
+    '<div style="margin-top:14px;display:flex;gap:8px"><button class="btn btn-p" style="flex:1" onclick="goTab(&quot;requirements&quot;)">📋 View Requirements</button></div>' +
+    '</div></div>';
+  document.body.appendChild(el);
+}
+
+async function viewLeadRequirements(leadId) {
+  var reqs = await dbGet('requirements', '?lead_id=eq.' + leadId);
+  var leads = await dbGet('leads', '?id=eq.' + leadId);
+  var lead = leads[0]; if(!lead) return;
+  var statusColors = { captured:'#6b7280', reviewed:'#d97706', confirmed:'#0d7a70', in_estimate:'#7c3aed', in_proposal:'#1d4ed8', implemented:'#16a34a', change_order:'#dc2626' };
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'lead-reqs-ov'; el.style.zIndex = '1001';
+  var rows = reqs.map(function(r) {
+    var sc = statusColors[r.status]||'#6b7280';
+    return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">' +
+      '<span style="font-weight:700;font-size:12px">' + (r.title||r.category||'Requirement') + '</span>' +
+      '<span style="background:' + sc + '20;color:' + sc + ';border:1px solid ' + sc + ';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">' + (r.status||'captured').replace(/_/g,' ').toUpperCase() + '</span>' +
+      '</div><div style="font-size:11px;color:var(--muted)">' + (r.description||'') + '</div></div>';
+  }).join('');
+  el.innerHTML = '<div class="modal" style="max-width:520px"><div class="mh"><div class="mt">Requirements — ' + lead.client_name + '</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb" style="max-height:70vh;overflow-y:auto">' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">' + reqs.length + ' requirements from all sources</div>' +
+    (rows || '<div style="color:var(--muted);font-size:12px">No requirements yet</div>') +
+    '<div style="margin-top:12px"><button class="btn btn-p" style="width:100%" onclick="addRequirementManual()">+ Add Requirement</button></div>' +
+    '</div></div>';
+  document.body.appendChild(el);
 }
 
 async function showBidComparison(leadOrJobId){
