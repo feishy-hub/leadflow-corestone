@@ -132,7 +132,26 @@ Versions are never deleted.
 
 ---
 
-## NEXT PLANNED RELEASE: 2.3.0 — Foundation Fixes
+### Version 2.3.0 — OS #7 (June 25, 2026) — Foundation Fixes
+**REQ-IDs:** REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-006
+
+**Features / Fixes:**
+- STORAGE ABSTRACTION LAYER: UI → Services → Repository → StorageAdapter → localStorage. No business logic touches localStorage directly. Migration hook ready for Supabase swap.
+- Export/Import/Backup functions added (exportAllData, importAllData, showStorageStatus)
+- B-001 FIXED: Gatekeeper is now an execution engine. gkApprove() dispatches to gkExecuteAction() which runs the actual action based on action_type. Audit record written on every execution.
+- B-002 FIXED: takeoffToEstimate() now saves complete estimate to estimates table with correct tax calculation before routing to Gatekeeper
+- B-003 FIXED: calcEstTotal() now applies 8% tax to materials only. Returns subtotal_materials, subtotal_labor, subtotal_subs, subtotal_permits, contractor_fee (20%), grand_total separately.
+- B-004 FIXED: callIntel.call_duration_seconds and call_ended_at captured in endCallOnly() before clearing. Full callIntel snapshot saved to lead on call end.
+- B-005 FIXED: generatePostCallReport() now saves all 12 structured data arrays individually: ai_interest_score, ai_what_client_said, ai_objections_raised, ai_agreements_made, ai_what_client_must_send, ai_what_we_must_send, ai_bid_notes, ai_permit_flags, ai_timeline_impact, ai_finish_estimate_recommendation, ai_follow_up_sequence, ai_recommendation
+- B-006 FIXED: Survey save now creates individual Requirements records for every selection and routes to Gatekeeper with action_type='survey_review'
+
+**Breaking Changes:** None — all fixes are additive
+
+**Known Issues:** None from this release. Storage abstraction layer uses same lsAll/lsSave interface — backward compatible.
+
+---
+
+## NEXT PLANNED RELEASE: 2.4.0 — Phase 1 Build
 **Target:** Next implementation session
 **Scope:**
 - Fix B-001: Gatekeeper execution
