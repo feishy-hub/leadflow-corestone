@@ -2108,6 +2108,32 @@ async function gkExecuteAction(item) {
       toast('Briefing acknowledged','ok');
       break;
 
+    case 'proposal_signed':
+      // Proposal signed — create job record
+      if(item.reference_id) {
+        var propData = await dbGet('proposals', '?id=eq.' + item.reference_id);
+        var signedProp = propData[0];
+        if(signedProp) {
+          await dbIns('jobs', {
+            lead_id: signedProp.lead_id,
+            proposal_id: item.reference_id,
+            client_name: signedProp.client_name,
+            address: signedProp.address,
+            job_type: signedProp.job_type,
+            contract_price: signedProp.total_price,
+            status: 'pre-construction',
+            current_phase: 'Pre-Construction',
+            progress_pct: 0,
+            budget_baseline: signedProp.total_price,
+            budget_used: 0,
+            created_from: 'signed_proposal'
+          });
+          await dbUpd('leads', signedProp.lead_id, { stage: 'signed' });
+          toast('✅ Job created from signed proposal — ' + signedProp.client_name, 'ok', 5000);
+        }
+      }
+      break;
+
     default:
       // Unknown type — log it but don't fail silently
       console.warn('[Gatekeeper] Unknown action_type:', type, '— status set to approved but no action executed');
@@ -5133,7 +5159,8 @@ setTimeout(async function(){
   }catch(e){console.warn('Startup AI check:',e);}
 },3000);
 async function pgProposals(){
-  var props=await dbGet('estimates','?status=in.(Sent,Viewed,Signed,Approved)&order=created_at.desc');
+  // REQ-041 — proposals now live in proposals table (not estimates)
+  var props=await dbGet('proposals','?order=created_at.desc');
   var jobs=await dbGet('jobs','?order=job_name.asc');
   var leads=await dbGet('leads','?order=created_at.desc');
   var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
@@ -5887,6 +5914,9 @@ async function openEstimate(id){
     '<button onclick="setEstStatus(\''+id+'\',\'draft\')" class="btn btn-g btn-sm" style="justify-content:flex-start">📝 Mark Draft</button>',
     '<button onclick="setEstStatus(\''+id+'\',\'sent\')" class="btn btn-g btn-sm" style="justify-content:flex-start">📧 Mark Sent</button>',
     '<button onclick="setEstStatus(\''+id+'\',\'approved\')" class="btn btn-green btn-sm" style="justify-content:flex-start">✅ Mark Approved</button>',
+    '<div style="border-top:2px solid var(--teal);margin:8px 0;padding-top:8px">',
+    '<button onclick="createProposalFromEstimate(\''+id+'\')" class="btn btn-p btn-sm" style="justify-content:flex-start;width:100%;background:var(--teal);font-weight:800">🚀 Create Proposal from Estimate</button>',
+    '</div>',
     '<button onclick="setEstStatus(\''+id+'\',\'declined\')" class="btn btn-red btn-sm" style="justify-content:flex-start">✕ Mark Declined</button>',
     '</div></div>',
     
@@ -6142,6 +6172,293 @@ function previewEstimate(estId){
   });
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ESTIMATE → PROPOSAL ONE-CLICK FLOW (REQ-039 | REQ-041 through REQ-044)
+// Creates a full 9-section proposal from an approved estimate
+// Data entered once — propagates to proposal automatically
+// ═══════════════════════════════════════════════════════════════
+async function createProposalFromEstimate(estId) {
+  var results = await dbGet('estimates', '?id=eq.' + estId);
+  var est = results[0];
+  if(!est) { toast('Estimate not found','err'); return; }
+
+  // Get lead/job/client data
+  var lead = null, job = null;
+  if(est.job_id) {
+    var jobs = await dbGet('jobs', '?id=eq.' + est.job_id);
+    job = jobs[0];
+  }
+  if(est.lead_id || (job && job.lead_id)) {
+    var lids = await dbGet('leads', '?id=eq.' + (est.lead_id || job.lead_id));
+    lead = lids[0];
+  }
+
+  var lines = est.line_items || [];
+  if(typeof lines === 'string') { try { lines = JSON.parse(lines); } catch(e){ lines=[]; }}
+  var totals = calcEstTotal(lines);
+  var clientName = (lead && lead.client_name) || (job && job.client_name) || est.client_name || 'Client';
+  var address = (lead && lead.address) || (job && job.address) || '';
+  var jobType = (lead && lead.job_type) || (job && job.job_type) || '';
+
+  // Get requirements for this lead to include in scope
+  var reqs = [];
+  if(lead) reqs = await dbGet('requirements', '?lead_id=eq.' + lead.id) || [];
+  var confirmedReqs = reqs.filter(function(r){ return r.status === 'confirmed' || r.status === 'captured'; });
+
+  // Build scope section from estimate lines + requirements
+  var scopeItems = lines.map(function(l){ return '• ' + (l.description||l.item||''); }).filter(Boolean);
+  confirmedReqs.forEach(function(r){
+    if(!scopeItems.some(function(s){ return s.includes(r.title); })) {
+      scopeItems.push('• ' + r.title + (r.description ? ': ' + r.description : ''));
+    }
+  });
+
+  var depositAmt = 5000;
+  var drawSchedule = [
+    { phase: 'Deposit', pct: Math.round(depositAmt/totals.grand_total*100), amount: depositAmt, trigger: 'Upon signing' },
+    { phase: 'Foundation Complete', pct: 25, amount: Math.round(totals.grand_total*0.25), trigger: 'Foundation/slab poured and inspected' },
+    { phase: 'Framing Complete', pct: 25, amount: Math.round(totals.grand_total*0.25), trigger: 'Framing rough-in complete' },
+    { phase: 'Mechanicals Rough-In', pct: 20, amount: Math.round(totals.grand_total*0.20), trigger: 'Plumbing, electrical, HVAC rough-in complete' },
+    { phase: 'Substantial Completion', pct: 20, amount: Math.round(totals.grand_total*0.20), trigger: '90% complete, punch list issued' },
+    { phase: 'Final Payment', pct: 10 - Math.round(depositAmt/totals.grand_total*100), amount: totals.grand_total - depositAmt - Math.round(totals.grand_total*0.90), trigger: 'Certificate of Occupancy issued, punch list complete' },
+  ];
+
+  var today = new Date();
+  var startDate = new Date(today.getTime() + 21*24*60*60*1000); // 3 weeks out
+  var endDate = new Date(startDate.getTime() + ((est.timeline_weeks||12)*7*24*60*60*1000));
+
+  // Build the 9-section proposal
+  var county = address.includes('Sullivan')||address.includes('Liberty')||address.includes('Monticello') ? 'Sullivan' : address.includes('Dutchess')||address.includes('Poughkeepsie') ? 'Dutchess' : 'Ulster';
+  var drawText = drawSchedule.map(function(d){ return '  ' + d.phase + ' (' + fmt$(d.amount) + '): ' + d.trigger; }).join('\n');
+  var priceBreakdown = [
+    totals.subtotal_labor > 0 ? 'Labor: ' + fmt$(totals.subtotal_labor) : '',
+    totals.subtotal_materials > 0 ? 'Materials: ' + fmt$(totals.subtotal_materials) : '',
+    totals.subtotal_subs > 0 ? 'Subcontractors: ' + fmt$(totals.subtotal_subs) : '',
+    totals.subtotal_permits > 0 ? 'Permits: ' + fmt$(totals.subtotal_permits) : '',
+    'NY Sales Tax (materials only, 8%): ' + fmt$(totals.tax),
+    'Contractor Fee (20%): ' + fmt$(totals.contractor_fee),
+    'Total: ' + fmt$(totals.grand_total)
+  ].filter(Boolean).map(function(l){ return '  ' + l; }).join('\n');
+
+  function sec(title, content) { return { title: title, content: content }; }
+
+  var sections = [
+    sec('1. SCOPE OF WORK',
+      'Corestone Developers agrees to perform the following work at ' + address + ':\n\n' +
+      scopeItems.join('\n') + '\n\nAll work shall be performed in a professional and workmanlike manner, in accordance with all applicable building codes and permit requirements for ' + county + ' County, New York.'),
+    sec('2. CONTRACT PRICE',
+      'The total contract price for all work described herein is ' + fmt$(totals.grand_total) + '.\n\nPrice Breakdown:\n' + priceBreakdown),
+    sec('3. PAYMENT SCHEDULE',
+      'Payments shall be made according to the following draw schedule:\n\n' + drawText + '\n\nPayments are due within 5 business days of invoice. A late fee of 1.5% per month applies to balances past due. Work may be suspended if payment is not received within 10 days of invoice date.'),
+    sec('4. PERMITS & APPROVALS',
+      'Corestone Developers will apply for and obtain all required permits. Permit fees are included in the contract price unless specifically noted otherwise.\n\nClient agrees to provide reasonable access to the property and sign any required owner authorization forms within 3 business days of request.\n\nProject timeline is contingent upon timely permit approval by the applicable municipality.'),
+    sec('5. SUBCONTRACTORS',
+      'Corestone Developers may engage licensed subcontractors to perform portions of the work. All subcontractors carry their own general liability insurance and workers compensation coverage.\n\nClient shall not direct, supervise, or give instructions to any subcontractor. All communication regarding the work shall go through Corestone Developers.'),
+    sec('6. CHANGES TO SCOPE',
+      'No change to the scope of work shall be valid unless documented in a written Change Order signed by both parties before the work is performed.\n\nVerbal authorizations are not binding. Client acknowledges that undocumented changes will not be performed and will not affect the contract price.\n\nChange Orders will include the description of change, price adjustment, and schedule impact.'),
+    sec('7. WARRANTY',
+      'Corestone Developers warrants all labor and materials for a period of one (1) year from the date of substantial completion.\n\nWarranty excludes: damage from misuse, neglect, or acts of nature; work performed by others; normal wear and tear; and items specifically noted as owner-furnished.\n\nManufacturer warranties on materials are passed through to the client and may exceed the labor warranty period.'),
+    sec('8. DISPUTE RESOLUTION',
+      'Any dispute arising from this contract shall first be subject to good-faith negotiation between the parties.\n\nIf unresolved within 30 days, disputes shall be submitted to binding arbitration in ' + county + ' County, New York, under the rules of the American Arbitration Association.\n\nThe prevailing party shall be entitled to recover reasonable attorney fees and costs.'),
+    sec('9. GENERAL CONDITIONS',
+      'This agreement constitutes the entire contract between the parties. No oral representations are binding.\n\nEstimated start date: ' + startDate.toLocaleDateString() + '\nEstimated completion: ' + endDate.toLocaleDateString() + ' (' + (est.timeline_weeks||12) + ' weeks)\n\nClient shall maintain homeowners insurance throughout the project. Corestone Developers carries general liability insurance of $1,000,000 per occurrence.\n\nThis contract is governed by the laws of the State of New York.')
+  ];
+
+  // Save the proposal
+  var proposal = await dbIns('proposals', {
+    estimate_id: estId,
+    job_id: est.job_id || null,
+    lead_id: est.lead_id || (lead ? lead.id : null),
+    client_name: clientName,
+    client_email: (lead && lead.email) || est.client_email || '',
+    address: address,
+    job_type: jobType,
+    sections: JSON.stringify(sections),
+    draw_schedule: JSON.stringify(drawSchedule),
+    total_price: totals.grand_total,
+    deposit_amount: depositAmt,
+    subtotal: totals.subtotal,
+    tax: totals.tax,
+    contractor_fee: totals.contractor_fee,
+    status: 'draft',
+    version: 1,
+    created_from: 'estimate',
+    requirements_count: confirmedReqs.length
+  });
+
+  var propId = proposal[0] ? proposal[0].id : null;
+
+  // Update estimate status to reflect proposal created
+  await dbUpd('estimates', estId, { status: 'proposal_created', proposal_id: propId });
+
+  // Audit log
+  await dbIns('audit_log', {
+    object_type: 'proposals', object_id: propId,
+    action: 'created_from_estimate',
+    new_value: 'draft',
+    changed_by_ai: false,
+    timestamp: new Date().toISOString()
+  });
+
+  toast('✅ Proposal created — ' + sections.length + ' sections, ' + fmt$(totals.grand_total), 'ok', 4000);
+
+  // Go directly to the proposal
+  if(propId) {
+    setTimeout(function(){ openProposal(propId); }, 500);
+  } else {
+    goTab('proposals');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROPOSAL VIEWER / SENDER (REQ-041 through REQ-046)
+// ═══════════════════════════════════════════════════════════════
+async function openProposal(propId) {
+  var props = await dbGet('proposals', '?id=eq.' + propId);
+  var prop = props[0];
+  if(!prop) { toast('Proposal not found','err'); return; }
+
+  var sections = []; try { sections = JSON.parse(prop.sections||'[]'); } catch(e){}
+  var draws = []; try { draws = JSON.parse(prop.draw_schedule||'[]'); } catch(e){}
+
+  var statusColor = prop.status==='signed'?'#16a34a':prop.status==='sent'?'#1d4ed8':prop.status==='viewed'?'#d97706':'#6b7280';
+
+  var html = '<div style="max-width:900px;margin:0 auto;padding:20px">';
+  // Header
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">';
+  html += '<button onclick="goTab(&quot;proposals&quot;)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px">← Proposals</button>';
+  html += '<div style="flex:1"><div style="font-size:20px;font-weight:800">Proposal — ' + prop.client_name + '</div>';
+  html += '<div style="font-size:12px;color:var(--muted)">' + (prop.address||'') + ' | ' + fmt$(prop.total_price) + ' | v' + (prop.version||1) + '</div></div>';
+  html += '<span style="font-size:11px;font-weight:700;text-transform:uppercase;color:' + statusColor + ';border:1.5px solid ' + statusColor + ';padding:4px 12px;border-radius:20px">' + (prop.status||'draft').toUpperCase() + '</span>';
+  html += '</div>';
+
+  // Action bar
+  html += '<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">';
+  html += '<button class="btn btn-p" onclick="sendProposalToClient(&quot;' + propId + '&quot;)">📧 Send to Client</button>';
+  html += '<button class="btn btn-g" onclick="previewProposal(&quot;' + propId + '&quot;)">👁 Preview</button>';
+  html += '<button class="btn btn-g" onclick="signProposal(&quot;' + propId + '&quot;)">✍️ Sign Now</button>';
+  html += '<button class="btn btn-g" onclick="reviseProposal(&quot;' + propId + '&quot;)">✏️ Revise</button>';
+  html += '</div>';
+
+  // 9 sections
+  html += '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px">';
+  sections.forEach(function(sec, i) {
+    html += '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden">';
+    html += '<div style="background:var(--navy);color:#fff;padding:10px 16px;font-size:13px;font-weight:700">' + sec.title + '</div>';
+    html += '<div style="padding:14px 16px;font-size:13px;line-height:1.7;white-space:pre-wrap;color:#374151">' + sec.content + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  // Draw schedule
+  html += '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px">';
+  html += '<div style="background:var(--teal);color:#fff;padding:10px 16px;font-size:13px;font-weight:700">PAYMENT DRAW SCHEDULE</div>';
+  html += '<div style="padding:14px">';
+  draws.forEach(function(d) {
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">';
+    html += '<div><div style="font-weight:700;font-size:13px">' + d.phase + '</div><div style="font-size:11px;color:var(--muted)">' + d.trigger + '</div></div>';
+    html += '<div style="font-weight:800;font-size:14px;color:var(--teal)">' + fmt$(d.amount) + '</div>';
+    html += '</div>';
+  });
+  html += '</div></div>';
+
+  // Signature block
+  if(prop.status === 'signed') {
+    html += '<div style="background:#f0fdf4;border:2px solid #16a34a;border-radius:10px;padding:16px;text-align:center">';
+    html += '<div style="font-size:20px;margin-bottom:6px">✅</div>';
+    html += '<div style="font-weight:800;color:#16a34a;margin-bottom:4px">SIGNED</div>';
+    html += '<div style="font-size:12px;color:var(--muted)">Signed by: ' + (prop.signatory_name||'') + ' on ' + (prop.signed_at ? new Date(prop.signed_at).toLocaleDateString() : '') + '</div>';
+    html += '</div>';
+  } else {
+    html += '<div style="background:var(--teal-bg);border:2px solid var(--teal);border-radius:10px;padding:20px">';
+    html += '<div style="font-size:13px;font-weight:700;color:var(--teal);margin-bottom:12px">CLIENT SIGNATURE</div>';
+    html += '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">By signing below, client agrees to all terms and conditions in this proposal.</div>';
+    html += '<input id="sig-name-' + propId + '" style="width:100%;padding:10px;border:2px solid var(--teal);border-radius:6px;font-size:14px;margin-bottom:10px;box-sizing:border-box;font-family:cursive" placeholder="Type full legal name to sign...">';
+    html += '<button class="btn btn-p" style="width:100%;padding:12px;font-size:14px;font-weight:800" onclick="executeSignature(&quot;' + propId + '&quot;)">✍️ I Agree — Sign This Proposal</button>';
+    html += '</div>';
+  }
+
+  html += '</div>';
+  document.getElementById('content').innerHTML = html;
+}
+
+async function executeSignature(propId) {
+  var nameEl = document.getElementById('sig-name-' + propId);
+  if(!nameEl || !nameEl.value.trim()) { toast('Please type your full name to sign','err'); return; }
+  var name = nameEl.value.trim();
+
+  await dbUpd('proposals', propId, {
+    status: 'signed',
+    signatory_name: name,
+    signed_at: new Date().toISOString(),
+    signatory_ip: 'captured'
+  });
+
+  // REQ-045 — signature triggers job creation via Gatekeeper
+  var props = await dbGet('proposals', '?id=eq.' + propId);
+  var prop = props[0];
+
+  await dbIns('gatekeeper_queue', {
+    item_type: 'proposal_signed',
+    title: 'Proposal Signed — ' + (prop.client_name||'Client'),
+    description: 'Client signed: ' + name + '. Total: ' + fmt$(prop.total_price||0) + '. Address: ' + (prop.address||'') + '. Create job and activate project?',
+    lead_id: prop.lead_id,
+    reference_id: propId,
+    status: 'pending', priority: 'high',
+    action_type: 'proposal_signed',
+    ai_recommendation: 'Proposal signed. Approve to create job, set budget baseline, and notify PM. Phase 1 complete.'
+  });
+
+  await dbIns('audit_log', {
+    object_type: 'proposals', object_id: propId,
+    action: 'signed', field_changed: 'status',
+    old_value: 'sent', new_value: 'signed',
+    new_value_detail: 'Signed by: ' + name,
+    changed_by_ai: false, timestamp: new Date().toISOString()
+  });
+
+  toast('✅ Proposal signed by ' + name + ' — Gatekeeper notified to create job', 'ok', 5000);
+  openProposal(propId);
+}
+
+async function sendProposalToClient(propId) {
+  var props = await dbGet('proposals', '?id=eq.' + propId);
+  var prop = props[0]; if(!prop) return;
+
+  var token = 'prop_' + propId + '_' + Date.now().toString(36);
+  await dbUpd('proposals', propId, {
+    status: 'sent', sent_at: new Date().toISOString(), magic_link_token: token
+  });
+
+  var link = window.location.origin + '?proposal=' + token;
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'prop-link-ov'; el.style.zIndex = '1001';
+  el.innerHTML = '<div class="modal" style="max-width:520px"><div class="mh"><div class="mt">Proposal Sent — ' + prop.client_name + '</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb">' +
+    '<div style="background:var(--teal-bg);border:1px solid var(--teal);border-radius:8px;padding:14px;margin-bottom:14px">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:6px">PROPOSAL MAGIC LINK</div>' +
+    '<div style="font-size:12px;word-break:break-all;background:#fff;padding:8px;border-radius:5px;border:1px solid var(--border)">' + link + '</div></div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">Send this link to ' + prop.client_name + '. They can review the full proposal and sign electronically — no login required.</div>' +
+    '<div style="display:flex;gap:8px">' +
+    '<button class="btn btn-p" style="flex:1" onclick="navigator.clipboard.writeText(&quot;' + link + '&quot;).then(function(){toast(\'Copied!\',\'ok\');})">📋 Copy Link</button>' +
+    '<button class="btn btn-g" style="flex:1" onclick="openProposal(&quot;' + propId + '&quot;)">👁 Open Proposal</button>' +
+    '</div></div></div>';
+  document.body.appendChild(el);
+
+  await addToGatekeeper('proposal_sent', 'Proposal sent: ' + prop.client_name, 'Magic Link sent. Awaiting client review and signature.', 'high', 'Follow up if not signed in 48 hours.');
+  toast('Proposal sent — awaiting client signature', 'ok');
+}
+
+async function reviseProposal(propId) {
+  var props = await dbGet('proposals', '?id=eq.' + propId);
+  var prop = props[0]; if(!prop) return;
+  // Increment version, reset to draft
+  await dbUpd('proposals', propId, { status: 'draft', version: (prop.version||1)+1, revised_at: new Date().toISOString() });
+  await dbIns('audit_log', { object_type:'proposals', object_id:propId, action:'revised', field_changed:'version', old_value:String(prop.version||1), new_value:String((prop.version||1)+1), timestamp:new Date().toISOString() });
+  toast('Proposal revised — now v' + ((prop.version||1)+1) + '. Edit and resend.', 'ok');
+  openProposal(propId);
+}
+
+// Add proposal_signed to Gatekeeper executor
 async function sendEstimate(estId){
   var results = await dbGet('estimates','?id=eq.'+estId);
   var est = results[0];
@@ -6434,7 +6751,150 @@ async function voiceCO(){
   micFillField('nco-desc','Describe the change order in detail');
   if($('co-form-wrap'))$('co-form-wrap').style.display='block';
 }
-async function pgEmails(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Emails</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
+// ═══════════════════════════════════════════════════════════════
+// EMAIL INTAKE ENGINE (REQ-012 — Phase 1)
+// Paste any inbound email — AI classifies and creates lead automatically
+// Future: Gmail OAuth → n8n → auto-intake (Phase 2)
+// ═══════════════════════════════════════════════════════════════
+async function pgEmails(){
+  var intakes = await dbGet('email_intakes','?order=created_at.desc') || [];
+  var html = '<div style="padding:20px;max-width:1000px">';
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+  html += '<div><h2 style="margin:0;font-size:20px;font-weight:700">📧 Email Intake</h2>';
+  html += '<div style="font-size:12px;color:var(--muted);margin-top:3px">Paste any inbound email — AI classifies and creates the right record automatically.</div></div>';
+  html += '</div>';
+
+  // Email paste zone
+  html += '<div style="background:#fff;border:2px dashed var(--teal);border-radius:12px;padding:20px;margin-bottom:20px">';
+  html += '<div style="font-size:13px;font-weight:700;color:var(--teal);margin-bottom:10px">📥 Paste Email Here</div>';
+  html += '<textarea id="email-paste" style="width:100%;min-height:140px;padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;box-sizing:border-box;resize:vertical" placeholder="Paste the full email here — Angi lead, supplier bill, client question, sub inquiry, anything..."></textarea>';
+  html += '<div style="display:flex;gap:8px;margin-top:10px">';
+  html += '<button class="btn btn-p" style="flex:1;font-weight:800" onclick="classifyAndProcessEmail()">🤖 Classify + Process Email</button>';
+  html += '<button class="btn btn-g" onclick="document.getElementById(&quot;email-paste&quot;).value=&quot;&quot;">Clear</button>';
+  html += '</div></div>';
+
+  // Classification guide
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px">';
+  var types = [
+    { icon:'🏠', label:'Angi / Lead', desc:'Creates new lead automatically', color:'#0d7a70' },
+    { icon:'🧾', label:'Supplier Bill', desc:'Creates bill record for approval', color:'#d97706' },
+    { icon:'💬', label:'Client Question', desc:'Routes to active job messages', color:'#1d4ed8' },
+    { icon:'👷', label:'Sub Inquiry', desc:'Creates sub onboarding record', color:'#7c3aed' },
+  ];
+  types.forEach(function(t) {
+    html += '<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center">';
+    html += '<div style="font-size:22px;margin-bottom:4px">' + t.icon + '</div>';
+    html += '<div style="font-size:12px;font-weight:700;color:' + t.color + '">' + t.label + '</div>';
+    html += '<div style="font-size:10px;color:var(--muted);margin-top:3px">' + t.desc + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  // Recent intakes
+  if(intakes.length) {
+    html += '<div style="font-size:13px;font-weight:700;color:var(--teal);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Recent Intakes</div>';
+    intakes.slice(0,10).forEach(function(e) {
+      var typeColor = e.classified_type==='lead'?'#0d7a70':e.classified_type==='bill'?'#d97706':e.classified_type==='client'?'#1d4ed8':'#7c3aed';
+      html += '<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">';
+      html += '<div><div style="font-weight:700;font-size:13px">' + (e.subject||'No subject') + '</div>';
+      html += '<div style="font-size:11px;color:var(--muted)">From: ' + (e.from_email||'unknown') + ' | ' + new Date(e.created_at).toLocaleDateString() + '</div></div>';
+      html += '<div style="display:flex;gap:6px;align-items:center">';
+      html += '<span style="background:' + typeColor + '20;color:' + typeColor + ';border:1px solid ' + typeColor + ';border-radius:4px;font-size:10px;font-weight:700;padding:2px 8px">' + (e.classified_type||'unknown').toUpperCase() + '</span>';
+      html += '<span style="font-size:10px;color:var(--muted)">' + (e.action_taken||'processed') + '</span>';
+      html += '</div></div>';
+    });
+  }
+
+  html += '</div>';
+  document.getElementById('content').innerHTML = html;
+}
+
+async function classifyAndProcessEmail() {
+  var emailText = document.getElementById('email-paste').value.trim();
+  if(!emailText) { toast('Paste an email first','err'); return; }
+  if(emailText.length < 20) { toast('Email too short to classify','err'); return; }
+
+  toast('AI classifying email...','ok',3000);
+
+  try {
+    var prompt = 'You are an AI email classifier for Corestone Developers, a residential construction company in NY. Classify this email and extract data.\n\nEMAIL:\n' + emailText.slice(0,3000) + '\n\nRespond ONLY with valid JSON (no markdown):\n{\n  "type": "lead|bill|client_message|sub_inquiry|other",\n  "confidence": 0-100,\n  "from_name": "...",\n  "from_email": "...",\n  "subject": "...",\n  "summary": "one sentence",\n  "action": "what to do",\n  "extracted": {\n    "client_name": "...",\n    "phone": "...",\n    "address": "...",\n    "job_type": "...",\n    "estimated_value": 0,\n    "timeline": "...",\n    "notes": "..."\n  }\n}';
+
+    var resp = await fetch('/api/claude', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ prompt: prompt })
+    });
+    var data = await resp.json();
+    var raw = (data.content||[]).map(function(b){return b.text||'';}).join('');
+    var clean = raw.replace(/```json|```/g,'').trim();
+    var result = JSON.parse(clean);
+
+    // Save intake record
+    var intake = await dbIns('email_intakes', {
+      raw_text: emailText.slice(0,5000),
+      from_email: result.from_email||'',
+      from_name: result.from_name||'',
+      subject: result.subject||'',
+      classified_type: result.type||'other',
+      confidence: result.confidence||0,
+      summary: result.summary||'',
+      action_taken: result.action||'',
+      extracted_data: JSON.stringify(result.extracted||{}),
+      created_at: new Date().toISOString()
+    });
+
+    var intakeId = intake[0] ? intake[0].id : null;
+
+    // Auto-execute based on type
+    if(result.type === 'lead' && result.confidence >= 70) {
+      var ext = result.extracted || {};
+      var newLead = await dbIns('leads', {
+        client_name: ext.client_name || result.from_name || 'Unknown',
+        phone: ext.phone || '',
+        email: result.from_email || '',
+        address: ext.address || '',
+        job_type: ext.job_type || 'General Construction',
+        estimated_value: ext.estimated_value || 0,
+        lead_source: 'email_intake',
+        timeline: ext.timeline || '',
+        notes: 'Auto-created from email intake.\n\n' + (ext.notes||'') + '\n\nOriginal email summary: ' + result.summary,
+        stage: 'new'
+      });
+      var leadId = newLead[0] ? newLead[0].id : null;
+
+      await dbIns('gatekeeper_queue', {
+        item_type: 'email_lead',
+        title: 'New Lead from Email: ' + (ext.client_name||result.from_name||'Unknown'),
+        description: result.summary + '\nAddress: ' + (ext.address||'unknown') + '\nJob type: ' + (ext.job_type||'unknown') + '\nEstimated value: ' + fmt$(ext.estimated_value||0),
+        lead_id: leadId,
+        reference_id: intakeId,
+        status: 'pending', priority: 'high',
+        action_type: 'email_lead_review',
+        ai_recommendation: 'Lead auto-created from email with ' + result.confidence + '% confidence. Review and call within 24 hours.'
+      });
+
+      toast('✅ Lead created: ' + (ext.client_name||'Unknown') + ' — routed to Gatekeeper', 'ok', 5000);
+    } else {
+      // Route to Gatekeeper for manual review
+      await dbIns('gatekeeper_queue', {
+        item_type: 'email_intake',
+        title: 'Email needs review: ' + (result.subject||'No subject'),
+        description: 'Type: ' + result.type + ' (' + result.confidence + '% confidence)\n' + result.summary + '\nSuggested action: ' + result.action,
+        reference_id: intakeId,
+        status: 'pending', priority: 'normal',
+        action_type: 'email_review',
+        ai_recommendation: result.action || 'Review and handle manually.'
+      });
+      toast('Email classified as ' + result.type + ' — sent to Gatekeeper for review', 'ok', 4000);
+    }
+
+    document.getElementById('email-paste').value = '';
+    await pgEmails();
+
+  } catch(e) {
+    logErr('classifyAndProcessEmail', e);
+    toast('Classification failed: ' + e.message, 'err');
+  }
+}
 async function pgComments(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Comments</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
 
 // ═══════════════════════════════════════════════════════════════
