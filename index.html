@@ -10,7 +10,7 @@
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
   --sb-width:240px;--sb-bg:#1a2b3c;--sb-hover:rgba(255,255,255,0.08);--sb-active:rgba(13,122,112,0.4);--sb-border:rgba(255,255,255,0.08);
-  --top-h:52px;--teal:#0d7a70;--teal-dark:#095f57;--teal-light:#e8f5f3;
+  --top-h:52px;--teal:#0d7a70;--teal-bg:#f0faf9;--teal-dark:#095f57;--teal-light:#e8f5f3;
   --navy:#1a2b3c;--bg:#f0f2f5;--card:#fff;--border:#dce1e8;--border2:#b8c2cc;
   --text:#0d1b2a;--muted:#4a5a6a;--dim:#8a9aaa;
   --green:#1e8c45;--green-bg:#eaf7ee;--red:#c0392b;--red-bg:#fdecea;
@@ -326,6 +326,8 @@ tr:hover td{background:#fafbfc}
   <div class="bt-topbar-right">
     <button class="bt-quick-add" onclick="showQuickAdd()">+ Quick Add</button>
     <div class="bt-notif" onclick="goTab('gatekeeper')" title="Gatekeeper approvals pending">🔑 <span id="gk-count-top">0</span></div>
+    <div onclick="showStorageStatus()" title="Storage usage — click for details" style="cursor:pointer;font-size:11px;color:var(--muted);padding:4px 8px;border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;gap:4px">💾 <span id="storage-pct">—</span></div>
+    <button onclick="exportAllData()" title="Backup all data" style="background:none;border:1px solid var(--border);border-radius:4px;padding:4px 8px;cursor:pointer;font-size:11px;color:var(--muted)">📦 Backup</button>
     <div class="av" style="cursor:pointer" title="Feishy Felberbaum">FF</div>
   </div>
 </div>
@@ -516,6 +518,88 @@ function showStorageStatus() {
   toast('Storage: ' + info.used_pct + '% used (' + Math.round(info.used_bytes/1024) + 'KB / 5MB)',
     info.used_pct > 80 ? 'err' : 'ok', 4000);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// UNIVERSAL COMPONENTS — shared across all modules
+// Enterprise Standard — DEC-012, REQ-047
+// ═══════════════════════════════════════════════════════════════
+
+// StatusBadge — consistent status rendering everywhere
+function statusBadge(status, customColors) {
+  var s = (status||'unknown').toLowerCase().replace(/[_\s]/g,'-');
+  var defaultColors = {
+    'new':'#0d7a70','active':'#16a34a','draft':'#6b7280','pending':'#d97706',
+    'sent':'#1d4ed8','viewed':'#7c3aed','signed':'#16a34a','approved':'#16a34a',
+    'completed':'#16a34a','complete':'#16a34a','paid':'#16a34a',
+    'in-progress':'#1d4ed8','in-review':'#7c3aed',
+    'rejected':'#dc2626','declined':'#dc2626','lost':'#dc2626','overdue':'#dc2626','disputed':'#dc2626',
+    'recalled':'#dc2626','cancelled':'#dc2626','blocked':'#dc2626',
+    'captured':'#6b7280','reviewed':'#d97706','confirmed':'#0d7a70',
+    'in-estimate':'#7c3aed','in-proposal':'#1d4ed8','implemented':'#16a34a',
+    'change-order':'#dc2626','pre-construction':'#d97706','punch-list':'#d97706','warranty':'#7c3aed',
+    'not-started':'#9ca3af','under-review':'#d97706','awarded':'#16a34a','submitted':'#1d4ed8',
+    'ready-to-pay':'#16a34a','stage1-review':'#d97706','stage2-review':'#d97706',
+    'invited':'#6b7280','opened':'#1d4ed8',
+  };
+  var colors = Object.assign({}, defaultColors, customColors||{});
+  var color = colors[s] || '#6b7280';
+  return '<span style="background:' + color + '20;color:' + color + ';border:1px solid ' + color + ';border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px;white-space:nowrap">' + (status||'unknown').replace(/_/g,' ').toUpperCase() + '</span>';
+}
+
+// PriorityBadge
+function priorityBadge(priority) {
+  var colors = { P1:'#dc2626', P2:'#d97706', P3:'#6b7280', high:'#dc2626', medium:'#d97706', low:'#6b7280', normal:'#6b7280' };
+  var c = colors[(priority||'P3').toLowerCase()] || '#6b7280';
+  return '<span style="background:'+c+'15;color:'+c+';border:1px solid '+c+';border-radius:3px;font-size:9px;font-weight:800;padding:1px 5px">'+(priority||'P3').toUpperCase()+'</span>';
+}
+
+// ActionMenu — three-dot menu for any object
+function actionMenu(id, actions) {
+  var items = actions.map(function(a) {
+    return '<div style="padding:8px 14px;font-size:12px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:8px" onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'\'" onclick="'+a.fn+';this.closest(\'.action-menu-dd\').remove()">' + (a.icon||'') + ' ' + a.label + '</div>';
+  }).join('');
+  return '<div style="position:relative;display:inline-block">' +
+    '<button onclick="var d=this.nextSibling;d.style.display=d.style.display===\'none\'?\'block\':\'none\'" style="background:none;border:1px solid var(--border);border-radius:4px;padding:3px 7px;cursor:pointer;font-size:12px">⋯</button>' +
+    '<div class="action-menu-dd" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:200;min-width:160px">' +
+    items + '</div></div>';
+}
+
+// EmptyState — consistent empty states
+function emptyState(icon, title, subtitle, btnLabel, btnFn) {
+  return '<div style="text-align:center;padding:60px 20px;color:var(--muted)">' +
+    '<div style="font-size:48px;margin-bottom:12px">' + icon + '</div>' +
+    '<div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">' + title + '</div>' +
+    (subtitle ? '<div style="font-size:13px;margin-bottom:16px">' + subtitle + '</div>' : '') +
+    (btnLabel ? '<button class="btn btn-p" onclick="' + btnFn + '">' + btnLabel + '</button>' : '') +
+    '</div>';
+}
+
+// SectionHeader — consistent module headers
+function sectionHeader(title, subtitle, btnLabel, btnFn, extraBtns) {
+  var btns = '';
+  if(extraBtns) btns += extraBtns;
+  if(btnLabel) btns += '<button class="btn btn-p" onclick="' + btnFn + '" style="font-size:12px;padding:7px 14px">' + btnLabel + '</button>';
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">' +
+    '<div><h2 style="margin:0;font-size:20px;font-weight:800">' + title + '</h2>' +
+    (subtitle ? '<div style="font-size:12px;color:var(--muted);margin-top:3px">' + subtitle + '</div>' : '') +
+    '</div>' +
+    (btns ? '<div style="display:flex;gap:8px;align-items:center">' + btns + '</div>' : '') +
+    '</div>';
+}
+
+// StorageStatus widget — shown in header
+function updateStorageWidget() {
+  try {
+    var info = StorageAdapter.getStorageInfo();
+    var el = document.getElementById('storage-pct');
+    if(el) {
+      el.textContent = info.used_pct + '%';
+      el.style.color = info.used_pct > 80 ? '#dc2626' : info.used_pct > 60 ? '#d97706' : '#6b7280';
+    }
+  } catch(e) {}
+}
+
+
 function newId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 
 // Parse filter string like ?stage=eq.new&order=created_at.desc
@@ -1178,20 +1262,77 @@ function showQuickAdd(){
   document.body.appendChild(el);
 }
 
-function globalSearch(q){
-  if(!q||q.length<2)return;
-  // Search leads, jobs, subs by name
-  var results=[];
-  ['leads','jobs','subcontractors','documents'].forEach(function(t){
-    lsAll(t).forEach(function(r){
-      var name=r.client_name||r.job_name||r.company_name||r.name||'';
-      if(name.toLowerCase().includes(q.toLowerCase())){
-        results.push({type:t,name:name,id:r.id});
+function globalSearch(q) {
+  // Remove existing dropdown
+  var existing = document.getElementById('global-search-dd');
+  if(existing) existing.remove();
+  if(!q || q.length < 2) return;
+
+  var results = [];
+  var tables = {
+    leads: function(r){ return { name: r.client_name||'', sub: (r.job_type||'') + ' · ' + (r.address||''), tab: 'sales', icon: '🏠' }; },
+    jobs: function(r){ return { name: r.job_name||r.client_name||'', sub: (r.job_type||'') + ' · ' + (r.status||''), tab: 'jobs', icon: '🏗️' }; },
+    subcontractors: function(r){ return { name: r.company_name||r.contact_name||'', sub: r.trade||'', tab: 'subs', icon: '👷' }; },
+    estimates: function(r){ return { name: r.title||r.client_name||'Estimate', sub: fmt$(r.grand_total||0), tab: 'estimates', icon: '📋' }; },
+    proposals: function(r){ return { name: 'Proposal: '+(r.client_name||''), sub: fmt$(r.total_price||0) + ' · ' + (r.status||''), tab: 'proposals', icon: '📄', fn: 'openProposal(\''+r.id+'\')' }; },
+    requirements: function(r){ return { name: r.title||r.category||'Requirement', sub: (r.description||'').slice(0,50), tab: 'requirements', icon: '📌' }; },
+  };
+
+  var ql = q.toLowerCase();
+  Object.entries(tables).forEach(function(entry) {
+    var table = entry[0], mapper = entry[1];
+    lsAll(table).forEach(function(r) {
+      var fields = JSON.stringify(r).toLowerCase();
+      if(fields.includes(ql)) {
+        var mapped = mapper(r);
+        mapped.id = r.id;
+        results.push(mapped);
       }
     });
   });
-  if(results.length===0){toast('No results for "'+q+'"','info');return;}
-  toast('Found '+results.length+' results — check console','info');
+
+  // Show dropdown
+  var input = document.getElementById('global-search');
+  if(!input) return;
+  var rect = input.getBoundingClientRect();
+
+  var dd = document.createElement('div');
+  dd.id = 'global-search-dd';
+  dd.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:' + rect.left + 'px;width:360px;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.12);z-index:9999;max-height:400px;overflow-y:auto';
+
+  if(!results.length) {
+    dd.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">No results for &ldquo;' + q + '&rdquo;</div>';
+  } else {
+    dd.innerHTML = '<div style="padding:8px 12px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">' + results.length + ' results for &ldquo;' + q + '&rdquo;</div>' +
+      results.slice(0,12).map(function(r) {
+        var action = r.fn ? 'closeSearchDd();' + r.fn : 'closeSearchDd();goTab(\'' + r.tab + '\')';
+        return '<div style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\'\'" onclick="' + action + '">' +
+          '<span style="font-size:18px">' + r.icon + '</span>' +
+          '<div><div style="font-size:13px;font-weight:700">' + r.name + '</div>' +
+          '<div style="font-size:11px;color:var(--muted)">' + r.sub + '</div></div>' +
+          '</div>';
+      }).join('') +
+      (results.length > 12 ? '<div style="padding:8px 14px;font-size:11px;color:var(--muted);text-align:center">+ ' + (results.length-12) + ' more results — refine your search</div>' : '');
+  }
+
+  document.body.appendChild(dd);
+
+  // Close on outside click
+  setTimeout(function() {
+    document.addEventListener('click', function closeDD(e) {
+      if(!dd.contains(e.target) && e.target !== input) {
+        dd.remove();
+        document.removeEventListener('click', closeDD);
+      }
+    });
+  }, 100);
+}
+
+function closeSearchDd() {
+  var dd = document.getElementById('global-search-dd');
+  if(dd) dd.remove();
+  var inp = document.getElementById('global-search');
+  if(inp) inp.value = '';
 }
 function renderPage(tab){
   // Only show spinner for tabs that take time — not dashboard
@@ -5151,7 +5292,9 @@ if(!localStorage.getItem('cs_ai_key')){
 }
 loadSidebar();
 // Small delay to ensure DOM is ready before rendering dashboard
-setTimeout(function(){ goTab('dashboard'); }, 100);
+setTimeout(function(){ goTab('dashboard'); updateStorageWidget(); }, 100);
+// Storage widget — update every 30 seconds
+setInterval(updateStorageWidget, 30000);
 // AI startup checks — run in background
 setTimeout(async function(){
   try{
@@ -5184,17 +5327,11 @@ async function pgProposals(){
     props.forEach(function(p,i){
       var job=jobs.find(function(j){return j.id===p.job_id;})||{job_name:'—'};
       var sColors={'Sent':'var(--muted)','Viewed':'var(--blue)','Signed':'var(--amber)','Approved':'var(--green)'};
-      var lines=p.line_items||[];
-      var tot=lines.reduce(function(s,l){return s+parseFloat(l.total||0);},0);
-      html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 100px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
-        +'<div><div style="font-weight:700;font-size:13px">'+p.client_name+'</div><div style="font-size:11px;color:var(--muted)">'+job.job_name+'</div></div>'
-        +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(tot)+'</div>'
-        +'<div style="font-size:12px;color:var(--muted)">'+(p.sent_at?new Date(p.sent_at).toLocaleDateString():'—')+'</div>'
-        +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[p.status]||'var(--muted)')+';color:#fff">'+p.status+'</span></div>'
-        +'<div style="display:flex;gap:4px">'
-        +'<button onclick="openEstimate(\''+p.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer;font-family:inherit">View</button>'
-        +(p.status==='Signed'?'<button onclick="setEstStatus(\''+p.id+'\',\'Approved\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">Approve</button>':'')
-        +'</div></div>';
+      // A-4 FIX: use proposal total_price, open openProposal(), show correct status colors
+      var tot = p.total_price || 0;
+      var statusMap = {'draft':'#6b7280','sent':'#1d4ed8','viewed':'#d97706','signed':'#16a34a','recalled':'#dc2626','expired':'#9ca3af'};
+      var sc = statusMap[(p.status||'draft').toLowerCase()] || '#6b7280';
+      html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 120px 130px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+';cursor:pointer" onclick="openProposal(\''+p.id+'\')" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\''+(i%2===0?'var(--card)':'var(--bg)')+'\'">'        +'<div><div style="font-weight:700;font-size:13px">'+p.client_name+'</div><div style="font-size:11px;color:var(--muted)">'+(p.address||job.job_name||'—')+' · v'+(p.version||1)+'</div></div>'        +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(tot)+'</div>'        +'<div style="font-size:12px;color:var(--muted)">'+(p.sent_at?new Date(p.sent_at).toLocaleDateString():'Draft')+'</div>'        +'<div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:'+sc+'20;color:'+sc+';border:1px solid '+sc+'">'+(p.status||'draft').toUpperCase()+'</span></div>'        +'<div style="display:flex;gap:4px" onclick="event.stopPropagation()">'        +'<button onclick="openProposal(\''+p.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--teal);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit">Open</button>'        +'<button onclick="sendProposalToClient(\''+p.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer;font-family:inherit">Send</button>'        +'<button onclick="previewProposal(\''+p.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-family:inherit">Preview</button>'        +'</div></div>';
     });
   }
   html+='</div>';
@@ -5728,7 +5865,7 @@ async function pgEstimates(){
     html += '<div style="display:flex;flex-direction:column;gap:10px">';
     ests.forEach(function(est){
       var job = jobs.find(function(j){return j.id===est.job_id;});
-      var total = calcEstTotal(est.line_items||[]);
+      var estLines = est.line_items||[]; if(typeof estLines==='string'){try{estLines=JSON.parse(estLines);}catch(e){estLines=[];}} var total = calcEstTotal(estLines);
       var statusColor = est.status==='sent'?'var(--blue)':est.status==='approved'?'var(--green)':est.status==='draft'?'var(--amber)':'var(--muted)';
       var statusBg = est.status==='sent'?'var(--blue-bg)':est.status==='approved'?'var(--green-bg)':est.status==='draft'?'var(--amber-bg)':'#f6f8fa';
       html += '<div class="card" style="cursor:pointer;transition:all 0.15s" onclick="openEstimate(\''+est.id+'\')" onmouseover="this.style.borderColor=\'var(--teal)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
@@ -5903,9 +6040,15 @@ async function openEstimate(id){
     '<div>',
     '<div class="card" style="margin-bottom:12px">',
     '<div style="font-size:12px;font-weight:800;margin-bottom:12px;color:var(--muted);text-transform:uppercase">Estimate Summary</div>',
-    '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Subtotal</span><span style="font-weight:700">'+fmt$(totals.subtotal)+'</span></div>',
-    '<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:16px;font-weight:800;color:var(--teal)"><span>TOTAL</span><span>'+fmt$(totals.grand_total)+'</span></div>',
-    '<div style="font-size:11px;color:var(--muted);margin-top:8px">'+lines.length+' line items · Default markup: '+(est.default_markup||20)+'%</div>',
+    (totals.subtotal_labor>0?'<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:var(--muted)"><span>Labor</span><span>'+fmt$(totals.subtotal_labor)+'</span></div>':''),
+    (totals.subtotal_materials>0?'<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:var(--muted)"><span>Materials</span><span>'+fmt$(totals.subtotal_materials)+'</span></div>':''),
+    (totals.subtotal_subs>0?'<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:var(--muted)"><span>Subcontractors</span><span>'+fmt$(totals.subtotal_subs)+'</span></div>':''),
+    (totals.subtotal_permits>0?'<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:var(--muted)"><span>Permits</span><span>'+fmt$(totals.subtotal_permits)+'</span></div>':''),
+    '<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:13px;margin-top:4px"><span>Subtotal</span><span style="font-weight:700">'+fmt$(totals.subtotal)+'</span></div>',
+    '<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:var(--amber)"><span>Tax (materials only 8% — NY law)</span><span>'+fmt$(totals.tax)+'</span></div>',
+    '<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:var(--muted)"><span>Contractor Fee (20%)</span><span>'+fmt$(totals.contractor_fee)+'</span></div>',
+    '<div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid var(--teal);font-size:16px;font-weight:800;color:var(--teal)"><span>TOTAL</span><span>'+fmt$(totals.grand_total)+'</span></div>',
+    '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+lines.length+' line items · '+lines.filter(function(l){return (l.cost_type||l.type||'').toLowerCase()==='materials'||l.cost_type==='Material';}).length+' material lines taxable</div>',
     '</div>',
     
     '<div class="card" style="margin-bottom:12px">',
@@ -6895,7 +7038,121 @@ async function classifyAndProcessEmail() {
     toast('Classification failed: ' + e.message, 'err');
   }
 }
-async function pgComments(){$("content").innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:10px">🚧</div><div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:6px">Comments</div><div style="color:var(--dim);font-size:12px">Coming in next update.</div></div>';}
+// A-5: Universal Communication Hub — replaces stub
+async function pgComments() {
+  var msgs = await dbGet('messages', '?order=created_at.desc') || [];
+  var jobs = await dbGet('jobs', '?order=job_name.asc') || [];
+  var leads = await dbGet('leads', '?order=created_at.desc') || [];
+  var jobMap = {}; jobs.forEach(function(j){ jobMap[j.id]=j; });
+  var leadMap = {}; leads.forEach(function(l){ leadMap[l.id]=l; });
+
+  var threads = {};
+  msgs.forEach(function(m) {
+    var key = (m.job_id||m.lead_id||'general') + '_' + (m.thread_id||m.id);
+    if(!threads[key]) threads[key] = { msgs:[], job_id:m.job_id, lead_id:m.lead_id, subject:m.subject||'General' };
+    threads[key].msgs.push(m);
+  });
+
+  var internalMsgs = msgs.filter(function(m){ return m.type==='internal'||!m.type; });
+  var clientMsgs = msgs.filter(function(m){ return m.type==='client'; });
+  var aiMsgs = msgs.filter(function(m){ return m.type==='ai'; });
+
+  var html = '<div style="padding:20px;max-width:1100px">';
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+  html += '<div><h2 style="margin:0;font-size:20px;font-weight:700">💬 Communications</h2>';
+  html += '<div style="font-size:12px;color:var(--muted);margin-top:3px">All internal, client, and AI communications in one place.</div></div>';
+  html += '<button class="btn btn-p" onclick="newMessageModal()" style="font-size:12px">+ New Message</button>';
+  html += '</div>';
+
+  // Stats
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">';
+  [
+    {label:'Internal Notes', count:internalMsgs.length, color:'#1d4ed8', icon:'🏢'},
+    {label:'Client Messages', count:clientMsgs.length, color:'#0d7a70', icon:'👤'},
+    {label:'AI Notes', count:aiMsgs.length, color:'#7c3aed', icon:'🤖'},
+  ].forEach(function(s){
+    html += '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">';
+    html += '<div style="font-size:28px">' + s.icon + '</div>';
+    html += '<div><div style="font-size:22px;font-weight:800;color:'+s.color+'">' + s.count + '</div>';
+    html += '<div style="font-size:11px;color:var(--muted)">' + s.label + '</div></div></div>';
+  });
+  html += '</div>';
+
+  // Filter bar
+  html += '<div style="display:flex;gap:8px;margin-bottom:16px">';
+  html += '<select id="msg-filter-job" onchange="filterMsgs()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit">';
+  html += '<option value="">All Jobs / Leads</option>';
+  jobs.forEach(function(j){ html += '<option value="job_'+j.id+'">'+j.job_name+'</option>'; });
+  leads.forEach(function(l){ html += '<option value="lead_'+l.id+'">Lead: '+l.client_name+'</option>'; });
+  html += '</select>';
+  html += '<select id="msg-filter-type" onchange="filterMsgs()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit">';
+  html += '<option value="">All Types</option><option value="internal">Internal</option><option value="client">Client</option><option value="ai">AI Notes</option>';
+  html += '</select>';
+  html += '</div>';
+
+  // Messages list
+  html += '<div id="msgs-list">';
+  if(!msgs.length) {
+    html += '<div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">💬</div><div style="font-size:15px;font-weight:600;margin-bottom:8px">No messages yet</div><div style="font-size:12px">Messages from jobs, leads, clients, and AI all appear here.</div></div>';
+  } else {
+    msgs.slice(0,50).forEach(function(m){
+      var typeColors = {internal:'#1d4ed8', client:'#0d7a70', ai:'#7c3aed'};
+      var tc = typeColors[m.type||'internal'] || '#6b7280';
+      var context = m.job_id ? (jobMap[m.job_id]||{}).job_name||'Job' : m.lead_id ? 'Lead: '+((leadMap[m.lead_id]||{}).client_name||'') : 'General';
+      html += '<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:8px">';
+      html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">';
+      html += '<div style="display:flex;align-items:center;gap:8px">';
+      html += '<span style="background:'+tc+'20;color:'+tc+';border:1px solid '+tc+';border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">'+(m.type||'internal').toUpperCase()+'</span>';
+      html += '<span style="font-weight:700;font-size:13px">'+(m.subject||'Note')+'</span>';
+      html += '<span style="font-size:11px;color:var(--muted)">— '+context+'</span>';
+      html += '</div>';
+      html += '<span style="font-size:10px;color:var(--muted)">'+new Date(m.created_at).toLocaleDateString()+'</span>';
+      html += '</div>';
+      html += '<div style="font-size:12px;color:#374151;line-height:1.6">'+(m.body||m.content||m.message||'')+'</div>';
+      if(m.author) html += '<div style="font-size:10px;color:var(--muted);margin-top:6px">— '+m.author+'</div>';
+      html += '</div>';
+    });
+  }
+  html += '</div></div>';
+  document.getElementById('content').innerHTML = html;
+}
+
+function filterMsgs() {
+  // Re-render with filters — simplified for Phase 1
+  pgComments();
+}
+
+function newMessageModal() {
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'new-msg-ov'; el.style.zIndex = '1001';
+  el.innerHTML = '<div class="modal" style="max-width:520px"><div class="mh"><div class="mt">New Message / Note</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb">' +
+    '<div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700">Type</label>' +
+    '<select id="nm-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px">' +
+    '<option value="internal">Internal Note</option><option value="client">Client Message</option><option value="ai">AI Note</option>' +
+    '</select></div>' +
+    '<div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700">Subject</label>' +
+    '<input id="nm-subject" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box" placeholder="Subject..."></div>' +
+    '<div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700">Message</label>' +
+    '<textarea id="nm-body" style="width:100%;min-height:80px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box" placeholder="Write your note or message..."></textarea></div>' +
+    '<button class="btn btn-p" style="width:100%" onclick="saveNewMessage()">Save Message</button>' +
+    '</div></div>';
+  document.body.appendChild(el);
+}
+
+async function saveNewMessage() {
+  var type = document.getElementById('nm-type').value;
+  var subject = document.getElementById('nm-subject').value.trim();
+  var body = document.getElementById('nm-body').value.trim();
+  if(!body) { toast('Message cannot be empty','err'); return; }
+  await dbIns('messages', {
+    type: type, subject: subject, body: body,
+    author: 'Owner', created_at: new Date().toISOString(),
+    job_id: AJOB ? AJOB.id : null
+  });
+  closeOv(document.getElementById('new-msg-ov'));
+  toast('✅ Message saved','ok');
+  await pgComments();
+}
 
 // ═══════════════════════════════════════════════════════════════
 // DAILY BRIEFING — AI Intelligence Engine
@@ -7816,6 +8073,78 @@ async function aiRankAllBids(refId){
   }catch(e){logErr('aiRankAllBids',e);}
 }
 
+
+// A-2 FIX: previewProposal — opens proposal in a clean print-ready modal
+async function previewProposal(propId) {
+  var props = await dbGet('proposals', '?id=eq.' + propId);
+  var prop = props[0]; if(!prop) { toast('Proposal not found','err'); return; }
+  var sections = []; try { sections = JSON.parse(prop.sections||'[]'); } catch(e){}
+  var draws = []; try { draws = JSON.parse(prop.draw_schedule||'[]'); } catch(e){}
+
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'preview-prop-ov'; el.style.zIndex = '1002';
+
+  var sectHtml = sections.map(function(s) {
+    return '<div style="margin-bottom:20px;page-break-inside:avoid">' +
+      '<div style="font-size:13px;font-weight:800;color:#0d7a70;border-bottom:2px solid #0d7a70;padding-bottom:4px;margin-bottom:8px">' + s.title + '</div>' +
+      '<div style="font-size:12px;line-height:1.8;white-space:pre-wrap;color:#1a1a1a">' + s.content + '</div></div>';
+  }).join('');
+
+  var drawHtml = draws.map(function(d) {
+    return '<tr><td style="padding:6px 8px;border:1px solid #ddd;font-size:11px">' + d.phase + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700">' + fmt$(d.amount) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;color:#666">' + d.trigger + '</td></tr>';
+  }).join('');
+
+  el.innerHTML = '<div class="modal" style="max-width:800px;max-height:90vh;overflow-y:auto"><div class="mh"><div class="mt">Preview — ' + prop.client_name + '</div>' +
+    '<div style="display:flex;gap:8px"><button class="btn btn-p btn-sm" onclick="window.print()">🖨️ Print</button><button class="mc" onclick="closeOv(this)">&#x2715;</button></div></div>' +
+    '<div class="mb" id="proposal-print-body">' +
+    '<div style="text-align:center;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #0d7a70">' +
+    '<div style="font-size:22px;font-weight:900;color:#0d7a70">CORESTONE DEVELOPERS</div>' +
+    '<div style="font-size:12px;color:#666;margin-top:4px">Hurleyville, NY | Ulster · Sullivan · Dutchess Counties</div>' +
+    '<div style="font-size:18px;font-weight:700;margin-top:12px">CONSTRUCTION PROPOSAL</div>' +
+    '<div style="font-size:13px;color:#444;margin-top:4px">Prepared for: ' + prop.client_name + ' | ' + (prop.address||'') + '</div>' +
+    '<div style="font-size:12px;color:#888;margin-top:2px">Contract Value: ' + fmt$(prop.total_price||0) + ' | Date: ' + new Date().toLocaleDateString() + '</div>' +
+    '</div>' +
+    sectHtml +
+    '<div style="margin-top:20px"><div style="font-size:13px;font-weight:800;color:#0d7a70;border-bottom:2px solid #0d7a70;padding-bottom:4px;margin-bottom:8px">PAYMENT SCHEDULE</div>' +
+    '<table style="width:100%;border-collapse:collapse"><tr style="background:#f0faf9"><th style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:left">Milestone</th><th style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right">Amount</th><th style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:left">Trigger</th></tr>' +
+    drawHtml + '</table></div>' +
+    '<div style="margin-top:32px;padding-top:20px;border-top:2px solid #ddd">' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:40px">' +
+    '<div><div style="font-size:11px;font-weight:700;margin-bottom:24px">CORESTONE DEVELOPERS</div>' +
+    '<div style="border-bottom:1px solid #333;margin-bottom:6px;height:32px"></div>' +
+    '<div style="font-size:11px;color:#666">Authorized Signature / Date</div></div>' +
+    '<div><div style="font-size:11px;font-weight:700;margin-bottom:24px">CLIENT ACCEPTANCE</div>' +
+    '<div style="border-bottom:1px solid #333;margin-bottom:6px;height:32px"></div>' +
+    '<div style="font-size:11px;color:#666">' + prop.client_name + ' / Date</div></div>' +
+    '</div></div>' +
+    '</div></div>';
+
+  document.body.appendChild(el);
+}
+
+// A-2 FIX: signProposal — inline sign modal (for when owner signs on behalf / in-office signing)
+async function signProposal(propId) {
+  var props = await dbGet('proposals', '?id=eq.' + propId);
+  var prop = props[0]; if(!prop) return;
+  if(prop.status === 'signed') { toast('Already signed by ' + (prop.signatory_name||'client'),'ok'); return; }
+
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'sign-prop-ov'; el.style.zIndex = '1002';
+  el.innerHTML = '<div class="modal" style="max-width:480px"><div class="mh"><div class="mt">Sign Proposal</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb">' +
+    '<div style="background:var(--teal-bg);border:1px solid var(--teal);border-radius:8px;padding:14px;margin-bottom:16px">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--teal);margin-bottom:4px">PROPOSAL SUMMARY</div>' +
+    '<div style="font-size:12px">Client: ' + prop.client_name + '</div>' +
+    '<div style="font-size:12px">Address: ' + (prop.address||'') + '</div>' +
+    '<div style="font-size:13px;font-weight:800;color:var(--teal);margin-top:6px">Total: ' + fmt$(prop.total_price||0) + '</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">By signing, both parties agree to all terms in this proposal.</div>' +
+    '<input id="sign-name-' + propId + '" style="width:100%;padding:10px;border:2px solid var(--teal);border-radius:6px;font-size:14px;font-family:cursive;margin-bottom:10px;box-sizing:border-box" placeholder="Type full legal name...">' +
+    '<button class="btn btn-p" style="width:100%;padding:12px;font-weight:800;font-size:14px" onclick="executeSignature(&quot;' + propId + '&quot;)">✍️ Execute Signature</button>' +
+    '</div></div>';
+  document.body.appendChild(el);
+}
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
