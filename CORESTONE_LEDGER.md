@@ -138,3 +138,15 @@ Breaking changes are flagged in red (marked BREAKING).
 
 *Version 1.0 — OS #7 — June 25, 2026*
 *Every implementation adds one entry — no entry is ever deleted*
+
+### IMP-009 — OS #7 (June 25, 2026) — Architecture Consolidation Phases A & B
+| Field | Value |
+|---|---|
+| REQ-IDs | REQ-001 through REQ-053 (consolidated all Phase 1 requirements) |
+| Files Changed | index.html |
+| Database Changes | bills table: stage1_approved, stage2_approved, stage3_approved, stage1_at/by, stage2_at/by, stage3_at/by fields; proposals table: now primary source for Proposals module; messages table: wired to pgComments; requirements table: auto-populated from call intel |
+| UI Changes | Lead cards show survey/deposit/call indicators; Dashboard has pipeline health row; Estimate panel shows full tax breakdown; Proposal list opens correctly; Gatekeeper badges sync across header and sidebar; Global search shows real dropdown; Quick Add has Phase 1 items; Storage widget in header |
+| Workflow Changes | Bill payment now requires 3-stage approval; Post-call AI creates Requirements records; Survey sends via Magic Link; Proposals have preview and sign modals |
+| Breaking Changes | None |
+| Open Concerns | Supabase migration still pending — localStorage is the active risk |
+| Implemented By | Claude (CTO/Architect) |
