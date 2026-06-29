@@ -82,6 +82,11 @@ This document is reviewed at the start of every session.
 | OQ-C003 | Dashboard spinning bug | Fixed in OS #3 — async/await pattern established | OS #3 |
 | OQ-C004 | Script sections rendering as one block | DOM createElement pattern, real newline splitting | OS #5 |
 | OQ-C005 | Master doc not updated after OS #6 | Updated in OS #7, new document system established | OS #7 |
+| OQ-C006 | previewProposal dead button | Built in OS #7 Architecture Consolidation | OS #7 |
+| OQ-C007 | signProposal dead button | Built in OS #7 Architecture Consolidation | OS #7 |
+| OQ-C008 | pgComments stub | Built as universal communication hub in OS #7 | OS #7 |
+| OQ-C009 | --teal-bg CSS variable undefined | Defined in OS #7 — all new UI now renders | OS #7 |
+| OQ-C010 | GK badge only updating one element | updateGKBadge() unified function built in OS #7 | OS #7 |
 
 ---
 
