@@ -305,6 +305,10 @@ tr:hover td{background:#fafbfc}
   </nav>
 
   <!-- User info at bottom -->
+  <div style="padding:8px;border-top:1px solid rgba(255,255,255,0.08)">
+    <div class="bt-nav-sub-item" onclick="goTab('settings')" style="margin-bottom:4px">&#x2699;&#xFE0F; Settings</div>
+    <div class="bt-nav-sub-item" onclick="exportAllData()">&#x1F4E6; Backup Data</div>
+  </div>
   <div class="bt-user">
     <div class="av" style="width:32px;height:32px;font-size:13px">FF</div>
     <div><div style="font-size:12px;font-weight:700;color:#fff">Feishy Felberbaum</div><div style="font-size:10px;color:rgba(255,255,255,0.5)">Owner · Corestone</div></div>
@@ -1341,7 +1345,7 @@ function closeSearchDd() {
 function renderPage(tab){
   // Only show spinner for tabs that take time — not dashboard
   if(tab!=='dashboard') $('content').innerHTML='<div class="loading"><div class="spin"></div></div>';
-  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,requirements:pgRequirements,survey:pgSurveyMgr,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgPlans,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
+  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,requirements:pgRequirements,survey:pgSurveyMgr,settings:pgSettings,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgPlans,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
 }
 
 // DASHBOARD
@@ -1641,7 +1645,69 @@ async function leadDetail(id){
 function switchLTab(tab,el){['script','intel','email','notes'].forEach(t=>{const e=$(`lt-${t}`);if(e)e.style.display=t===tab?'block':'none';});document.querySelectorAll('#ld .ctab').forEach(t=>t.classList.remove('active'));el.classList.add('active');}
 async function regenLeadAI(id){toast('🤖 Generating...');const[lead]=await dbGet('leads',`?id=eq.${id}`);if(lead){await generateLeadAI(id,lead);closeModal('ld');leadDetail(id);}}
 async function stageUp(id,stage){try{await dbUpd('leads',id,{stage,last_contact_at:new Date().toISOString()});toast(`Lead → ${stage}`);closeModal('ld');pgSales();}catch(e){toast(e.message,'err');}}
-async function toJob(lid,name,budget){if(!confirm(`Confirm: ${name} paid the $5,000 deposit?`))return;const jname=prompt('Job name:',`${name} — ${new Date().getFullYear()}`);if(!jname)return;try{await dbIns('jobs',{lead_id:lid,job_name:jname,client_name:name,budget,status:'active',start_date:new Date().toISOString().split('T')[0],percent_complete:0,current_phase:'Pre-Construction'});await dbUpd('leads',lid,{stage:'signed'});toast('Job created!');closeModal('ld');ALLJOBS=await dbGet('jobs','?order=created_at.desc');renderJobList(ALLJOBS);goTab('jobs');}catch(e){toast(e.message,'err');}}
+async function toJob(lid,name,budget){
+  var el=document.createElement('div');
+  el.className='ov';el.id='tojob-ov';el.style.zIndex='1002';
+  var modal=document.createElement('div');modal.className='modal';modal.style.maxWidth='460px';
+  modal.innerHTML='';
+  // Header
+  var hdr=document.createElement('div');hdr.className='mh';
+  hdr.innerHTML='<div class="mt">Convert Lead to Job</div>';
+  var xbtn=document.createElement('button');xbtn.className='mc';xbtn.innerHTML='&#x2715;';
+  xbtn.onclick=function(){closeOv(el);};hdr.appendChild(xbtn);modal.appendChild(hdr);
+  // Body
+  var body=document.createElement('div');body.className='mb';
+  // Info box
+  var info=document.createElement('div');
+  info.style.cssText='background:#f0faf9;border:1px solid #0d7a70;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px';
+  info.innerHTML='<div style="font-weight:700;color:#0d7a70;margin-bottom:6px">Confirm Deposit Received</div>'
+    +'<div>Client: <strong>'+name+'</strong></div>'
+    +'<div>Deposit: <strong>$5,000</strong></div>'
+    +'<div>Contract: <strong>'+fmt$(budget)+'</strong></div>';
+  body.appendChild(info);
+  // Job name input
+  var nl=document.createElement('div');nl.style.marginBottom='10px';
+  nl.innerHTML='<label style="font-size:12px;font-weight:700">Job Name</label>';
+  var ni=document.createElement('input');ni.id='tojob-name';
+  ni.value=name+' — '+new Date().getFullYear();
+  ni.style.cssText='width:100%;padding:8px;border:1px solid #dce1e8;border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box;font-family:inherit';
+  nl.appendChild(ni);body.appendChild(nl);
+  // Date input
+  var dl=document.createElement('div');dl.style.marginBottom='14px';
+  dl.innerHTML='<label style="font-size:12px;font-weight:700">Start Date</label>';
+  var di=document.createElement('input');di.id='tojob-date';di.type='date';
+  di.value=new Date().toISOString().slice(0,10);
+  di.style.cssText='width:100%;padding:8px;border:1px solid #dce1e8;border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box;font-family:inherit';
+  dl.appendChild(di);body.appendChild(dl);
+  // Buttons
+  var btns=document.createElement('div');btns.style.cssText='display:flex;gap:8px';
+  var cbtn=document.createElement('button');cbtn.className='btn btn-p';
+  cbtn.style.cssText='flex:1;font-weight:800';cbtn.textContent='✅ Confirm — Create Job';
+  cbtn.onclick=function(){confirmToJob(cbtn,lid,name,budget);};
+  var ccl=document.createElement('button');ccl.className='btn';ccl.style.flex='1';ccl.textContent='Cancel';
+  ccl.onclick=function(){closeOv(el);};
+  btns.appendChild(cbtn);btns.appendChild(ccl);body.appendChild(btns);
+  modal.appendChild(body);el.appendChild(modal);document.body.appendChild(el);
+}
+
+async function confirmToJob(btn,lid,name,budget){
+  var jname=(document.getElementById('tojob-name')||{}).value||'';
+  var startDate=(document.getElementById('tojob-date')||{}).value||new Date().toISOString().slice(0,10);
+  jname=jname.trim();
+  if(!jname){toast('Job name required','err');return;}
+  btn.disabled=true;btn.textContent='Creating...';
+  try{
+    await dbIns('jobs',{lead_id:lid,job_name:jname,client_name:name,
+      budget:budget,budget_baseline:budget,contract_price:budget,
+      status:'active',start_date:startDate,current_phase:'Pre-Construction',progress_pct:0});
+    await dbUpd('leads',lid,{stage:'signed',deposit_status:true,deposit_received_at:new Date().toISOString()});
+    await addToGatekeeper('job_created','Job created: '+jname,'Lead converted to job. Budget: '+fmt$(budget)+'. Assign PM and schedule kickoff.','high','Review and assign project manager.','job_created');
+    closeOv(document.getElementById('tojob-ov'));
+    toast('Job created: '+jname,'ok',4000);
+    await pgJobsV2();
+  }catch(e){btn.disabled=false;btn.textContent='Confirm';toast('Error: '+e.message,'err');}
+}
+// _old_toJob removed — replaced by toJob() + confirmToJob() modal
 async function delLead(id,name){if(confirm(`Delete "${name}"?`)){try{await dbDel('leads',id);toast('Deleted');closeModal('ld');pgSales();}catch(e){toast(e.message,'err');}}}
 async function saveLeadNotes(id){try{await dbUpd('leads',id,{notes:$('ln-notes').value,last_contact_at:new Date().toISOString()});toast('Saved!');}catch(e){toast(e.message,'err');}}
 async function analyzeCall(id){const notes=$('ln-call').value;if(!notes){toast('Add call notes first','err');return;}$('call-analysis').innerHTML='<div class="loading" style="padding:10px"><div class="spin"></div></div>';try{const[lead]=await dbGet('leads',`?id=eq.${id}`);const r=await ai(`Analyze sales call for ${lead?.client_name}, budget ${fmt$(lead?.estimated_value)}, job ${lead?.job_type}. Notes: "${notes}". Give: 1) Sentiment 2) Interest 1-10 3) Next action 4) Improvement tip.`);$('call-analysis').innerHTML=`<div class="ai-box" style="margin-top:9px"><div class="ai-lbl">AI Call Analysis</div>${r.replace(/\n/g,'<br>')}</div>`;await dbUpd('leads',id,{ai_next_action:r.split('\n')[2]||'Follow up',last_contact_at:new Date().toISOString()});}catch(e){$('call-analysis').innerHTML=`<div style="color:var(--red);font-size:12px;margin-top:7px">AI unavailable</div>`;}}
@@ -1879,7 +1945,7 @@ async function pgInvoices(){
       +'</div></div>';
   });}
   html+='</div>';
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgInvoices',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgInvoices()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showInvoiceForm(){var w=$('inv-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
 async function saveNewInvoice(){
@@ -2091,7 +2157,7 @@ async function pgBills(){
       +'</div></div>';
   });}
   html+='</div>';
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgBills',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgBills()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showBillForm(){var f=$('bill-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
 async function saveNewBill(){
@@ -2360,6 +2426,25 @@ async function gkExecuteAction(item) {
       toast('Briefing acknowledged','ok');
       break;
 
+    case 'email_lead_review':
+      if(item.reference_id) await dbUpd('email_intakes',item.reference_id,{reviewed:true,reviewed_at:new Date().toISOString()});
+      if(item.lead_id) await dbUpd('leads',item.lead_id,{reviewed_at:new Date().toISOString()});
+      toast('Email lead approved — lead is active','ok');
+      break;
+
+    case 'email_review':
+      if(item.reference_id) await dbUpd('email_intakes',item.reference_id,{reviewed:true,reviewed_at:new Date().toISOString()});
+      toast('Email reviewed and filed','ok');
+      break;
+
+    case 'survey_sent':
+      toast('Survey send acknowledged','ok');
+      break;
+
+    case 'job_created':
+      toast('Job creation acknowledged','ok');
+      break;
+
     case 'proposal_signed':
       // Proposal signed — create job record
       if(item.reference_id) {
@@ -2409,6 +2494,8 @@ async function gkExecuteAction(item) {
 
 async function gkReject(id){
   await dbUpd('gatekeeper_queue',id,{status:'rejected',resolved_at:new Date().toISOString()});
+  var pending = await dbGet('gatekeeper_queue','?status=eq.pending');
+  updateGKBadge(pending.length);
   toast('Rejected and logged','ok');
   await pgGK();
 }
@@ -4023,7 +4110,7 @@ async function pgSubsV2(){
     });
     html += '</div>';
   }
-  document.getElementById('content').innerHTML = html;
+  try{document.getElementById('content').innerHTML = html;}catch(e){logErr('pgSubsV2',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgSubsV2()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 
 function openSubForm(id){
@@ -5491,7 +5578,7 @@ async function pgProposals(){
     });
   }
   html+='</div>';
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgProposals',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgProposals()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 async function pgBids(){
   var bids=await dbGet('bids','?order=created_at.desc');
@@ -5541,7 +5628,7 @@ async function pgBids(){
       +'</div></div>';
   });}
   html+='</div>';
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgBids',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgBids()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showNewBidForm(){var w=$('bid-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
 async function saveNewBid(){
@@ -5651,7 +5738,7 @@ async function pgTodos(){
     }
   }
 
-  document.getElementById('content').innerHTML = html;
+  try{document.getElementById('content').innerHTML = html;}catch(e){logErr('pgTodos',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgTodos()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 
 function newTodo(){
@@ -5828,7 +5915,7 @@ async function pgSelections(){
         }).join('')+'</div>';
     }).join('')
     +(sels.length===0?'<div style="padding:40px;text-align:center;color:var(--dim)">No selections yet — add your first one above.</div>':'');
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgSelections',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgSelections()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showSelForm(){var f=$('sel-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
 async function saveSelection(){
@@ -5894,7 +5981,7 @@ async function pgSpecs(){
       +'<div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.6">'+s.content+'</div></div>'
       +'<button onclick="delRecord(\''+s.id+'\',\'specifications\',pgSpecs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;margin-left:10px;font-family:inherit">✕</button>'
       +'</div></div>';}).join('')+'</div>');
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgSpecs',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgSpecs()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showSpecForm(){var f=$('spec-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
 async function saveSpec(){
@@ -5964,7 +6051,7 @@ async function pgWarranty(){
     +'<button onclick="aiWeeklySummary()" style="padding:10px 18px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">📊 Weekly AI Summary</button>'
     +'</div>'
     +'</div>';
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgWarranty',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgWarranty()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showWCForm(){var f=$('wc-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
 async function saveWarrantyClaim(){
@@ -6060,8 +6147,10 @@ function calcEstTotal(lines) {
     else subtotal_other += line_total;
   });
   var subtotal = subtotal_materials + subtotal_labor + subtotal_subs + subtotal_permits + subtotal_other;
-  var tax = subtotal_materials * 0.08; // NY law: materials only
-  var contractor_fee = subtotal * 0.20; // 20% Corestone fee
+  var taxRate = (typeof getTaxRate === 'function') ? getTaxRate() : 0.08; // NY law: materials only
+  var feeRate = (typeof getContractorFee === 'function') ? getContractorFee() : 0.20;
+  var tax = subtotal_materials * taxRate;
+  var contractor_fee = subtotal * feeRate;
   var grand_total = subtotal + tax + contractor_fee;
   return {
     subtotal: subtotal,
@@ -6845,7 +6934,7 @@ async function pgBudget(){
         +jobPOs.slice(0,5).map(function(p){return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span>'+p.supplier_name+'</span><span style="font-weight:700;color:var(--blue)">'+fmt$(p.total||0)+'</span><span style="color:var(--muted)">'+p.status+'</span></div>';}).join('')+'</div>':'')
       +'</div>';
   });
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgBudget',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgBudget()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 async function pgPOs(){
   var pos=await dbGet('purchase_orders','?order=created_at.desc');
@@ -6896,7 +6985,7 @@ async function pgPOs(){
       +'</div></div>';
   });}
   html+='</div>';
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgPOs',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgPOs()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showNewPOForm(){var w=$('po-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
 async function saveNewPO(){
@@ -6995,7 +7084,7 @@ async function pgCOs(){
       +'</div></div>';
   });}
   html+='</div>';
-  $('content').innerHTML=html;
+  try{$('content').innerHTML=html;}catch(e){logErr('pgCOs',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgCOs()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 function showNewCOForm(){var w=$('co-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
 function calcCOTotal(){
@@ -7105,7 +7194,7 @@ async function pgEmails(){
   }
 
   html += '</div>';
-  document.getElementById('content').innerHTML = html;
+  try{document.getElementById('content').innerHTML = html;}catch(e){logErr('pgEmails',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgEmails()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 
 async function classifyAndProcessEmail() {
@@ -7270,7 +7359,7 @@ async function pgComments() {
     });
   }
   html += '</div></div>';
-  document.getElementById('content').innerHTML = html;
+  try{document.getElementById('content').innerHTML = html;}catch(e){logErr('pgComments',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgComments()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 
 function filterMsgs() {
@@ -7846,6 +7935,7 @@ async function saveSurveyResults(leadId){
   var sels={};
   document.querySelectorAll('#survey-ov input[type=radio]:checked').forEach(function(r){sels[r.name]=r.value;});
   var notes=document.getElementById('survey-notes')?document.getElementById('survey-notes').value:'';
+  if(Object.keys(sels).length===0&&!notes.trim()){toast('Make at least one selection before saving','err');return;}
   try{
     await dbUpd('leads', leadId, {survey_selections: JSON.stringify(sels), survey_notes: notes, survey_completed: new Date().toISOString()});
     var prefs = Object.values(sels); if(notes) prefs.push(notes);
@@ -8000,7 +8090,7 @@ async function pgRequirements() {
   }
 
   html += '</div>';
-  document.getElementById('content').innerHTML = html;
+  try{document.getElementById('content').innerHTML = html;}catch(e){logErr('pgRequirements',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgRequirements()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 
 async function updateReqStatus(reqId, newStatus) {
@@ -8034,7 +8124,8 @@ async function saveManualRequirement() {
   var desc = document.getElementById('req-desc').value.trim();
   var cat = document.getElementById('req-cat').value.trim();
   var pri = document.getElementById('req-pri').value;
-  if(!title) { toast('Title required','err'); return; }
+  if(!title) { toast('Requirement title is required','err'); return; }
+  if(title.length < 3) { toast('Title must be at least 3 characters','err'); return; }
   await dbIns('requirements', {
     lead_id: leadId || null,
     title: title, description: desc, category: cat,
@@ -8123,7 +8214,7 @@ async function pgSurveyMgr() {
   }
 
   html += '</div>';
-  document.getElementById('content').innerHTML = html;
+  try{document.getElementById('content').innerHTML = html;}catch(e){logErr('pgSurveyMgr',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgSurveyMgr()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 
 // Send survey via Magic Link (REQ-015)
@@ -8301,6 +8392,106 @@ async function signProposal(propId) {
     '<button class="btn btn-p" style="width:100%;padding:12px;font-weight:800;font-size:14px" onclick="executeSignature(&quot;' + propId + '&quot;)">✍️ Execute Signature</button>' +
     '</div></div>';
   document.body.appendChild(el);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SETTINGS PAGE (FIX-8d) — replaces all hardcoded business values
+// ═══════════════════════════════════════════════════════════════
+function getSetting(key,def){try{var s=JSON.parse(localStorage.getItem('cs_settings')||'{}');return s[key]!==undefined?s[key]:def;}catch(e){return def;}}
+function setSetting(key,val){try{var s=JSON.parse(localStorage.getItem('cs_settings')||'{}');s[key]=val;localStorage.setItem('cs_settings',JSON.stringify(s));}catch(e){}}
+function getAllSettings(){try{return JSON.parse(localStorage.getItem('cs_settings')||'{}')}catch(e){return {};}}
+function getContractorFee(){return parseFloat(getSetting('contractor_fee_pct',20))/100;}
+function getTaxRate(){return parseFloat(getSetting('tax_rate',8))/100;}
+function getDepositAmount(){return parseFloat(getSetting('deposit_amount',5000));}
+function getAIModel(){return getSetting('ai_model','claude-sonnet-4-6');}
+function getCompanyName(){return getSetting('company_name','Corestone Developers');}
+
+async function pgSettings(){
+  var s=getAllSettings();
+  var info=StorageAdapter.getStorageInfo();
+  var pct=info.used_pct;
+  var barColor=pct>80?'#c0392b':pct>60?'#d97706':'#0d7a70';
+
+  function row(key,label,desc,inputHtml){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--border)">'
+      +'<div><div style="font-size:13px;font-weight:700">'+label+'</div>'
+      +(desc?'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+desc+'</div>':'')
+      +'</div>'+inputHtml+'</div>';
+  }
+    function numInput(key,def,min,max){
+    var v=getSetting(key,def);
+    return '<input type="number" min="'+min+'" max="'+max+'" value="'+v+'" data-skey="'+key+'" data-sdef="'+def+'" onchange="setSetting(this.dataset.skey,parseFloat(this.value)||parseFloat(this.dataset.sdef))" style="width:90px;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-family:inherit;text-align:right">';
+  }
+  function txtInput(key,def){
+    var v=getSetting(key,def);
+    return '<input type="text" value="'+v.replace(/"/g,'&quot;')+'" data-skey="'+key+'" onchange="setSetting(this.dataset.skey,this.value)" style="width:200px;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-family:inherit">';
+  }
+  function toggle(key,def){
+    var v=getSetting(key,def);
+    return '<label style="display:flex;align-items:center;gap:8px;cursor:pointer">'
+      +'<input type="checkbox"'+(v?' checked':'') +' data-skey="'+key+'" onchange="setSetting(this.dataset.skey,this.checked)" style="width:16px;height:16px;cursor:pointer">'
+      +'<span style="font-size:12px;color:var(--muted)">'+(v?'On':'Off')+'</span></label>';
+  }
+  function selInput(key,def,opts){
+    var v=getSetting(key,def);
+    var o=opts.map(function(x){var val=x[0],lbl=x[1];return '<option value="'+val+'"'+(v===val?' selected':'')+'>'+lbl+'</option>';}).join('');
+    return '<select data-skey="'+key+'" onchange="setSetting(this.dataset.skey,this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-family:inherit">'+o+'</select>';
+  }
+    function grp(title,rows){
+    return '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;margin-bottom:16px;overflow:hidden">'
+      +'<div style="background:var(--navy);color:#fff;padding:10px 16px;font-size:13px;font-weight:700">'+title+'</div>'
+      +'<div style="padding:0 16px">'+rows+'</div></div>';
+  }
+
+  var html='<div style="padding:20px;max-width:860px">';
+  html+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+  html+='<div><h2 style="margin:0;font-size:20px;font-weight:800">&#x2699;&#xFE0F; Settings</h2>';
+  html+='<div style="font-size:12px;color:var(--muted);margin-top:3px">Configure Corestone OS for your business. Changes take effect immediately.</div></div></div>';
+
+  html+=grp('&#x1F3E2; Company',
+    row('company_name','Company Name','Appears on proposals and documents',txtInput('company_name','Corestone Developers'))
+    +row('company_phone','Phone','Main business phone',txtInput('company_phone',''))
+    +row('service_counties','Service Counties','Used for permit jurisdiction logic',txtInput('service_counties','Ulster, Sullivan, Dutchess'))
+  );
+  html+=grp('&#x1F4B0; Financial',
+    row('contractor_fee_pct','Contractor Fee %','Applied to subtotal on all estimates',numInput('contractor_fee_pct',20,0,100))
+    +row('tax_rate','NY Sales Tax %','Materials only — NY law. Labor/subs/permits = 0%',numInput('tax_rate',8,0,15))
+    +row('deposit_amount','Required Deposit ($)','Deposit before survey is sent',numInput('deposit_amount',5000,0,100000))
+    +row('payment_terms_days','Payment Terms (days)','Days until invoice is due',numInput('payment_terms_days',15,1,90))
+  );
+  html+=grp('&#x1F916; AI',
+    row('ai_model','AI Model','Model used for all AI features',selInput('ai_model','claude-sonnet-4-6',[['claude-sonnet-4-6','Claude Sonnet 4.6 (Default)'],['claude-opus-4-6','Claude Opus 4.6 (More powerful)'],['claude-haiku-4-5-20251001','Claude Haiku (Fastest)']]))
+    +row('daily_briefing_enabled','Daily AI Briefing','Auto-generate morning briefing',toggle('daily_briefing_enabled',true))
+    +row('call_ai_enabled','Live Call AI','AI assistant during client calls',toggle('call_ai_enabled',true))
+    +row('scope_change_min','Scope Change Threshold ($)','Flag log entries over this amount',numInput('scope_change_min',500,0,10000))
+  );
+  html+=grp('&#x1F511; Gatekeeper',
+    row('gk_enabled','Gatekeeper Required','All AI actions must be approved',toggle('gk_enabled',true))
+    +row('gk_notify_new','Notify on New Item','Toast when new Gatekeeper item arrives',toggle('gk_notify_new',true))
+  );
+  html+=grp('&#x1F4CB; Workflow',
+    row('proposal_expiry_days','Proposal Expiry (days)','Days until unsigned proposal expires',numInput('proposal_expiry_days',30,1,180))
+    +row('co_reminder_hours','CO Reminder (hours)','Hours before CO reminder to client',numInput('co_reminder_hours',48,1,168))
+    +row('coi_warning_days','COI Warning (days)','Days before COI expiry to warn',numInput('coi_warning_days',30,7,90))
+    +row('lien_waiver_required','Require Lien Waiver','Block payment until signed',toggle('lien_waiver_required',true))
+  );
+
+  // Storage section
+  html+='<div style="background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px">';
+  html+='<div style="background:var(--navy);color:#fff;padding:10px 16px;font-size:13px;font-weight:700">&#x1F4BE; Storage Status</div>';
+  html+='<div style="padding:16px">';
+  html+='<div style="background:var(--bg);border-radius:6px;height:10px;margin-bottom:8px;overflow:hidden"><div style="height:100%;background:'+barColor+';width:'+pct+'%"></div></div>';
+  html+='<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:12px"><span>'+Math.round(info.used_bytes/1024)+'KB used</span><span>'+pct+'% of 5MB</span><span>'+Math.round((info.limit_bytes-info.used_bytes)/1024)+'KB free</span></div>';
+  html+='<div style="display:flex;gap:8px">';
+  html+='<button class="btn btn-p" onclick="exportAllData()" style="font-size:12px">&#x1F4E6; Backup All Data</button>';
+  html+='<button class="btn btn-g" onclick="importAllData()" style="font-size:12px">&#x1F4E5; Restore Backup</button>';
+  html+='</div></div></div>';
+
+  html+='<div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:8px;padding:12px;font-size:12px;color:#92400e;margin-bottom:20px">';
+  html+='<strong>&#x26A0;&#xFE0F; Testing Mode:</strong> All data is stored in this browser only. Back up regularly. Supabase migration happens after testing is complete.</div>';
+  html+='</div>';
+
+  document.getElementById('content').innerHTML=html;
 }
 </script>
 
