@@ -406,6 +406,12 @@ let salesView='today';
 const $=id=>document.getElementById(id);
 // BUG-9 class fix: safe property setter — prevents "Cannot set properties of null" crashes
 function $set(id,prop,val){var el=document.getElementById(id);if(el)el[prop]=val;return !!el;}
+// Safe line_items length — handles string-stored JSON, non-arrays, null/undefined
+function lineCount(li){
+  if(!li) return 0;
+  if(typeof li==='string'){ try{li=JSON.parse(li);}catch(e){return 0;} }
+  return Array.isArray(li)?li.length:0;
+}
 // ═══════════════════════════════════════════════════════════════
 // BUG-8 FIX: Universal double-click / repeat-action protection
 // Wraps async onclick handlers so a button cannot fire twice while
@@ -4338,13 +4344,13 @@ function openSubForm(id){
       +'<div class="mf">'
       +(id?'<button class="btn btn-red btn-sm" onclick="deleteSub(\''+id+'\')">Delete</button>':'')
       +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-      +'<button class="btn btn-p" onclick="saveSub('+(id?'\''+id+'\'':'null')+')">Save Subcontractor</button>'
+      +'<button class="btn btn-p" onclick="saveSubProfile('+(id?'\''+id+'\'':'null')+')">Save Subcontractor</button>'
       +'</div></div>';
     document.body.appendChild(el);
   });
 }
 
-async function saveSub(id){
+async function saveSubProfile(id){
   var data = {
     company_name: document.getElementById('sub-co').value.trim(),
     contact_name: document.getElementById('sub-contact').value.trim(),
@@ -6275,7 +6281,7 @@ async function pgEstimates(){
         + '</div>'
         + '<div style="display:flex;align-items:center;gap:14px">'
         + '<div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--teal)">'+fmt$(total.grand_total)+'</div>'
-        + '<div style="font-size:10px;color:var(--muted)">'+(est.line_items||[]).length+' line items</div></div>'
+        + '<div style="font-size:10px;color:var(--muted)">'+lineCount(est.line_items)+' line items</div></div>'
         + '<span style="background:'+statusBg+';color:'+statusColor+';padding:4px 10px;border-radius:20px;font-size:10px;font-weight:800;text-transform:uppercase">'+( est.status||'draft')+'</span>'
         + '</div></div></div>';
     });
@@ -7756,41 +7762,8 @@ async function saveNewMessage() {
 // ═══════════════════════════════════════════════════════════════
 // DAILY BRIEFING — AI Intelligence Engine
 // ═══════════════════════════════════════════════════════════════
-async function generateDailyBriefing(leads,jobs,gk,todos,overdue,cacheKey){
-  try{
-    var now=new Date();
-    var ctx='TODAY: '+now.toDateString()+' '+now.toLocaleTimeString()+
-      '\nACTIVE JOBS: '+jobs.filter(function(j){return j.status==='active';}).length+
-      '\nNEW LEADS (last 48h): '+leads.filter(function(l){return l.stage==='new'&&Date.now()-new Date(l.created_at)<172800000;}).length+
-      '\nPENDING GATEKEEPER APPROVALS: '+gk.length+
-      '\nOVERDUE TASKS: '+overdue.length+
-      '\nUNSIGNED PROPOSALS: '+leads.filter(function(l){return l.stage==='proposal';}).length+
-      '\nLEADS NEEDING FOLLOWUP: '+leads.filter(function(l){return l.next_followup&&new Date(l.next_followup)<=now;}).length+
-      '\nTODAY TASKS DUE: '+todos.filter(function(t){return !t.done&&t.due_date&&new Date(t.due_date).toDateString()===now.toDateString();}).length;
-    var r=await ai('You are the Corestone OS Business Brain. Analyze this snapshot and give Feishy his morning briefing. Be a smart business partner — direct, specific, no fluff.\n'+ctx+
-      '\nReturn exactly 3 numbered priorities in this format:\n1. [URGENT/HIGH/NORMAL] [EMOJI] [specific action] — [one line why this matters today]\n2. [same format]\n3. [same format]\nThen one line: WATCH: [one risk or opportunity Feishy should be aware of today]\nNo preamble. No headers. Just the 4 lines.',
-      'You are a senior construction business advisor. Be direct and specific. Always reference actual numbers from the data.', 600);
-    if(r){
-      var formatted=r.replace(/(\d\.\s)/g,'<br><b>$1</b>').replace(/WATCH:/,'<br><span style="color:#fbbf24;font-weight:700">⚡ WATCH:</span>').trim();
-      if(formatted.startsWith('<br>')) formatted=formatted.substring(4);
-      localStorage.setItem(cacheKey, formatted);
-      var el=document.getElementById('briefing-body');
-      if(el) el.innerHTML=formatted;
-    }
-  }catch(e){
-    var el=document.getElementById('briefing-body');
-    if(el) el.innerHTML='<em style="color:rgba(255,255,255,0.5)">Briefing unavailable — check AI connection</em>';
-  }
-}
-
-async function refreshDailyBriefing(){
-  var el=document.getElementById('briefing-body');
-  if(el) el.innerHTML='<em style="color:rgba(255,255,255,0.5)">Refreshing intelligence...</em>';
-  // Clear cache for today so it regenerates
-  var key='briefing_'+new Date().toDateString();
-  localStorage.removeItem(key);
-  pgDashV2();
-}
+// Duplicate dead generateDailyBriefing removed — referenced removed 'briefing-body' element. Active version uses 'brief-body'.
+// Duplicate dead refreshDailyBriefing removed — referenced removed 'briefing-body' element. Active version uses 'brief-body'.
 
 // ═══════════════════════════════════════════════════════════════
 // CLIENT INTELLIGENCE PROFILE
@@ -7872,65 +7845,7 @@ async function showClientIntelligence(leadId){
 // ═══════════════════════════════════════════════════════════════
 // PREDICTIVE JOB PROFITABILITY
 // ═══════════════════════════════════════════════════════════════
-async function showJobProfitability(jobId){
-  var jobs=await dbGet('jobs','?id=eq.'+jobId)||[];
-  if(!jobs.length) return;
-  var job=jobs[0];
-  var cos=await dbGet('change_orders','?job_id=eq.'+jobId)||[];
-  var bills=await dbGet('bills','?job_id=eq.'+jobId)||[];
-  var invoices=await dbGet('invoices','?job_id=eq.'+jobId)||[];
-  var logs=await dbGet('daily_logs','?job_id=eq.'+jobId)||[];
-  var totalBilled=invoices.reduce(function(s,i){return s+(i.amount||0);},0);
-  var totalCost=bills.reduce(function(s,b){return s+(b.amount||0);},0);
-  var approvedCOs=cos.filter(function(c){return c.status==='approved';}).reduce(function(s,c){return s+(c.amount||0);},0);
-  var contractVal=(job.contract_value||0)+approvedCOs;
-  var margin=contractVal>0?((contractVal-totalCost)/contractVal*100):0;
-  var el=document.createElement('div');
-  el.className='ov';el.id='jp-ov';el.style.zIndex='1000';
-  el.innerHTML='<div class="modal" style="max-width:600px;margin:auto">'
-    +'<div class="mh"><div class="mt">📊 Job Profitability — '+job.job_name+'</div>'
-    +'<button class="mc" onclick="closeOv(this)">✕</button></div>'
-    +'<div class="mb">'
-    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'
-    +'<div class="card" style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--teal)">'+fmt$(contractVal)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Contract Value</div></div>'
-    +'<div class="card" style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--red)">'+fmt$(totalCost)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Costs To Date</div></div>'
-    +'<div class="card" style="text-align:center"><div style="font-size:20px;font-weight:800;color:'+(margin>15?'var(--green)':margin>8?'var(--amber)':'var(--red)')+'">'+margin.toFixed(1)+'%</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Current Margin</div></div>'
-    +'</div>'
-    +'<div id="jp-ai" style="color:var(--muted);font-size:13px;text-align:center;padding:16px">🤖 Analyzing profitability...</div>'
-    +'</div></div>';
-  document.body.appendChild(el);
-  var ctx='JOB: '+job.job_name+'|STATUS: '+(job.status||'active')+'|COMPLETION: '+(job.percent_complete||0)+'%'
-    +'|CONTRACT: '+fmt$(contractVal)+'|COSTS TO DATE: '+fmt$(totalCost)+'|BILLED: '+fmt$(totalBilled)
-    +'|APPROVED CHANGE ORDERS: '+cos.filter(function(c){return c.status==='approved';}).length
-    +'|PENDING CHANGE ORDERS: '+cos.filter(function(c){return c.status==='pending';}).length
-    +'|DAILY LOGS: '+logs.length+'|CURRENT MARGIN: '+margin.toFixed(1)+'%';
-  try{
-    var r=await ai('You are a construction financial analyst. Predict final profitability for this job.\n'+ctx+
-      '\nReturn ONLY valid JSON: {"predicted_final_margin":18.5,"predicted_final_profit":42000,"confidence":80,"status":"on_track|at_risk|in_trouble","risk_factors":["factor1"],"opportunities":["opportunity1"],"recommendation":"2 sentences on what Feishy should do right now to protect or improve profit"}',
-      'Return ONLY valid JSON.',600);
-    var d=safeJSON(r)||{};
-    var jpEl=document.getElementById('jp-ai');
-    if(jpEl) jpEl.innerHTML=
-      '<div class="card" style="border-left:4px solid '+(d.status==='on_track'?'var(--green)':d.status==='at_risk'?'var(--amber)':'var(--red)')+';margin-bottom:10px">'
-      +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:6px">AI Prediction</div>'
-      +'<div style="display:flex;gap:16px;margin-bottom:8px">'
-      +'<div><div style="font-size:18px;font-weight:800;color:var(--teal)">'+(d.predicted_final_margin||0)+'%</div><div style="font-size:10px;color:var(--muted)">Predicted Final Margin</div></div>'
-      +'<div><div style="font-size:18px;font-weight:800;color:var(--green)">'+fmt$(d.predicted_final_profit||0)+'</div><div style="font-size:10px;color:var(--muted)">Predicted Final Profit</div></div>'
-      +'<div><div style="font-size:18px;font-weight:800;color:var(--muted)">'+(d.confidence||0)+'%</div><div style="font-size:10px;color:var(--muted)">Confidence</div></div>'
-      +'</div>'
-      +(d.recommendation?'<div style="font-size:13px;color:var(--text);border-top:1px solid var(--border);padding-top:8px;margin-top:4px">'+d.recommendation+'</div>':'')
-      +'</div>'
-      +((d.risk_factors&&d.risk_factors.length)?'<div class="card" style="background:var(--red-bg);margin-bottom:8px"><div style="font-size:11px;font-weight:800;color:var(--red);margin-bottom:5px">⚠️ RISK FACTORS</div>'+d.risk_factors.map(function(f){return '<div style="font-size:12px">• '+f+'</div>';}).join('')+'</div>':'')
-      +((d.opportunities&&d.opportunities.length)?'<div class="card" style="background:var(--green-bg)"><div style="font-size:11px;font-weight:800;color:var(--green);margin-bottom:5px">💡 OPPORTUNITIES</div>'+d.opportunities.map(function(f){return '<div style="font-size:12px">• '+f+'</div>';}).join('')+'</div>':'');
-  }catch(e){
-    var jpEl=document.getElementById('jp-ai');
-    if(jpEl) jpEl.innerHTML='<div style="color:var(--red)">Analysis error: '+e.message+'</div>';
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// GATEKEEPER — Add reminder item helper
-// ═══════════════════════════════════════════════════════════════
+// Duplicate dead showJobProfitability removed — later (better) version with toast error handling is used
 async function addToGatekeeper(type, title, description, priority, recommendation, actionType){
   priority=priority||'normal';
   try{
@@ -7988,64 +7903,7 @@ async function refreshDailyBriefing(){
 // ═══════════════════════════════════════════════════════════════
 // CLIENT INTELLIGENCE PROFILE
 // ═══════════════════════════════════════════════════════════════
-async function showClientIntelligence(leadId){
-  var leads=await dbGet('leads','?id=eq.'+leadId)||[];
-  if(!leads.length) return;
-  var lead=leads[0];
-  var allLeads=await dbGet('leads','?order=created_at.desc')||[];
-  var history=allLeads.filter(function(l){return l.client_name===lead.client_name||l.email===lead.email;});
-  var el=document.createElement('div');
-  el.className='ov';el.id='ci-ov';el.style.zIndex='1000';
-  el.innerHTML='<div class="modal" style="max-width:700px;margin:auto">'
-    +'<div class="mh"><div class="mt">Client Intelligence &mdash; '+lead.client_name+'</div>'
-    +'<button class="mc" onclick="closeOv(this)">&#x2715;</button></div>'
-    +'<div class="mb" style="max-height:70vh;overflow-y:auto">'
-    +'<div id="ci-content" style="padding:4px"><div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Analyzing client profile...</div></div>'
-    +'</div></div>';
-  document.body.appendChild(el);
-  var ctx='CLIENT: '+lead.client_name
-    +'|FIRST CONTACT: '+new Date(lead.created_at).toLocaleDateString()
-    +'|CURRENT STAGE: '+lead.stage
-    +'|VALUE: $'+(lead.estimated_value||0)
-    +'|JOB TYPE: '+(lead.job_type||'Unknown')
-    +'|FINANCING: '+(lead.financing||'Unknown')
-    +'|TIMELINE: '+(lead.timeline||'Unknown')
-    +'|COMPETING BIDS: '+(lead.competing_bids||'Unknown')
-    +'|SENTIMENT: '+(lead.ai_sentiment||'Not analyzed')
-    +'|INTERACTIONS: '+history.length
-    +'|NOTES: '+(lead.notes||'None');
-  try{
-    var r=await ai('Analyze this client for Corestone Developers and provide a structured intelligence profile. Return ONLY valid JSON: {"risk_score":"low|medium|high","risk_reason":"one sentence","payment_behavior":"reliable|unknown|risk","scope_tendency":"stable|change_prone|unknown","communication_style":"responsive|slow|unclear","recommended_approach":"2-3 sentences","watch_flags":["flag1"],"opportunity":"one sentence","predicted_outcome":"will_sign|uncertain|likely_lost","confidence":75}\n'+ctx,
-      'Return ONLY valid JSON. No markdown.',800);
-    var d=safeJSON(r)||{};
-    var rc=d.risk_score==='high'?'var(--red)':d.risk_score==='medium'?'var(--amber)':'var(--green)';
-    var ciEl=document.getElementById('ci-content');
-    if(!ciEl) return;
-    ciEl.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
-      +'<div class="card" style="border-left:4px solid '+rc+'"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Risk Level</div>'
-      +'<div style="font-size:18px;font-weight:800;color:'+rc+'">'+(d.risk_score||'?').toUpperCase()+'</div>'
-      +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+(d.risk_reason||'')+'</div></div>'
-      +'<div class="card"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Predicted Outcome</div>'
-      +'<div style="font-size:15px;font-weight:800;color:var(--teal)">'+(d.predicted_outcome||'Uncertain').replace(/_/g,' ').toUpperCase()+'</div>'
-      +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+(d.confidence||'?')+'% confidence</div></div></div>'
-      +'<div class="card" style="margin-bottom:10px"><div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Client Profile</div>'
-      +'<div style="display:flex;flex-direction:column;gap:6px">'
-      +'<div style="display:flex;justify-content:space-between"><span style="font-size:12px;color:var(--muted)">Payment Behavior</span><span style="font-size:12px;font-weight:700">'+(d.payment_behavior||'Unknown')+'</span></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="font-size:12px;color:var(--muted)">Scope Tendency</span><span style="font-size:12px;font-weight:700">'+(d.scope_tendency||'Unknown')+'</span></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="font-size:12px;color:var(--muted)">Communication</span><span style="font-size:12px;font-weight:700">'+(d.communication_style||'Unknown')+'</span></div>'
-      +'</div></div>'
-      +(d.recommended_approach?'<div class="card" style="margin-bottom:10px;background:var(--teal-bg)"><div style="font-size:11px;font-weight:800;color:var(--teal);margin-bottom:6px">RECOMMENDED APPROACH</div><div style="font-size:13px">'+d.recommended_approach+'</div></div>':'')
-      +(d.opportunity?'<div class="card" style="margin-bottom:10px;background:var(--green-bg)"><div style="font-size:11px;font-weight:800;color:var(--green);margin-bottom:6px">OPPORTUNITY</div><div style="font-size:13px">'+d.opportunity+'</div></div>':'')
-      +((d.watch_flags&&d.watch_flags.length)?'<div class="card" style="background:var(--red-bg)"><div style="font-size:11px;font-weight:800;color:var(--red);margin-bottom:6px">WATCH FLAGS</div>'+d.watch_flags.map(function(f){return '<div style="font-size:12px">- '+f+'</div>';}).join('')+'</div>':'');
-  }catch(e){
-    var ciEl=document.getElementById('ci-content');
-    if(ciEl) ciEl.innerHTML='<div style="color:var(--red);padding:16px">Analysis error: '+e.message+'</div>';
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// JOB PROFITABILITY PREDICTOR
-// ═══════════════════════════════════════════════════════════════
+// Duplicate inferior showClientIntelligence removed — earlier version (more complete client profile data including COs/invoices) is now the only version.
 async function showJobProfitability(jobId){
   var jobs=await dbGet('jobs','?id=eq.'+jobId)||[];
   if(!jobs.length){toast('Job not found','err');return;}
@@ -8103,16 +7961,10 @@ async function showJobProfitability(jobId){
 // ═══════════════════════════════════════════════════════════════
 // GATEKEEPER HELPER
 // ═══════════════════════════════════════════════════════════════
-async function addToGatekeeper(type,title,description,priority,recommendation){
-  try{
-    await dbIns('gatekeeper_queue',{item_type:type,title:title,description:description,status:'pending',priority:priority||'normal',ai_recommendation:recommendation||''});
-    var gkItems=await dbGet('gatekeeper_queue','?status=eq.pending')||[];
-    var gkEl=document.getElementById('gk-count');
-    if(gkEl) gkEl.textContent=gkItems.length;
-    toast('Added to Gatekeeper: '+title,'ok');
-  }catch(e){toast('GK error: '+e.message,'err');}
-}
-
+// Duplicate inferior addToGatekeeper removed — the canonical version (with
+// actionType param + updateGKBadge) defined earlier in the file is now the
+// only version. Previously this later/worse copy silently won due to JS
+// hoisting rules, breaking actionType propagation for every Gatekeeper call.
 
 function detectCommitments(transcript){
   if(!transcript||transcript.length<10) return;
@@ -8254,42 +8106,158 @@ async function captureClientPreference(leadId,text){
   }catch(e){}
 }
 
+// BUG-7 FIX: Robust Client Survey — visual tier cards, explanations, professional
+// presentation, paginated by room/category. Same data contract as before
+// (sv_Category_Item radio names, survey-notes textarea) so saveSurveyResults
+// and downstream Requirements propagation work unchanged.
+var SURVEY_CATS = {
+  'Exterior': {
+    icon:'\u{1F3E0}',
+    items:{
+      'Siding':{desc:'The exterior wall covering — affects curb appeal, maintenance, and durability.', opts:[
+        {tier:'Standard',name:'Vinyl',desc:'Low maintenance, budget-friendly, wide color range',img:'\u{1F3E0}'},
+        {tier:'Premium',name:'Hardie Board',desc:'Fiber cement, fire-resistant, 30+ year lifespan',img:'\u{1F3E2}'},
+        {tier:'Luxury',name:'Stone/Stucco',desc:'Premium look, highest durability, custom texture',img:'\u{1F3F0}'}
+      ]},
+      'Roof':{desc:'Roofing material affects longevity, energy efficiency, and appearance.', opts:[
+        {tier:'Standard',name:'Asphalt Shingle',desc:'Most common, cost-effective, 20-25 yr life',img:'\u{1F3E0}'},
+        {tier:'Premium',name:'Metal Standing Seam',desc:'50+ year life, energy efficient, modern look',img:'\u26A1'},
+        {tier:'Luxury',name:'Clay Tile',desc:'Distinctive look, exceptional longevity',img:'\u{1F3DB}'}
+      ]},
+      'Front Door':{desc:'The entry door sets the first impression of your home.', opts:[
+        {tier:'Standard',name:'Fiberglass',desc:'Durable, energy efficient, low maintenance',img:'\u{1F6AA}'},
+        {tier:'Premium',name:'Black Steel',desc:'Modern, secure, striking contrast',img:'\u{1F6AA}'},
+        {tier:'Luxury',name:'Custom Wood',desc:'Hand-crafted, unique, premium materials',img:'\u{1F6AA}'}
+      ]},
+      'Windows':{desc:'Windows impact energy bills, comfort, and natural light.', opts:[
+        {tier:'Standard',name:'Double-Pane Vinyl',desc:'Good insulation, standard efficiency',img:'\u{1FA9F}'},
+        {tier:'Premium',name:'Triple-Pane',desc:'Superior insulation, noise reduction',img:'\u{1FA9F}'},
+        {tier:'Luxury',name:'Custom Clad',desc:'Wood interior/aluminum exterior, custom sizes',img:'\u{1FA9F}'}
+      ]}
+    }
+  },
+  'Interior': {
+    icon:'\u{1F6CB}\uFE0F',
+    items:{
+      'Cabinets':{desc:'Kitchen and bath cabinetry — a major visual and functional centerpiece.', opts:[
+        {tier:'Standard',name:'White Shaker',desc:'Timeless, versatile, widely available',img:'\u{1F371}'},
+        {tier:'Premium',name:'Flat Panel',desc:'Modern, clean lines, soft-close hardware',img:'\u{1F371}'},
+        {tier:'Luxury',name:'Two-Tone Custom',desc:'Designer finish, fully custom layout',img:'\u{1F371}'}
+      ]},
+      'Countertops':{desc:'Countertop material affects durability, maintenance, and look.', opts:[
+        {tier:'Standard',name:'Laminate',desc:'Budget-friendly, wide pattern selection',img:'\u{1F37D}\uFE0F'},
+        {tier:'Premium',name:'Quartz',desc:'Non-porous, scratch resistant, low maintenance',img:'\u{1F37D}\uFE0F'},
+        {tier:'Luxury',name:'Marble',desc:'Natural stone, unique veining, premium feel',img:'\u{1F37D}\uFE0F'}
+      ]},
+      'Flooring':{desc:'Flooring sets the tone for the whole space and must handle daily wear.', opts:[
+        {tier:'Standard',name:'LVP (Luxury Vinyl Plank)',desc:'Waterproof, durable, budget-friendly',img:'\u{1FAB5}'},
+        {tier:'Premium',name:'Engineered Hardwood',desc:'Real wood look, more stable than solid',img:'\u{1FAB5}'},
+        {tier:'Luxury',name:'Solid Hardwood',desc:'Authentic, refinishable, long-term value',img:'\u{1FAB5}'}
+      ]},
+      'Appliances':{desc:'Kitchen appliance package — functionality and finish level.', opts:[
+        {tier:'Standard',name:'30\" Standard Package',desc:'Reliable, energy-efficient, standard fit',img:'\u{1F505}'},
+        {tier:'Premium',name:'36\" Pro Package',desc:'Larger capacity, professional features',img:'\u{1F505}'},
+        {tier:'Luxury',name:'Wolf/Sub-Zero',desc:'Top-tier performance brands, premium finish',img:'\u{1F505}'}
+      ]},
+      'Tile':{desc:'Tile selection for kitchen backsplash, bathrooms, and wet areas.', opts:[
+        {tier:'Standard',name:'Ceramic 12x12',desc:'Classic size, budget-friendly, wide colors',img:'\u{1F4D0}'},
+        {tier:'Premium',name:'Porcelain 24x24',desc:'Large format, fewer grout lines, durable',img:'\u{1F4D0}'},
+        {tier:'Luxury',name:'Natural Stone',desc:'Marble/travertine, unique character',img:'\u{1F4D0}'}
+      ]},
+      'Shower':{desc:'Bathroom shower system — comfort and daily experience.', opts:[
+        {tier:'Standard',name:'Basic Showerhead',desc:'Standard fixture, reliable pressure',img:'\u{1F6BF}'},
+        {tier:'Premium',name:'Rain Head',desc:'Wide rain-style head, spa-like feel',img:'\u{1F6BF}'},
+        {tier:'Luxury',name:'Rain + Body Jets',desc:'Multi-function system, full spa experience',img:'\u{1F6BF}'}
+      ]}
+    }
+  },
+  'Outdoor/Deck': {
+    icon:'\u{1F333}',
+    items:{
+      'Decking':{desc:'Deck surface material — appearance, maintenance, and lifespan.', opts:[
+        {tier:'Standard',name:'Treated Lumber',desc:'Cost-effective, requires periodic staining',img:'\u{1FAB5}'},
+        {tier:'Premium',name:'Composite',desc:'Low maintenance, fade and stain resistant',img:'\u{1FAB5}'},
+        {tier:'Luxury',name:'Exotic Hardwood',desc:'Ipe/Tigerwood — premium look, very durable',img:'\u{1FAB5}'}
+      ]},
+      'Railing':{desc:'Deck/porch railing — safety and visual style.', opts:[
+        {tier:'Standard',name:'Painted Wood',desc:'Classic look, needs periodic repainting',img:'\u{1F6E0}\uFE0F'},
+        {tier:'Premium',name:'Cable Rail',desc:'Modern, unobstructed views, low maintenance',img:'\u{1F6E0}\uFE0F'},
+        {tier:'Luxury',name:'Glass Panel',desc:'Maximum visibility, premium architectural look',img:'\u{1F6E0}\uFE0F'}
+      ]},
+      'Lighting':{desc:'Outdoor lighting for safety, ambiance, and usability after dark.', opts:[
+        {tier:'Standard',name:'Basic Post Lights',desc:'Simple fixtures, manual on/off',img:'\u{1F4A1}'},
+        {tier:'Premium',name:'Low Voltage System',desc:'Layered lighting, timer-controlled',img:'\u{1F4A1}'},
+        {tier:'Luxury',name:'Smart Integrated',desc:'App-controlled, scenes, full automation',img:'\u{1F4A1}'}
+      ]}
+    }
+  }
+};
+
 function showClientSurvey(leadId){
   var el=document.createElement('div');
   el.className='ov';el.id='survey-ov';el.style.zIndex='1000';
-  var cats={
-    'Exterior':{'Siding':['Vinyl','Hardie Board','Stone/Stucco'],'Roof':['Asphalt','Metal Seam','Clay Tile'],'Front Door':['Fiberglass','Black Steel','Custom Wood'],'Windows':['Standard','Triple-Pane','Custom Clad']},
-    'Interior':{'Cabinets':['White Shaker','Flat Panel','Two-Tone Custom'],'Countertops':['Laminate','Quartz','Marble'],'Flooring':['LVP','Engineered Hardwood','Solid Hardwood'],'Appliances':['30" Standard','36" Pro','Wolf/Sub-Zero'],'Tile':['Ceramic 12x12','Porcelain 24x24','Natural Stone'],'Shower':['Basic','Rain Head','Rain+Body Jets']},
-    'Outdoor/Deck':{'Decking':['Treated Lumber','Composite','Exotic Hardwood'],'Railing':['Painted Wood','Cable Rail','Glass Panel'],'Lighting':['Basic Post','Low Voltage','Smart Integrated']}
-  };
-  var tiers=['Standard','Premium','Luxury'];
-  var colors=['var(--muted)','var(--teal)','#8b5cf6'];
-  var bgs=['rgba(0,0,0,0.04)','var(--teal-bg)','rgba(139,92,246,0.08)'];
-  var html='<div class="modal" style="max-width:760px;margin:auto"><div class="mh"><div class="mt">Client Selection Survey</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb" style="max-height:75vh;overflow-y:auto"><div style="font-size:13px;color:var(--muted);margin-bottom:16px">Client selects Standard/Premium/Luxury for each item. Selections automatically feed into sub bid packages.</div>';
-  Object.keys(cats).forEach(function(cat){
-    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid var(--teal)">'+cat+'</div>';
-    Object.keys(cats[cat]).forEach(function(item){
-      var opts=cats[cat][item];
-      html+='<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">'+item+'</div><div style="display:flex;gap:6px;flex-wrap:wrap">';
-      opts.forEach(function(opt,i){
-        html+='<label style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;background:'+bgs[i]+';border:1px solid '+colors[i]+';cursor:pointer;font-size:11px;font-weight:600;color:'+colors[i]+'">'
-          +'<input type="radio" name="sv_'+cat+'_'+item+'" value="'+tiers[i]+':'+opt+'" style="margin:0"> '+tiers[i]+'</label>';
+  var tierColors={'Standard':'#6b7280','Premium':'#0d7a70','Luxury':'#8b5cf6'};
+  var tierBgs={'Standard':'rgba(107,114,128,0.06)','Premium':'var(--teal-bg,#f0faf9)','Luxury':'rgba(139,92,246,0.08)'};
+
+  var html='<div class="modal" style="max-width:820px;margin:auto"><div class="mh">'
+    +'<div><div class="mt">Client Selection Survey</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-top:2px">Choose the option that best fits your vision for each item below</div></div>'
+    +'<button class="mc" onclick="closeOv(this)">&#x2715;</button></div>'
+    +'<div class="mb" style="max-height:75vh;overflow-y:auto">'
+    +'<div style="background:var(--teal-bg,#f0faf9);border:1px solid var(--teal);border-radius:8px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--text)">'
+    +'<strong>How this works:</strong> For each item, pick Standard, Premium, or Luxury based on your preference and budget. There are no wrong answers \u2014 this simply helps us build an accurate estimate and source the right materials for your project.'
+    +'</div>';
+
+  Object.keys(SURVEY_CATS).forEach(function(cat){
+    var catData = SURVEY_CATS[cat];
+    html+='<div style="margin-bottom:24px">'
+      +'<div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid var(--teal)">'
+      +'<span style="font-size:20px">'+catData.icon+'</span>'+cat+'</div>';
+
+    Object.keys(catData.items).forEach(function(item){
+      var itemData = catData.items[item];
+      html+='<div style="margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">'
+        +'<div style="font-size:13px;font-weight:800;margin-bottom:3px">'+item+'</div>'
+        +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">'+itemData.desc+'</div>'
+        +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">';
+
+      itemData.opts.forEach(function(opt){
+        var tc = tierColors[opt.tier], tb = tierBgs[opt.tier];
+        html+='<label style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:'+tb+';border:1.5px solid '+tc+';cursor:pointer;position:relative">'
+          +'<input type="radio" name="sv_'+cat+'_'+item+'" value="'+opt.tier+':'+opt.name+'" style="position:absolute;top:8px;right:8px;margin:0">'
+          +'<div style="font-size:18px">'+opt.img+'</div>'
+          +'<div style="font-size:9px;font-weight:800;color:'+tc+';text-transform:uppercase;letter-spacing:0.05em">'+opt.tier+'</div>'
+          +'<div style="font-size:11px;font-weight:700;color:var(--text)">'+opt.name+'</div>'
+          +'<div style="font-size:10px;color:var(--muted);line-height:1.4">'+opt.desc+'</div>'
+          +'</label>';
       });
+
       html+='</div></div>';
     });
     html+='</div>';
   });
-  html+='<div style="margin-top:8px"><div style="font-size:12px;font-weight:700;margin-bottom:5px">Special Requests / Client Notes:</div><textarea id="survey-notes" style="width:100%;min-height:60px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;box-sizing:border-box" placeholder="Accessibility needs, special preferences, budget focus areas..."></textarea></div>';
-  html+='<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-p" onclick="saveSurveyResults(\''+leadId+'\')" style="flex:1">Save & Feed to Bid Packages</button><button class="btn btn-g" onclick="closeOv(this)">Cancel</button></div></div></div>';
+
+  html+='<div style="margin-top:8px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">'
+    +'<div style="font-size:13px;font-weight:800;margin-bottom:6px">Special Requests / Notes</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Accessibility needs, must-have features, areas to prioritize on a tighter budget, anything else we should know.</div>'
+    +'<textarea id="survey-notes" style="width:100%;min-height:70px;padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;box-sizing:border-box" placeholder="Type any additional notes here..."></textarea></div>';
+
+  html+='<div style="display:flex;gap:8px;margin-top:16px;position:sticky;bottom:0;background:#fff;padding-top:10px">'
+    +'<button class="btn btn-p" onclick="saveSurveyResults(\''+leadId+'\',this)" style="flex:1;font-weight:800;padding:12px">Submit Selections</button>'
+    +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button></div>'
+    +'</div></div>';
+
   el.innerHTML=html;
   document.body.appendChild(el);
 }
 
-async function saveSurveyResults(leadId){
+async function saveSurveyResults(leadId,btnEl){
+  var idemKey='save_survey_'+leadId;
+  if(btnEl && !guardAction(idemKey,btnEl)) return;
   var sels={};
   document.querySelectorAll('#survey-ov input[type=radio]:checked').forEach(function(r){sels[r.name]=r.value;});
   var notes=document.getElementById('survey-notes')?document.getElementById('survey-notes').value:'';
-  if(Object.keys(sels).length===0&&!notes.trim()){toast('Make at least one selection before saving','err');return;}
+  if(Object.keys(sels).length===0&&!notes.trim()){toast('Make at least one selection before saving','err');if(btnEl)releaseAction(idemKey,btnEl,false);return;}
   try{
     await dbUpd('leads', leadId, {survey_selections: JSON.stringify(sels), survey_notes: notes, survey_completed: new Date().toISOString()});
     var prefs = Object.values(sels); if(notes) prefs.push(notes);
@@ -8346,7 +8314,11 @@ async function saveSurveyResults(leadId){
     toast('✅ Survey saved — ' + Object.keys(sels).length + ' requirements created','ok');
     var summary=Object.values(sels).slice(0,4).join(', ');
     await addToGatekeeper('survey_complete','Survey Complete: '+leadId,summary+(notes?'\nNotes: '+notes:''),'normal','Review and confirm selections are in bid packages.');
-  }catch(e){logErr('saveSurveyResults',e);toast('Error: '+e.message,'err');}
+    if(btnEl) releaseAction(idemKey,btnEl,true);
+  }catch(e){
+    if(btnEl) releaseAction(idemKey,btnEl,false);
+    logErr('saveSurveyResults',e);toast('Error: '+e.message,'err');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
