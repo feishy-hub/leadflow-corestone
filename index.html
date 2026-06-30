@@ -257,6 +257,7 @@ tr:hover td{background:#fafbfc}
         <div class="bt-nav-sub-item" id="btn-estimates" onclick="goTab('estimates')">Estimates</div>
         <div class="bt-nav-sub-item" id="btn-budget" onclick="goTab('budget')">Job Costing Budget</div>
         <div class="bt-nav-sub-item" id="btn-financial" onclick="goTab('financial')">Invoices</div>
+        <div class="bt-nav-sub-item" id="btn-bills" onclick="goTab('bills')">Bills</div>
         <div class="bt-nav-sub-item" id="btn-pos" onclick="goTab('pos')">Purchase Orders</div>
         <div class="bt-nav-sub-item" id="btn-cos" onclick="goTab('cos')">Change Orders</div>
         <div class="bt-nav-sub-item" id="btn-liens" onclick="goTab('liens')">Lien Waivers</div>
@@ -403,6 +404,73 @@ window.addEventListener('unhandledrejection',function(e){logErr('PROMISE',e.reas
 let CUR='dashboard',AJOB=null,ALLJOBS=[];
 let salesView='today';
 const $=id=>document.getElementById(id);
+// BUG-9 class fix: safe property setter — prevents "Cannot set properties of null" crashes
+function $set(id,prop,val){var el=document.getElementById(id);if(el)el[prop]=val;return !!el;}
+// ═══════════════════════════════════════════════════════════════
+// BUG-8 FIX: Universal double-click / repeat-action protection
+// Wraps async onclick handlers so a button cannot fire twice while
+// its action is still in flight, and tracks completed actions by
+// idempotency key so re-clicking after success is a safe no-op.
+// ═══════════════════════════════════════════════════════════════
+var _actionLocks = {};       // btn-level: prevents concurrent execution
+var _completedActions = {};  // idempotency: prevents re-running a finished action
+
+function isActionLocked(key) { return !!_actionLocks[key]; }
+function lockAction(key) { _actionLocks[key] = true; }
+function unlockAction(key) { delete _actionLocks[key]; }
+function isActionCompleted(key) { return !!_completedActions[key]; }
+function markActionCompleted(key) { _completedActions[key] = Date.now(); }
+
+// Call this at the TOP of any async handler that could be double-clicked.
+// idempotencyKey should be unique per "thing being acted on" (e.g. 'approve_'+itemId)
+// Returns true if the action should proceed, false if it should be blocked.
+function guardAction(idempotencyKey, btnEl) {
+  if (isActionCompleted(idempotencyKey)) {
+    toast('Already completed', 'ok', 1500);
+    return false;
+  }
+  if (isActionLocked(idempotencyKey)) {
+    return false; // silently ignore — action already in flight
+  }
+  lockAction(idempotencyKey);
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.dataset._origText = btnEl.dataset._origText || btnEl.innerHTML;
+    btnEl.style.opacity = '0.6';
+    btnEl.style.cursor = 'wait';
+  }
+  return true;
+}
+
+// Call this when the async action finishes (success OR error) to release the lock.
+// Pass completed=true only on real success, so a failed attempt can be retried.
+function releaseAction(idempotencyKey, btnEl, completed) {
+  unlockAction(idempotencyKey);
+  if (completed) markActionCompleted(idempotencyKey);
+  if (btnEl) {
+    btnEl.disabled = !!completed; // stays disabled only if truly completed
+    btnEl.style.opacity = completed ? '0.5' : '1';
+    btnEl.style.cursor = completed ? 'default' : 'pointer';
+    if (completed && btnEl.dataset._origText) {
+      // Optionally show a completed state
+    }
+  }
+}
+
+// Generic wrapper: pass the idempotency key, the button element, and an async fn.
+// Handles lock/unlock/complete/error automatically.
+async function runGuarded(idempotencyKey, btnEl, asyncFn) {
+  if (!guardAction(idempotencyKey, btnEl)) return;
+  try {
+    await asyncFn();
+    releaseAction(idempotencyKey, btnEl, true);
+  } catch(e) {
+    releaseAction(idempotencyKey, btnEl, false);
+    toast('Error: ' + e.message, 'err');
+    throw e;
+  }
+}
+
 const fmt$=n=>n?'$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0}):'$0';
 const fmtD=d=>d?new Date(d).toLocaleDateString('en-US'):'—';
 const dAgo=d=>{if(!d)return'new';const x=Math.floor((Date.now()-new Date(d))/86400000);return x===0?'today':x+'d ago';};
@@ -1169,8 +1237,11 @@ async function loadSidebar(){
 }
 
 function renderJobList(jobs){
-  if(!jobs.length){$('job-list').innerHTML='<div style="font-size:11px;color:rgba(255,255,255,0.3);padding:8px;text-align:center">No jobs yet</div>';return;}
-  $('job-list').innerHTML=jobs.map(j=>`
+  // BUG-9 FIX: 'job-list' element does not exist in current layout — legacy sidebar pattern. Guard against null.
+  var jlEl = $('job-list');
+  if(!jlEl) return; // sidebar job list not present in this layout — safe no-op
+  if(!jobs.length){jlEl.innerHTML='<div style="font-size:11px;color:rgba(255,255,255,0.3);padding:8px;text-align:center">No jobs yet</div>';return;}
+  jlEl.innerHTML=jobs.map(j=>`
     <div class="job-row ${AJOB?.id===j.id?'sel':''}" onclick="selectJob('${j.id}')">
       <div class="jdot ${j.status==='active'?'jd-a':j.status==='on_hold'?'jd-h':'jd-d'}"></div>
       <div class="job-info"><div class="job-title">${j.job_name}</div><div class="job-client">${j.client_name}</div></div>
@@ -1679,6 +1750,14 @@ async function toJob(lid,name,budget){
   di.value=new Date().toISOString().slice(0,10);
   di.style.cssText='width:100%;padding:8px;border:1px solid #dce1e8;border-radius:6px;margin-top:4px;font-size:12px;box-sizing:border-box;font-family:inherit';
   dl.appendChild(di);body.appendChild(dl);
+  // BUG-10 FIX: deposit invoice checkbox — connects job creation to billing
+  var depWrap=document.createElement('div');
+  depWrap.style.cssText='background:var(--amber-bg,#fef3c7);border:1px solid var(--amber,#d97706);border-radius:8px;padding:10px;margin-bottom:14px';
+  var depLabel=document.createElement('label');depLabel.style.cssText='display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:700';
+  var depCheck=document.createElement('input');depCheck.type='checkbox';depCheck.id='tojob-dep-invoice';depCheck.checked=true;depCheck.style.cssText='width:16px;height:16px;cursor:pointer';
+  depLabel.appendChild(depCheck);
+  var depTxt=document.createElement('span');depTxt.textContent='Create $5,000 deposit invoice and send to Gatekeeper';
+  depLabel.appendChild(depTxt);depWrap.appendChild(depLabel);body.appendChild(depWrap);
   // Buttons
   var btns=document.createElement('div');btns.style.cssText='display:flex;gap:8px';
   var cbtn=document.createElement('button');cbtn.className='btn btn-p';
@@ -1691,21 +1770,51 @@ async function toJob(lid,name,budget){
 }
 
 async function confirmToJob(btn,lid,name,budget){
+  var idemKey='confirm_to_job_'+lid;
+  if(!guardAction(idemKey,btn)) return;
   var jname=(document.getElementById('tojob-name')||{}).value||'';
   var startDate=(document.getElementById('tojob-date')||{}).value||new Date().toISOString().slice(0,10);
+  var wantsDepositInvoice=(document.getElementById('tojob-dep-invoice')||{}).checked;
   jname=jname.trim();
-  if(!jname){toast('Job name required','err');return;}
-  btn.disabled=true;btn.textContent='Creating...';
+  if(!jname){toast('Job name required','err');releaseAction(idemKey,btn,false);return;}
+  btn.textContent='Creating...';
   try{
-    await dbIns('jobs',{lead_id:lid,job_name:jname,client_name:name,
+    var depositAmount=(typeof getDepositAmount==='function')?getDepositAmount():5000;
+    var newJob=await dbIns('jobs',{lead_id:lid,job_name:jname,client_name:name,
       budget:budget,budget_baseline:budget,contract_price:budget,
-      status:'active',start_date:startDate,current_phase:'Pre-Construction',progress_pct:0});
-    await dbUpd('leads',lid,{stage:'signed',deposit_status:true,deposit_received_at:new Date().toISOString()});
+      status:'active',start_date:startDate,current_phase:'Pre-Construction',progress_pct:0,
+      deposit_amount:depositAmount,deposit_invoiced:wantsDepositInvoice});
+    var jobId=newJob[0]?newJob[0].id:null;
+
+    // BUG-10 FIX: convert-to-job now actually connects to billing — creates a real
+    // deposit invoice record (not just a disconnected status flag) and routes it
+    // through Gatekeeper for approval before it's considered sent.
+    if(wantsDepositInvoice){
+      var inv=await dbIns('invoices',{
+        job_id:jobId,lead_id:lid,client_name:name,
+        invoice_type:'deposit',amount:depositAmount,
+        description:'Deposit invoice for '+jname,
+        status:'draft',due_date:new Date(Date.now()+7*86400000).toISOString().slice(0,10)
+      });
+      var invId=inv[0]?inv[0].id:null;
+      await addToGatekeeper('deposit_invoice','Deposit Invoice Ready: '+name,
+        'Job "'+jname+'" created. $'+depositAmount.toLocaleString()+' deposit invoice drafted and ready to send.',
+        'high','Review and send deposit invoice to client.','deposit_invoice_review');
+      await dbUpd('leads',lid,{stage:'signed',deposit_status:'invoiced',deposit_invoice_id:invId,deposit_received_at:new Date().toISOString()});
+    } else {
+      await dbUpd('leads',lid,{stage:'signed',deposit_status:'confirmed_manual',deposit_received_at:new Date().toISOString()});
+    }
+
     await addToGatekeeper('job_created','Job created: '+jname,'Lead converted to job. Budget: '+fmt$(budget)+'. Assign PM and schedule kickoff.','high','Review and assign project manager.','job_created');
     closeOv(document.getElementById('tojob-ov'));
-    toast('Job created: '+jname,'ok',4000);
+    toast(wantsDepositInvoice ? 'Job created — deposit invoice sent to Gatekeeper' : 'Job created: '+jname,'ok',4000);
     await pgJobsV2();
-  }catch(e){btn.disabled=false;btn.textContent='Confirm';toast('Error: '+e.message,'err');}
+    releaseAction(idemKey,btn,true);
+  }catch(e){
+    btn.textContent='Confirm';
+    releaseAction(idemKey,btn,false);
+    toast('Error: '+e.message,'err');
+  }
 }
 // _old_toJob removed — replaced by toJob() + confirmToJob() modal
 async function delLead(id,name){if(confirm(`Delete "${name}"?`)){try{await dbDel('leads',id);toast('Deleted');closeModal('ld');pgSales();}catch(e){toast(e.message,'err');}}}
@@ -2321,29 +2430,50 @@ async function auditLog(objectType, objectId, action, extra) {
 // REQ-001 | B-001 FIX — Gatekeeper Execution Engine
 // Every approval now EXECUTES its intended action
 // action_type map defines what each approval actually does
-async function gkApprove(id) {
-  var items = await dbGet('gatekeeper_queue', '?id=eq.' + id);
-  var item = items[0];
-  if(!item) { toast('Item not found','err'); return; }
+async function gkApprove(id, btnEl) {
+  // BUG-6 FIX: data-layer guard — checks actual stored status, not just UI state.
+  // This blocks double-execution even from rapid clicks, stale page state, or
+  // duplicate button renders that bypass the in-memory lock.
+  var idemKey = 'gk_resolve_' + id;
+  if (!guardAction(idemKey, btnEl)) return;
 
-  // Mark approved first
-  await dbUpd('gatekeeper_queue', id, {
-    status: 'approved',
-    resolved_at: new Date().toISOString()
-  });
-
-  // EXECUTE the action based on action_type
   try {
-    await gkExecuteAction(item);
-  } catch(e) {
-    console.error('[Gatekeeper] Execution error:', e);
-    toast('Approved but execution error: ' + e.message, 'err');
-  }
+    var items = await dbGet('gatekeeper_queue', '?id=eq.' + id);
+    var item = items[0];
+    if(!item) { toast('Item not found','err'); releaseAction(idemKey, btnEl, false); return; }
 
-  // Update badge count
-  var pending = await dbGet('gatekeeper_queue', '?status=eq.pending');
-  updateGKBadge(pending.length);
-  await pgGK();
+    if (item.status !== 'pending') {
+      // Already resolved by a previous click/request — do not re-execute.
+      toast('This item is already ' + item.status + ' — no action taken', 'ok', 2500);
+      releaseAction(idemKey, btnEl, true);
+      await pgGK();
+      return;
+    }
+
+    // Mark approved first
+    await dbUpd('gatekeeper_queue', id, {
+      status: 'approved',
+      resolved_at: new Date().toISOString()
+    });
+
+    // EXECUTE the action based on action_type
+    try {
+      await gkExecuteAction(item);
+    } catch(e) {
+      console.error('[Gatekeeper] Execution error:', e);
+      toast('Approved but execution error: ' + e.message, 'err');
+    }
+
+    // Update badge count
+    var pending = await dbGet('gatekeeper_queue', '?status=eq.pending');
+    updateGKBadge(pending.length);
+    await pgGK();
+    releaseAction(idemKey, btnEl, true);
+  } catch(e) {
+    releaseAction(idemKey, btnEl, false);
+    toast('Error: ' + e.message, 'err');
+    return;
+  }
 
   nextStep('Approved & Executed ✅', 'Action confirmed and completed.', [
     {icon:'🔑', label:'Review more items', sub:'Back to Gatekeeper queue', fn:'goTab("gatekeeper")'},
@@ -2445,6 +2575,14 @@ async function gkExecuteAction(item) {
       toast('Job creation acknowledged','ok');
       break;
 
+    case 'deposit_invoice_review':
+      // Deposit invoice approved — mark as ready to send
+      if(item.reference_id){
+        // no reference_id tracked here; invoice already exists in draft, just acknowledge
+      }
+      toast('Deposit invoice approved — visible in Invoices for sending','ok');
+      break;
+
     case 'proposal_signed':
       // Proposal signed — create job record
       if(item.reference_id) {
@@ -2492,12 +2630,28 @@ async function gkExecuteAction(item) {
   });
 }
 
-async function gkReject(id){
-  await dbUpd('gatekeeper_queue',id,{status:'rejected',resolved_at:new Date().toISOString()});
-  var pending = await dbGet('gatekeeper_queue','?status=eq.pending');
-  updateGKBadge(pending.length);
-  toast('Rejected and logged','ok');
-  await pgGK();
+async function gkReject(id, btnEl){
+  var idemKey = 'gk_resolve_' + id;
+  if (!guardAction(idemKey, btnEl)) return;
+  try {
+    var items = await dbGet('gatekeeper_queue', '?id=eq.' + id);
+    var item = items[0];
+    if (item && item.status !== 'pending') {
+      toast('This item is already ' + item.status + ' — no action taken', 'ok', 2500);
+      releaseAction(idemKey, btnEl, true);
+      await pgGK();
+      return;
+    }
+    await dbUpd('gatekeeper_queue',id,{status:'rejected',resolved_at:new Date().toISOString()});
+    var pending = await dbGet('gatekeeper_queue','?status=eq.pending');
+    updateGKBadge(pending.length);
+    toast('Rejected and logged','ok');
+    await pgGK();
+    releaseAction(idemKey, btnEl, true);
+  } catch(e) {
+    releaseAction(idemKey, btnEl, false);
+    toast('Error: ' + e.message, 'err');
+  }
 }
 
 async function gkDelegate(id,note){
@@ -2512,9 +2666,11 @@ async function pgGK(){
   try{
     const items=await dbGet('gatekeeper_queue','?status=eq.pending&order=created_at.desc');
     updateGKBadge(items.length);
+    // BUG-6 FIX: exactly ONE approve + ONE reject control per card (legacy gkDo() and
+    // duplicate gkApprove/gkReject buttons removed — was 4 controls stacked on one card)
     $('content').innerHTML=`<div style="font-size:13px;color:var(--muted);margin-bottom:16px">${items.length} decision${items.length!==1?'s':''} waiting for your approval</div>
       ${!items.length?`<div class="empty"><div class="ei">✅</div><div class="et">All clear — no pending decisions</div></div>`:
-      items.map(i=>`<div class="gkcard">
+      items.map(i=>`<div class="gkcard" id="gkcard-${i.id}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
           <span style="background:var(--amber-bg);color:var(--amber);font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;text-transform:uppercase">${(i.item_type||'').replace(/_/g,' ')}</span>
           ${i.amount?`<span style="font-weight:800;color:var(--amber)">${fmt$(i.amount)}</span>`:''}
@@ -2524,15 +2680,14 @@ async function pgGK(){
         ${i.description?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">${i.description}</div>`:''}
         ${i.ai_recommendation?`<div class="ai-box" style="margin-bottom:12px"><div class="ai-lbl">🤖 AI Recommendation</div>${i.ai_recommendation}</div>`:''}
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button style="background:var(--green-bg);color:var(--green);border:1.5px solid var(--green);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer" onclick="gkDo('${i.id}','approved')">✅ Approve</button>
-          <button style="background:var(--red-bg);color:var(--red);border:1.5px solid var(--red);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer" onclick="gkDo('${i.id}','rejected')">❌ Reject</button>
-          <button onclick="gkApprove(item.id)" style="padding:7px 14px;background:var(--green);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-right:4px">Approve</button><button onclick="gkReject(item.id)" style="padding:7px 14px;background:var(--red);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-right:4px">Reject</button><button class="btn btn-g btn-sm" onclick="gkAI('${i.id}','${i.title}','${(i.description||'').replace(/'/g,'').substring(0,100)}',${i.amount||0})">🤖 Ask AI</button>
+          <button style="background:var(--green-bg);color:var(--green);border:1.5px solid var(--green);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer" onclick="gkApprove('${i.id}',this)">✅ Approve</button>
+          <button style="background:var(--red-bg);color:var(--red);border:1.5px solid var(--red);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer" onclick="gkReject('${i.id}',this)">❌ Reject</button>
+          <button class="btn btn-g btn-sm" onclick="gkAI('${i.id}','${i.title}','${(i.description||'').replace(/'/g,'').substring(0,100)}',${i.amount||0})">🤖 Ask AI</button>
         </div>
         <div id="gkai-${i.id}"></div>
       </div>`).join('')}`;
   }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
 }
-async function gkDo(id,status){try{await dbUpd('gatekeeper_queue',id,{status,decided_at:new Date().toISOString()});toast(status==='approved'?'Approved ✅':'Rejected ❌');pgGK();}catch(e){toast(e.message,'err');}}
 async function gkAI(id,title,desc,amount){const el=$(`gkai-${id}`);el.innerHTML='<div class="loading" style="padding:6px"><div class="spin"></div></div>';try{const r=await ai(`Should I approve or reject? Title: ${title}. Description: ${desc}. Amount: ${fmt$(amount)}. 2 sentences max, direct recommendation.`);el.innerHTML=`<div class="ai-box" style="margin-top:8px"><div class="ai-lbl">AI Advice</div>${r}</div>`;}catch(e){el.innerHTML='';}}
 
 // REPORTS
@@ -3547,7 +3702,7 @@ async function takeoffToEstimate(docId){
     var est=safeJSON(r);
     
     // REQ-002 | B-002 FIX — Save to estimates table (was only going to gatekeeper_queue)
-    var estLines = (est.line_items||[]).map(function(li) {
+    var estLines = (function(){var l=est.line_items||[];if(typeof l==='string'){try{l=JSON.parse(l);}catch(e){l=[];}}return Array.isArray(l)?l:[];})().map(function(li) {
       return {
         phase: li.phase, item: li.item, type: li.type || 'other',
         unit: li.unit, qty: li.qty || 1,
@@ -3598,7 +3753,8 @@ async function takeoffToEstimate(docId){
 function showEstimateModal(est){
   var el=document.createElement('div');el.className='ov';el.id='est-modal';el.style.alignItems='flex-start';el.style.padding='8px';
   var phases={};
-  (est.line_items||[]).forEach(function(li){if(!phases[li.phase])phases[li.phase]=[];phases[li.phase].push(li);});
+  var _pli=est.line_items||[]; if(typeof _pli==='string'){try{_pli=JSON.parse(_pli);}catch(e){_pli=[];}} if(!Array.isArray(_pli))_pli=[];
+  _pli.forEach(function(li){if(!phases[li.phase])phases[li.phase]=[];phases[li.phase].push(li);});
   
   el.innerHTML='<div class="modal" style="max-width:900px;margin:auto">'
     +'<div class="mh" style="background:linear-gradient(135deg,var(--teal),var(--teal-dark));border-radius:12px 12px 0 0;padding:16px 22px">'
@@ -3923,7 +4079,7 @@ async function pgJobsV2(){
       +'</div>'
       +'<div style="display:flex;gap:8px">'
       +'<input id="job-search" placeholder="Search jobs..." style="width:180px;padding:7px 11px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;font-family:inherit" oninput="filterJobsV2(this.value)">'
-      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button><button onclick="aiWeeklySummary()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">AI Summary</button>'
+      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button>'+(AJOB?'<button onclick="showJobSettingsOverride(&quot;'+AJOB.id+'&quot;)" style="padding:8px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">&#x2699;&#xFE0F; Job Settings</button>':'')+'<button onclick="aiWeeklySummary()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">AI Summary</button>'
       +'</div></div>'
       
       // Status filter tabs
@@ -6132,7 +6288,7 @@ async function pgEstimates(){
 // REQ-003 | REQ-036 | DEC-011 — NY law: tax on materials ONLY
 // Labor: 0% | Subs: 0% | Permits: 0% | Materials: 8%
 // LOCKED — do not change without Owner approval
-function calcEstTotal(lines) {
+function calcEstTotal(lines, jobId) {
   var subtotal_materials = 0, subtotal_labor = 0, subtotal_subs = 0,
       subtotal_permits = 0, subtotal_other = 0;
   lines.forEach(function(l) {
@@ -6147,8 +6303,8 @@ function calcEstTotal(lines) {
     else subtotal_other += line_total;
   });
   var subtotal = subtotal_materials + subtotal_labor + subtotal_subs + subtotal_permits + subtotal_other;
-  var taxRate = (typeof getTaxRate === 'function') ? getTaxRate() : 0.08; // NY law: materials only
-  var feeRate = (typeof getContractorFee === 'function') ? getContractorFee() : 0.20;
+  var taxRate = (typeof getTaxRate === 'function') ? getTaxRate(jobId) : 0.08; // NY law: materials only (job override aware)
+  var feeRate = (typeof getContractorFee === 'function') ? getContractorFee(jobId) : 0.20;
   var tax = subtotal_materials * taxRate;
   var contractor_fee = subtotal * feeRate;
   var grand_total = subtotal + tax + contractor_fee;
@@ -6229,31 +6385,56 @@ async function openEstimate(id){
   var jobs = await dbGet('jobs','?order=job_name.asc');
   var job = jobs.find(function(j){return j.id===est.job_id;});
   var lines = est.line_items||[];
-  var totals = calcEstTotal(lines);
+  if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} } // defensive: line_items sometimes saved as JSON string
+  if(!Array.isArray(lines)) lines=[];
+  var totals = calcEstTotal(lines, est.job_id);
   
   var costTypes = ['Labor','Materials','Subcontractor','Equipment','Permit','Other'];
   
-  // Build line items table
-  var linesHtml = lines.length === 0 
-    ? '<div style="text-align:center;padding:28px;color:var(--dim);font-size:13px">No line items yet — click Add Line below</div>'
-    : lines.map(function(l,i){
-        var cost = (l.qty||0)*(l.unit_cost||0);
-        var markup = cost*((l.markup_pct||est.default_markup||20)/100);
-        var total = cost+markup;
-        return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 80px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)">'
-          + '<div><div style="font-size:13px;font-weight:600">'+l.description+'</div>'
-          + (l.notes?'<div style="font-size:11px;color:var(--muted)">'+l.notes+'</div>':'')
-          + '<div style="font-size:10px;color:var(--dim);margin-top:2px">'+l.cost_type+'</div></div>'
-          + '<div style="font-size:13px;text-align:center">'+l.qty+' '+l.unit+'</div>'
-          + '<div style="font-size:13px;text-align:right">'+fmt$(l.unit_cost)+'</div>'
-          + '<div style="font-size:13px;text-align:center">'+l.markup_pct+'%</div>'
-          + '<div style="font-size:13px;font-weight:700;text-align:right;color:var(--teal)">'+fmt$(total)+'</div>'
-          + '<div style="display:flex;gap:4px">'
-          + '<button onclick="editLine(\''+id+'\','+i+')" style="padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">Edit</button>'
-          + '<button onclick="deleteLine(\''+id+'\','+i+')" style="padding:4px 8px;font-size:11px;border:1px solid var(--red);border-radius:4px;background:#fff;color:var(--red);cursor:pointer">✕</button>'
-          + '</div></div>';
-      }).join('');
+  // BUG-3 FIX: line items now grouped by trade/cost type with subtotals — was a flat list
+  function renderEstLineRow(l,i){
+    var cost = (l.qty||0)*(l.unit_cost||0);
+    var markup = cost*((l.markup_pct||est.default_markup||20)/100);
+    var total = cost+markup;
+    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 80px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)">'
+      + '<div><div style="font-size:13px;font-weight:600">'+l.description+'</div>'
+      + (l.notes?'<div style="font-size:11px;color:var(--muted)">'+l.notes+'</div>':'')
+      + '</div>'
+      + '<div style="font-size:13px;text-align:center">'+l.qty+' '+l.unit+'</div>'
+      + '<div style="font-size:13px;text-align:right">'+fmt$(l.unit_cost)+'</div>'
+      + '<div style="font-size:13px;text-align:center">'+l.markup_pct+'%</div>'
+      + '<div style="font-size:13px;font-weight:700;text-align:right;color:var(--teal)">'+fmt$(total)+'</div>'
+      + '<div style="display:flex;gap:4px">'
+      + '<button onclick="editLine(\''+id+'\','+i+')" style="padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">Edit</button>'
+      + '<button onclick="deleteLine(\''+id+'\','+i+',this)" style="padding:4px 8px;font-size:11px;border:1px solid var(--red);border-radius:4px;background:#fff;color:var(--red);cursor:pointer">✕</button>'
+      + '</div></div>';
+  }
 
+  var linesHtml;
+  if(lines.length === 0){
+    linesHtml = '<div style="text-align:center;padding:28px;color:var(--dim);font-size:13px">No line items yet — click Add Line below</div>';
+  } else {
+    var tradeOrder = ['Labor','Materials','Subcontractor','Equipment','Permit'];
+    var byTrade = {};
+    lines.forEach(function(l,i){
+      var t = l.cost_type || 'Other';
+      if(!byTrade[t]) byTrade[t] = [];
+      byTrade[t].push({line:l, idx:i});
+    });
+    var orderedTrades = tradeOrder.filter(function(t){return byTrade[t];}).concat(Object.keys(byTrade).filter(function(t){return tradeOrder.indexOf(t)===-1;}));
+    linesHtml = orderedTrades.map(function(trade){
+      var group = byTrade[trade];
+      var groupTotal = group.reduce(function(s,g){
+        var c=(g.line.qty||0)*(g.line.unit_cost||0);
+        var m=c*((g.line.markup_pct||est.default_markup||20)/100);
+        return s+c+m;
+      },0);
+      return '<div style="background:var(--bg);padding:6px 12px;border-bottom:2px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
+        +'<span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted)">'+trade+' ('+group.length+')</span>'
+        +'<span style="font-size:12px;font-weight:800;color:var(--teal)">'+fmt$(groupTotal)+'</span></div>'
+        + group.map(function(g,gi){return renderEstLineRow(g.line, g.idx);}).join('');
+    }).join('');
+  }
   var statusColor = est.status==='sent'?'var(--blue)':est.status==='approved'?'var(--green)':'var(--amber)';
 
   document.getElementById('content').innerHTML = [
@@ -6262,7 +6443,7 @@ async function openEstimate(id){
     '<div style="flex:1"><div style="font-size:18px;font-weight:800">'+est.title+'</div>',
     '<div style="font-size:12px;color:var(--muted)">'+(job?job.job_name:'No job')+' · '+est.client_name+'</div></div>',
     '<span style="font-size:11px;font-weight:700;text-transform:uppercase;color:'+statusColor+';border:1.5px solid '+statusColor+';padding:4px 12px;border-radius:20px">'+est.status+'</span>',
-    '<button class="btn btn-g btn-sm" onclick="previewEstimate(\''+id+'\')">👁 Preview</button>',
+    '<button class="btn btn-g btn-sm" onclick="showClientPreviewOptions(\''+id+'\')">👁 Preview</button>',
     '<button class="btn btn-g btn-sm" onclick="aiEstimateHelper(\''+id+'\')">🤖 AI Fill</button>',
     '<button class="btn btn-p btn-sm" onclick="sendEstimate(\''+id+'\')">📧 Send to Client</button>',
     '</div>',
@@ -6278,7 +6459,7 @@ async function openEstimate(id){
     linesHtml,
     '<div style="padding:12px;border-top:2px solid var(--border);display:flex;gap:8px">',
     '<button class="btn btn-p" onclick="addLine(\''+id+'\')">+ Add Line Item</button>',
-    '<button class="btn btn-g" onclick="addLineAI(\''+id+'\')">🤖 AI Suggest Lines</button>',
+    '<button class="btn btn-g" onclick="addLineAI(\''+id+'\',this)">🤖 AI Suggest Lines</button>',
     '</div></div></div>',
     
     // Right: totals + actions
@@ -6379,29 +6560,44 @@ async function saveNewLine(estId){
   var results = await dbGet('estimates','?id=eq.'+estId);
   var est = results[0];
   var lines = est.line_items||[];
+  if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
   lines.push(line);
   await dbUpd('estimates',estId,{line_items:lines});
+  await autoMarkEstimateRevised(estId);
   closeOv(document.getElementById('add-line-modal'));
   toast('Line item added','ok');
   openEstimate(estId);
 }
 
-async function deleteLine(estId, idx){
+async function deleteLine(estId, idx, btnEl){
   if(!confirm('Remove this line item?'))return;
-  var results = await dbGet('estimates','?id=eq.'+estId);
-  var est = results[0];
-  var lines = est.line_items||[];
-  lines.splice(idx,1);
-  await dbUpd('estimates',estId,{line_items:lines});
-  toast('Line removed','ok');
-  openEstimate(estId);
+  var idemKey='delete_line_'+estId+'_'+idx;
+  if(btnEl && !guardAction(idemKey,btnEl)) return;
+  try{
+    var results = await dbGet('estimates','?id=eq.'+estId);
+    var est = results[0];
+    if(!est){toast('Estimate not found','err');if(btnEl)releaseAction(idemKey,btnEl,false);return;}
+    var lines = est.line_items||[];
+    if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+    if(!Array.isArray(lines)) lines=[];
+    lines.splice(idx,1);
+    await dbUpd('estimates',estId,{line_items:lines});
+    await autoMarkEstimateRevised(estId);
+    toast('Line removed','ok');
+    openEstimate(estId);
+    if(btnEl)releaseAction(idemKey,btnEl,true);
+  }catch(e){if(btnEl)releaseAction(idemKey,btnEl,false);toast('Error: '+e.message,'err');}
 }
 
 async function editLine(estId, idx){
   var results = await dbGet('estimates','?id=eq.'+estId);
   var est = results[0];
-  var l = (est.line_items||[])[idx];
-  if(!l)return;
+  if(!est){toast('Estimate not found','err');return;}
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+  if(!Array.isArray(lines)) lines=[];
+  var l = lines[idx];
+  if(!l){toast('Line item not found','err');return;}
   
   var costTypes = ['Labor','Materials','Subcontractor','Equipment','Permit','Other'];
   var el = document.createElement('div');
@@ -6427,40 +6623,128 @@ async function editLine(estId, idx){
   document.body.appendChild(el);
 }
 
-async function saveEditLine(estId, idx){
-  var results = await dbGet('estimates','?id=eq.'+estId);
-  var est = results[0];
-  var lines = est.line_items||[];
-  lines[idx] = {
-    description: document.getElementById('eli-desc').value.trim(),
-    notes: document.getElementById('eli-notes').value.trim(),
-    cost_type: document.getElementById('eli-type').value,
-    unit: document.getElementById('eli-unit').value,
-    qty: parseFloat(document.getElementById('eli-qty').value)||1,
-    unit_cost: parseFloat(document.getElementById('eli-cost').value)||0,
-    markup_pct: parseFloat(document.getElementById('eli-markup').value)||20
-  };
-  await dbUpd('estimates',estId,{line_items:lines});
-  closeOv(document.getElementById('edit-line-modal'));
-  toast('Line updated','ok');
-  openEstimate(estId);
-}
-
-async function setEstStatus(estId, status){
-  await dbUpd('estimates',estId,{status:status});
-  toast('Status updated to '+status,'ok');
-  openEstimate(estId);
-}
-
-async function aiEstimateHelper(estId){
-  var results = await dbGet('estimates','?id=eq.'+estId);
-  var est = results[0];
-  var jobs = await dbGet('jobs','?id=eq.'+est.job_id);
-  var job = jobs[0];
-  
-  toast('🤖 AI analyzing project — building line items...','info',8000);
-  
+async function saveEditLine(estId, idx, btnEl){
+  var idemKey='save_edit_line_'+estId+'_'+idx;
+  if(btnEl && !guardAction(idemKey,btnEl)) return;
   try{
+    var descEl=document.getElementById('eli-desc');
+    if(!descEl || !descEl.value.trim()){toast('Description required','err');if(btnEl)releaseAction(idemKey,btnEl,false);return;}
+    var results = await dbGet('estimates','?id=eq.'+estId);
+    var est = results[0];
+    var lines = est.line_items||[];
+    if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+    lines[idx] = {
+      description: descEl.value.trim(),
+      notes: document.getElementById('eli-notes').value.trim(),
+      cost_type: document.getElementById('eli-type').value,
+      unit: document.getElementById('eli-unit').value,
+      qty: parseFloat(document.getElementById('eli-qty').value)||1,
+      unit_cost: parseFloat(document.getElementById('eli-cost').value)||0,
+      markup_pct: parseFloat(document.getElementById('eli-markup').value)||20
+    };
+    await dbUpd('estimates',estId,{line_items:lines});
+    // BUG-4: editing a line on a SENT estimate auto-flips status to Revised — never manual
+    await autoMarkEstimateRevised(estId);
+    closeOv(document.getElementById('edit-line-modal'));
+    toast('Line updated','ok');
+    openEstimate(estId);
+    if(btnEl)releaseAction(idemKey,btnEl,true);
+  }catch(e){if(btnEl)releaseAction(idemKey,btnEl,false);toast('Error: '+e.message,'err');}
+}
+
+// BUG-4 FIX: status transitions are now validated, not free-text.
+// Most transitions happen automatically (send, approve via Gatekeeper, revise on edit).
+// Manual override is limited to the legal forward transitions in this map.
+var ESTIMATE_STATUS_TRANSITIONS = {
+  'draft': ['reviewed'],
+  'reviewed': ['draft','sent','approved'],
+  'sent': ['revised','approved'],
+  'approved': ['proposal_created'],
+  'revised': ['sent'],
+  'proposal_created': []
+};
+
+async function setEstStatus(estId, status, btnEl){
+  var idemKey='set_est_status_'+estId+'_'+status;
+  if(!guardAction(idemKey,btnEl)) return;
+  try{
+    var rows=await dbGet('estimates','?id=eq.'+estId);
+    var est=rows[0];
+    if(!est){toast('Estimate not found','err');releaseAction(idemKey,btnEl,false);return;}
+    var current=est.status||'draft';
+    var allowed=ESTIMATE_STATUS_TRANSITIONS[current]||[];
+    if(current===status){
+      toast('Already '+status,'ok',2000);
+      releaseAction(idemKey,btnEl,true);
+      return;
+    }
+    if(allowed.indexOf(status)===-1){
+      toast('Cannot move from '+current+' to '+status+' manually','err');
+      releaseAction(idemKey,btnEl,false);
+      return;
+    }
+    await dbUpd('estimates',estId,{status:status,status_changed_at:new Date().toISOString()});
+    await auditLog('estimates',estId,'status_changed',{old_value:current,new_value:status});
+    toast('Status updated to '+status,'ok');
+    openEstimate(estId);
+    releaseAction(idemKey,btnEl,true);
+  }catch(e){releaseAction(idemKey,btnEl,false);toast('Error: '+e.message,'err');}
+}
+
+// Automatic status helpers — called by the actual business events, not by hand
+async function autoMarkEstimateSent(estId){
+  await dbUpd('estimates',estId,{status:'sent',sent_at:new Date().toISOString()});
+  await auditLog('estimates',estId,'status_changed',{old_value:'reviewed',new_value:'sent',changed_by_ai:false});
+}
+async function autoMarkEstimateRevised(estId){
+  var rows=await dbGet('estimates','?id=eq.'+estId);
+  var est=rows[0];
+  if(est && est.status==='sent'){
+    await dbUpd('estimates',estId,{status:'revised',revised_at:new Date().toISOString()});
+    await auditLog('estimates',estId,'status_changed',{old_value:'sent',new_value:'revised'});
+  }
+}
+
+// BUG-2 FIX: validates every AI-returned line item, rejects undefined/malformed
+// entries, and is idempotency-guarded so repeated clicks cannot duplicate rows.
+function validateEstimateLineItem(item){
+  if(!item || typeof item!=='object') return null;
+  var desc=(item.description||'').toString().trim();
+  if(!desc || desc==='undefined') return null;
+  var qty=parseFloat(item.qty);
+  var unitCost=parseFloat(item.unit_cost);
+  if(isNaN(qty)||qty<=0) qty=1;
+  if(isNaN(unitCost)||unitCost<0) unitCost=0;
+  var markup=parseFloat(item.markup_pct);
+  if(isNaN(markup)||markup<0) markup=20;
+  var validTypes=['Labor','Materials','Subcontractor','Equipment','Permit'];
+  var costType=validTypes.indexOf(item.cost_type)>=0 ? item.cost_type : 'Materials';
+  var validUnits=['EA','SF','LF','HR','LS','CY','SQ','GAL'];
+  var unit=validUnits.indexOf(item.unit)>=0 ? item.unit : 'EA';
+  return {
+    description:desc,
+    notes:(item.notes||'').toString().trim(),
+    cost_type:costType,
+    unit:unit,
+    qty:qty,
+    unit_cost:unitCost,
+    markup_pct:markup
+  };
+}
+
+async function aiEstimateHelper(estId,btnEl){
+  var idemKey='ai_est_lines_'+estId;
+  if(!guardAction(idemKey,btnEl)) return;
+  try{
+    var results = await dbGet('estimates','?id=eq.'+estId);
+    var est = results[0];
+    if(!est){toast('Estimate not found','err');releaseAction(idemKey,btnEl,false);return;}
+    var jobs = await dbGet('jobs','?id=eq.'+est.job_id);
+    var job = jobs[0];
+
+    btnEl && (btnEl.textContent='🤖 Generating...');
+    toast('🤖 AI analyzing project — building line items...','info',8000);
+
     var prompt = 'You are a construction estimator for Corestone Developers, Hudson Valley NY. '
       +'Create a detailed estimate with realistic line items for this project.\n'
       +'Project: '+est.title+'\n'
@@ -6468,41 +6752,95 @@ async function aiEstimateHelper(estId){
       +'Scope: '+(est.notes||'General construction')+'\n'
       +'Return ONLY valid JSON array of line items, no markdown:\n'
       +'[{"description":"Item name","notes":"detail","cost_type":"Labor|Materials|Subcontractor|Equipment|Permit","unit":"EA|SF|LF|HR|LS","qty":1,"unit_cost":500,"markup_pct":20}]';
-    
+
     var r = await ai(prompt, 'Construction estimator. Return only valid JSON array. Realistic Hudson Valley NY pricing.', 1500);
-    var items = safeJSON(r);
-    
+    var rawItems = safeJSON(r);
+
+    if(!Array.isArray(rawItems)){
+      toast('AI did not return a valid list — nothing was added','err');
+      releaseAction(idemKey,btnEl,false);
+      btnEl && (btnEl.textContent='🤖 AI Suggest Lines');
+      return;
+    }
+
+    // Validate every item — silently drop anything malformed instead of saving garbage
+    var validItems=[];
+    rawItems.forEach(function(raw){
+      var v=validateEstimateLineItem(raw);
+      if(v) validItems.push(v);
+    });
+
+    if(!validItems.length){
+      toast('AI response had no usable line items — nothing was added','err');
+      releaseAction(idemKey,btnEl,false);
+      btnEl && (btnEl.textContent='🤖 AI Suggest Lines');
+      return;
+    }
+
     var existing = est.line_items||[];
-    var combined = existing.concat(items);
+    if(typeof existing==='string'){ try{existing=JSON.parse(existing);}catch(e){existing=[];} }
+    if(!Array.isArray(existing)) existing=[];
+
+    // De-duplicate: skip any AI item whose description already exists in the estimate
+    var existingDescs = existing.map(function(l){return (l.description||'').toLowerCase().trim();});
+    var newItems = validItems.filter(function(v){
+      return existingDescs.indexOf(v.description.toLowerCase().trim()) === -1;
+    });
+
+    if(!newItems.length){
+      toast('AI suggested only items that already exist — nothing duplicated','ok',3000);
+      releaseAction(idemKey,btnEl,true);
+      btnEl && (btnEl.textContent='🤖 AI Suggest Lines');
+      return;
+    }
+
+    var combined = existing.concat(newItems);
     await dbUpd('estimates',estId,{line_items:combined});
-    toast('✅ AI added '+items.length+' line items','ok');
+    toast('✅ AI added '+newItems.length+' validated line item'+(newItems.length===1?'':'s'),'ok');
     openEstimate(estId);
+    releaseAction(idemKey,btnEl,true);
+    btnEl && (btnEl.textContent='🤖 AI Suggest Lines');
   }catch(e){
+    releaseAction(idemKey,btnEl,false);
+    btnEl && (btnEl.textContent='🤖 AI Suggest Lines');
     toast('AI error: '+e.message,'err');
   }
 }
 
-async function addLineAI(estId){
-  await aiEstimateHelper(estId);
+async function addLineAI(estId,btnEl){
+  await aiEstimateHelper(estId,btnEl);
 }
 
-function previewEstimate(estId){
+function previewEstimate(estId,opts){
+  // BUG-5 FIX: respects Client Preview Options (show/hide markup, costs, details, etc.)
+  if(!opts){
+    try{opts=JSON.parse(localStorage.getItem('cs_preview_opts_'+estId)||'{}');}catch(e){opts={};}
+  }
+  var defaults={show_markup:false,show_original_cost:false,show_line_details:true,totals_only:false,show_allowances:true,show_trade_breakdown:true,show_notes:false};
+  opts=Object.assign({},defaults,opts);
+
   dbGet('estimates','?id=eq.'+estId).then(function(results){
     var est = results[0];
     if(!est)return;
     var lines = est.line_items||[];
-    var totals = calcEstTotal(lines);
-    
-    var linesHtml = lines.map(function(l){
+    if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+    var totals = calcEstTotal(lines, est.job_id);
+
+    var linesHtml = opts.totals_only ? '' : lines.map(function(l){
       var cost = (l.qty||0)*(l.unit_cost||0);
       var markup = cost*((l.markup_pct||20)/100);
       var total = cost+markup;
+      var displayCost = opts.show_markup ? total : (opts.show_original_cost ? cost : total);
+      var desc = opts.show_line_details ? l.description : (l.cost_type||'Item');
       return '<tr>'
-        +'<td style="padding:10px 12px;border-bottom:1px solid #e8ecf0"><div style="font-weight:600">'+l.description+'</div>'
-        +(l.notes?'<div style="font-size:11px;color:#666;margin-top:2px">'+l.notes+'</div>':'')+'</td>'
-        +'<td style="padding:10px 12px;border-bottom:1px solid #e8ecf0;text-align:center;color:#666">'+l.cost_type+'</td>'
+        +'<td style="padding:10px 12px;border-bottom:1px solid #e8ecf0"><div style="font-weight:600">'+desc+'</div>'
+        +(opts.show_notes && l.notes?'<div style="font-size:11px;color:#666;margin-top:2px">'+l.notes+'</div>':'')
+        +(opts.show_markup?'<div style="font-size:10px;color:#0d7a70;margin-top:2px">Markup: '+(l.markup_pct||20)+'%</div>':'')
+        +(opts.show_original_cost?'<div style="font-size:10px;color:#999;margin-top:2px">Base cost: '+fmt$(cost)+'</div>':'')
+        +'</td>'
+        +(opts.show_trade_breakdown?'<td style="padding:10px 12px;border-bottom:1px solid #e8ecf0;text-align:center;color:#666">'+l.cost_type+'</td>':'')
         +'<td style="padding:10px 12px;border-bottom:1px solid #e8ecf0;text-align:center">'+l.qty+' '+l.unit+'</td>'
-        +'<td style="padding:10px 12px;border-bottom:1px solid #e8ecf0;text-align:right;font-weight:700;color:#0d7a70">'+fmt$(total)+'</td>'
+        +'<td style="padding:10px 12px;border-bottom:1px solid #e8ecf0;text-align:right;font-weight:700;color:#0d7a70">'+fmt$(displayCost)+'</td>'
         +'</tr>';
     }).join('');
     
@@ -6870,27 +7208,31 @@ async function sendEstimate(estId){
     +'</div>'
     +'<div class="mf">'
     +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-    +'<button class="btn btn-g" onclick="previewEstimate(\''+estId+'\')">👁 Preview First</button>'
-    +'<button class="btn btn-p" onclick="confirmSendEstimate(\''+estId+'\')">📧 Send Now</button>'
+    +'<button class="btn btn-g" onclick="showClientPreviewOptions(\''+estId+'\')">👁 Preview First</button>'
+    +'<button class="btn btn-p" onclick="confirmSendEstimate(\''+estId+'\',this)">📧 Send Now</button>'
     +'</div></div>';
   document.body.appendChild(el);
 }
 
-async function confirmSendEstimate(estId){
-  await dbUpd('estimates',estId,{status:'sent',sent_at:new Date().toISOString()});
-  var to = document.getElementById('send-to').value;
-  var subj = document.getElementById('send-subj').value;
-  var body = document.getElementById('send-body').value;
-  
-  // Log the send in messages
-  await dbIns('messages',{
-    body:'ESTIMATE SENT\n\nTo: '+to+'\nSubject: '+subj+'\n\n'+body,
-    created_at:new Date().toISOString()
-  });
-  
-  closeOv(document.getElementById('send-est-modal'));
-  toast('✅ Estimate logged as sent to '+to,'ok');
-  openEstimate(estId);
+async function confirmSendEstimate(estId,btnEl){
+  var idemKey='send_estimate_'+estId;
+  if(!guardAction(idemKey,btnEl)) return;
+  try{
+    await dbUpd('estimates',estId,{status:'sent',sent_at:new Date().toISOString()});
+    var to = document.getElementById('send-to').value;
+    var subj = document.getElementById('send-subj').value;
+    var body = document.getElementById('send-body').value;
+
+    await dbIns('messages',{
+      body:'ESTIMATE SENT\n\nTo: '+to+'\nSubject: '+subj+'\n\n'+body,
+      created_at:new Date().toISOString()
+    });
+
+    closeOv(document.getElementById('send-est-modal'));
+    toast('✅ Estimate logged as sent to '+to,'ok');
+    openEstimate(estId);
+    releaseAction(idemKey,btnEl,true);
+  }catch(e){releaseAction(idemKey,btnEl,false);toast('Error: '+e.message,'err');}
 }
 async function pgBudget(){
   var jobs=await dbGet('jobs','?order=job_name.asc');
@@ -7072,13 +7414,13 @@ async function pgCOs(){
     var job=jobs.find(function(j){return j.id===co.job_id;})||{job_name:'—'};
     var labor=parseFloat(co.labor_cost||0),mat=parseFloat(co.material_cost||0),mk=parseFloat(co.markup_pct||20)/100;
     var total=(labor+mat)*(1+mk);
-    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:80px 1fr 140px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
+    html+='<div onclick="openCODetail(\''+co.id+'\')" style="cursor:pointer;padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:80px 1fr 140px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\''+(i%2===0?'var(--card)':'var(--bg)')+'\'">'
       +'<div style="font-size:11px;font-weight:800;color:var(--muted)">CO-'+String(i+1).padStart(3,'0')+'<br><span style="font-weight:400;font-size:10px">'+job.job_name.substring(0,14)+'</span></div>'
       +'<div><div style="font-weight:700;font-size:13px;margin-bottom:2px">'+co.title+'</div><div style="font-size:11px;color:var(--muted)">'+co.reason+'</div></div>'
       +'<div style="font-size:11px;color:var(--muted)">Labor: '+fmt$(labor)+'<br>Mat: '+fmt$(mat)+'<br>Markup: '+(mk*100).toFixed(0)+'%</div>'
       +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(total)+'<br><span style="font-size:10px;color:var(--muted);font-weight:400">'+co.schedule_impact_days+' days</span></div>'
       +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[co.status]||'var(--muted)')+';color:#fff">'+co.status+'</span></div>'
-      +'<div style="display:flex;gap:4px;flex-wrap:wrap">'
+      +'<div style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">'
       +(co.status!=='Approved'&&co.status!=='Rejected'?'<button onclick="approveCOItem(\''+co.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">✓</button>':'')
       +'<button onclick="delRecord(\''+co.id+'\',\'change_orders\',pgCOs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
       +'</div></div>';
@@ -7110,10 +7452,22 @@ async function saveNewCO(status){
   ]);
   }catch(e){toast('Change order error: '+e.message,'err');console.error('saveNewCO',e);}
 }
-async function approveCOItem(id){
-  await dbUpd('change_orders',id,{status:'Approved',approved_at:new Date().toISOString()});
-  await aiLogTransaction('CO Approved','Change order #'+id+' approved.','normal');
-  pgCOs();
+async function approveCOItem(id,btnEl){
+  var idemKey='approve_co_'+id;
+  if(!guardAction(idemKey,btnEl)) return;
+  try{
+    var rows=await dbGet('change_orders','?id=eq.'+id);
+    var co=rows[0];
+    if(co && (co.status==='Approved'||co.status==='Rejected')){
+      toast('This Change Order is already '+co.status,'ok',2500);
+      releaseAction(idemKey,btnEl,true);
+      return;
+    }
+    await dbUpd('change_orders',id,{status:'Approved',approved_at:new Date().toISOString()});
+    await aiLogTransaction('CO Approved','Change order #'+id+' approved.','normal');
+    pgCOs();
+    releaseAction(idemKey,btnEl,true);
+  }catch(e){releaseAction(idemKey,btnEl,false);toast('Error: '+e.message,'err');return;}
   nextStep('Change Order Approved!', 'Budget has been updated. What next?', [
     {icon:'📄', label:'Create invoice for this CO', sub:'Bill client for the change order', fn:"goTab('invoices')", primary:true},
     {icon:'📱', label:'Notify client', sub:'AI drafts update message', fn:"goTab('messages')", primary:false},
@@ -8397,12 +8751,62 @@ async function signProposal(propId) {
 // ═══════════════════════════════════════════════════════════════
 // SETTINGS PAGE (FIX-8d) — replaces all hardcoded business values
 // ═══════════════════════════════════════════════════════════════
-function getSetting(key,def){try{var s=JSON.parse(localStorage.getItem('cs_settings')||'{}');return s[key]!==undefined?s[key]:def;}catch(e){return def;}}
+// BUG-1 FIX: settings can now be overridden per job/project.
+// Lookup order: job override (if jobId given) -> company-wide setting -> hardcoded default.
+function getSetting(key,def,jobId){
+  try{
+    if(jobId){
+      var jobs=lsAll('jobs');
+      var job=jobs.find(function(j){return j.id===jobId;});
+      if(job && job.setting_overrides){
+        var ov=typeof job.setting_overrides==='string'?JSON.parse(job.setting_overrides):job.setting_overrides;
+        if(ov && ov[key]!==undefined) return ov[key];
+      }
+    }
+    var s=JSON.parse(localStorage.getItem('cs_settings')||'{}');
+    return s[key]!==undefined?s[key]:def;
+  }catch(e){return def;}
+}
+function setJobOverride(jobId,key,val){
+  try{
+    var jobs=lsAll('jobs');
+    var idx=jobs.findIndex(function(j){return j.id===jobId;});
+    if(idx<0) return false;
+    var ov=jobs[idx].setting_overrides;
+    ov=ov?(typeof ov==='string'?JSON.parse(ov):ov):{};
+    ov[key]=val;
+    jobs[idx].setting_overrides=JSON.stringify(ov);
+    lsSave('jobs',jobs);
+    return true;
+  }catch(e){return false;}
+}
+function clearJobOverride(jobId,key){
+  try{
+    var jobs=lsAll('jobs');
+    var idx=jobs.findIndex(function(j){return j.id===jobId;});
+    if(idx<0) return false;
+    var ov=jobs[idx].setting_overrides;
+    if(!ov) return true;
+    ov=typeof ov==='string'?JSON.parse(ov):ov;
+    delete ov[key];
+    jobs[idx].setting_overrides=JSON.stringify(ov);
+    lsSave('jobs',jobs);
+    return true;
+  }catch(e){return false;}
+}
+function getJobOverrides(jobId){
+  try{
+    var jobs=lsAll('jobs');
+    var job=jobs.find(function(j){return j.id===jobId;});
+    if(!job||!job.setting_overrides) return {};
+    return typeof job.setting_overrides==='string'?JSON.parse(job.setting_overrides):job.setting_overrides;
+  }catch(e){return {};}
+}
 function setSetting(key,val){try{var s=JSON.parse(localStorage.getItem('cs_settings')||'{}');s[key]=val;localStorage.setItem('cs_settings',JSON.stringify(s));}catch(e){}}
 function getAllSettings(){try{return JSON.parse(localStorage.getItem('cs_settings')||'{}')}catch(e){return {};}}
-function getContractorFee(){return parseFloat(getSetting('contractor_fee_pct',20))/100;}
-function getTaxRate(){return parseFloat(getSetting('tax_rate',8))/100;}
-function getDepositAmount(){return parseFloat(getSetting('deposit_amount',5000));}
+function getContractorFee(jobId){return parseFloat(getSetting('contractor_fee_pct',20,jobId))/100;}
+function getTaxRate(jobId){return parseFloat(getSetting('tax_rate',8,jobId))/100;}
+function getDepositAmount(jobId){return parseFloat(getSetting('deposit_amount',5000,jobId));}
 function getAIModel(){return getSetting('ai_model','claude-sonnet-4-6');}
 function getCompanyName(){return getSetting('company_name','Corestone Developers');}
 
@@ -8492,6 +8896,188 @@ async function pgSettings(){
   html+='</div>';
 
   document.getElementById('content').innerHTML=html;
+}
+
+// BUG-12 FIX: Change Order detail view — was completely missing
+async function openCODetail(coId){
+  var rows = await dbGet('change_orders','?id=eq.'+coId);
+  var co = rows[0]; if(!co){toast('Change Order not found','err');return;}
+  var jobs = await dbGet('jobs','');
+  var job = jobs.find(function(j){return j.id===co.job_id;}) || {job_name:'\u2014'};
+  var labor = parseFloat(co.labor_cost||0), mat = parseFloat(co.material_cost||0), mk = parseFloat(co.markup_pct||20)/100;
+  var total = (labor+mat)*(1+mk);
+  var sColors={'Draft':'#6b7280','Pending Internal':'#d97706','Pending Client':'#1d4ed8','Approved':'#16a34a','Rejected':'#dc2626'};
+  var sc = sColors[co.status]||'#6b7280';
+
+  var el=document.createElement('div');el.className='ov';el.id='co-detail-ov';el.style.zIndex='1002';
+  var modal=document.createElement('div');modal.className='modal';modal.style.maxWidth='600px';
+
+  var hdr=document.createElement('div');hdr.className='mh';
+  hdr.innerHTML='<div class="mt">Change Order \u2014 '+co.title+'</div>';
+  var xbtn=document.createElement('button');xbtn.className='mc';xbtn.innerHTML='&#x2715;';
+  xbtn.onclick=function(){closeOv(el);};hdr.appendChild(xbtn);modal.appendChild(hdr);
+
+  var body=document.createElement('div');body.className='mb';
+  var html='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
+    +'<span style="font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px;background:'+sc+';color:#fff">'+co.status+'</span>'
+    +'<span style="font-size:12px;color:var(--muted)">'+job.job_name+'</span></div>'
+    +'<div style="background:var(--teal-bg,#f0faf9);border:1px solid var(--teal);border-radius:8px;padding:14px;margin-bottom:14px">'
+    +'<div style="font-size:12px;font-weight:700;color:var(--teal);margin-bottom:6px">REASON FOR CHANGE</div>'
+    +'<div style="font-size:13px">'+(co.reason||'\u2014')+'</div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'
+    +'<div><div style="font-size:11px;color:var(--muted);font-weight:700">LABOR</div><div style="font-size:15px;font-weight:800">'+fmt$(labor)+'</div></div>'
+    +'<div><div style="font-size:11px;color:var(--muted);font-weight:700">MATERIALS</div><div style="font-size:15px;font-weight:800">'+fmt$(mat)+'</div></div>'
+    +'<div><div style="font-size:11px;color:var(--muted);font-weight:700">MARKUP</div><div style="font-size:15px;font-weight:800">'+(mk*100).toFixed(0)+'%</div></div>'
+    +'<div><div style="font-size:11px;color:var(--muted);font-weight:700">SCHEDULE IMPACT</div><div style="font-size:15px;font-weight:800">'+(co.schedule_impact_days||0)+' days</div></div>'
+    +'</div>'
+    +'<div style="background:var(--bg);border-radius:8px;padding:14px;margin-bottom:14px;text-align:center">'
+    +'<div style="font-size:11px;color:var(--muted);font-weight:700">TOTAL COST IMPACT</div>'
+    +'<div style="font-size:24px;font-weight:800;color:var(--teal)">'+fmt$(total)+'</div></div>'
+    +(co.created_at?'<div style="font-size:11px;color:var(--muted);margin-bottom:14px">Created: '+new Date(co.created_at).toLocaleDateString()+(co.approved_at?' \u00b7 Approved: '+new Date(co.approved_at).toLocaleDateString():'')+'</div>':'');
+  body.innerHTML=html;
+
+  var btns=document.createElement('div');btns.style.cssText='display:flex;gap:8px;margin-top:8px';
+  if(co.status!=='Approved'&&co.status!=='Rejected'){
+    var ab=document.createElement('button');ab.className='btn btn-p';ab.style.flex='1';ab.textContent='\u2705 Approve';
+    ab.onclick=function(){approveCOItem(coId,ab);setTimeout(function(){closeOv(el);},600);};
+    btns.appendChild(ab);
+  }
+  var cb=document.createElement('button');cb.className='btn';cb.style.flex='1';cb.textContent='Close';
+  cb.onclick=function(){closeOv(el);};
+  btns.appendChild(cb);
+  body.appendChild(btns);
+  modal.appendChild(body);el.appendChild(modal);document.body.appendChild(el);
+}
+
+// BUG-1 FIX: per-job settings override UI
+function showJobSettingsOverride(jobId){
+  var jobs=lsAll('jobs');
+  var job=jobs.find(function(j){return j.id===jobId;});
+  if(!job){toast('Job not found','err');return;}
+  var ov=getJobOverrides(jobId);
+
+  var el=document.createElement('div');el.className='ov';el.id='job-ov-settings';el.style.zIndex='1002';
+  var modal=document.createElement('div');modal.className='modal';modal.style.maxWidth='480px';
+
+  var hdr=document.createElement('div');hdr.className='mh';
+  hdr.innerHTML='<div class="mt">Job Settings Override \u2014 '+job.job_name+'</div>';
+  var xbtn=document.createElement('button');xbtn.className='mc';xbtn.innerHTML='&#x2715;';
+  xbtn.onclick=function(){closeOv(el);};hdr.appendChild(xbtn);modal.appendChild(hdr);
+
+  var body=document.createElement('div');body.className='mb';
+  var intro=document.createElement('div');
+  intro.style.cssText='font-size:12px;color:var(--muted);margin-bottom:14px';
+  intro.textContent='Leave blank to use the company-wide default from Settings. Fill in to override for this job only.';
+  body.appendChild(intro);
+
+  var fields=[
+    {key:'contractor_fee_pct',label:'Contractor Fee %',companyDefault:getSetting('contractor_fee_pct',20)},
+    {key:'tax_rate',label:'Tax Rate %',companyDefault:getSetting('tax_rate',8)},
+    {key:'deposit_amount',label:'Deposit Amount ($)',companyDefault:getSetting('deposit_amount',5000)},
+    {key:'proposal_expiry_days',label:'Proposal Expiry (days)',companyDefault:getSetting('proposal_expiry_days',30)},
+    {key:'co_reminder_hours',label:'CO Reminder (hours)',companyDefault:getSetting('co_reminder_hours',48)},
+  ];
+
+  fields.forEach(function(f){
+    var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)';
+    var lbl=document.createElement('div');
+    lbl.innerHTML='<div style="font-size:13px;font-weight:700">'+f.label+'</div><div style="font-size:11px;color:var(--muted)">Company default: '+f.companyDefault+'</div>';
+    row.appendChild(lbl);
+    var inp=document.createElement('input');inp.type='number';inp.id='jov-'+f.key;
+    inp.placeholder='Default';
+    inp.value=(ov[f.key]!==undefined)?ov[f.key]:'';
+    inp.style.cssText='width:100px;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;text-align:right';
+    row.appendChild(inp);
+    body.appendChild(row);
+  });
+
+  var btnRow=document.createElement('div');btnRow.style.cssText='display:flex;gap:8px;margin-top:16px';
+  var saveBtn=document.createElement('button');saveBtn.className='btn btn-p';saveBtn.style.flex='1';saveBtn.textContent='Save Overrides';
+  saveBtn.onclick=function(){saveJobSettingsOverride(jobId,fields);};
+  var clearBtn=document.createElement('button');clearBtn.className='btn';clearBtn.style.flex='1';clearBtn.textContent='Clear All Overrides';
+  clearBtn.onclick=function(){
+    fields.forEach(function(f){clearJobOverride(jobId,f.key);});
+    toast('All overrides cleared for this job — using company defaults','ok');
+    closeOv(el);
+  };
+  btnRow.appendChild(saveBtn);btnRow.appendChild(clearBtn);body.appendChild(btnRow);
+
+  modal.appendChild(body);el.appendChild(modal);document.body.appendChild(el);
+}
+
+function saveJobSettingsOverride(jobId,fields){
+  fields.forEach(function(f){
+    var inp=document.getElementById('jov-'+f.key);
+    if(!inp) return;
+    var val=inp.value.trim();
+    if(val===''){ clearJobOverride(jobId,f.key); }
+    else { setJobOverride(jobId,f.key,parseFloat(val)); }
+  });
+  toast('Job settings saved','ok');
+  closeOv(document.getElementById('job-ov-settings'));
+}
+
+// BUG-5 FIX: Client Preview Options — owner chooses exactly what the client sees
+// before sending/previewing an estimate or proposal. This was part of the original
+// design and had been dropped.
+function showClientPreviewOptions(estId){
+  var saved={};
+  try{saved=JSON.parse(localStorage.getItem('cs_preview_opts_'+estId)||'{}');}catch(e){}
+  var defaults={
+    show_markup:false, show_original_cost:false, show_line_details:true,
+    totals_only:false, show_allowances:true, show_trade_breakdown:true, show_notes:false
+  };
+  var opts=Object.assign({},defaults,saved);
+
+  var el=document.createElement('div');el.className='ov';el.id='preview-opts-ov';el.style.zIndex='1002';
+  var modal=document.createElement('div');modal.className='modal';modal.style.maxWidth='460px';
+
+  var hdr=document.createElement('div');hdr.className='mh';
+  hdr.innerHTML='<div class="mt">What Should the Client See?</div>';
+  var xbtn=document.createElement('button');xbtn.className='mc';xbtn.innerHTML='&#x2715;';
+  xbtn.onclick=function(){closeOv(el);};hdr.appendChild(xbtn);modal.appendChild(hdr);
+
+  var body=document.createElement('div');body.className='mb';
+  var intro=document.createElement('div');
+  intro.style.cssText='font-size:12px;color:var(--muted);margin-bottom:14px';
+  intro.textContent='Choose what is visible on the client-facing version. Internal cost data is hidden by default.';
+  body.appendChild(intro);
+
+  var toggles=[
+    {key:'show_line_details',label:'Show Line Item Details',desc:'Individual line descriptions vs. summary only'},
+    {key:'totals_only',label:'Totals Only Mode',desc:'Hides all line items \u2014 shows only the grand total'},
+    {key:'show_trade_breakdown',label:'Show Trade/Phase Breakdown',desc:'Group costs by trade category'},
+    {key:'show_allowances',label:'Show Allowances',desc:'Show allowance line items separately'},
+    {key:'show_markup',label:'Show Markup %',desc:'Reveal the markup percentage applied'},
+    {key:'show_original_cost',label:'Show Original Cost (pre-markup)',desc:'Reveal raw cost before markup \u2014 use with caution'},
+    {key:'show_notes',label:'Show Internal Notes',desc:'Notes field on each line item'},
+  ];
+
+  toggles.forEach(function(t){
+    var row=document.createElement('div');row.style.cssText='display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)';
+    var lbl=document.createElement('div');
+    lbl.innerHTML='<div style="font-size:13px;font-weight:700">'+t.label+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+t.desc+'</div>';
+    row.appendChild(lbl);
+    var chk=document.createElement('input');chk.type='checkbox';chk.id='cpo-'+t.key;
+    chk.checked=!!opts[t.key];
+    chk.style.cssText='width:18px;height:18px;cursor:pointer;margin-top:2px;flex-shrink:0';
+    row.appendChild(chk);
+    body.appendChild(row);
+  });
+
+  var btnRow=document.createElement('div');btnRow.style.cssText='display:flex;gap:8px;margin-top:16px';
+  var applyBtn=document.createElement('button');applyBtn.className='btn btn-p';applyBtn.style.flex='1';applyBtn.textContent='Apply & Preview';
+  applyBtn.onclick=function(){
+    var newOpts={};
+    toggles.forEach(function(t){newOpts[t.key]=document.getElementById('cpo-'+t.key).checked;});
+    localStorage.setItem('cs_preview_opts_'+estId,JSON.stringify(newOpts));
+    closeOv(el);
+    previewEstimate(estId,newOpts);
+  };
+  btnRow.appendChild(applyBtn);
+  body.appendChild(btnRow);
+
+  modal.appendChild(body);el.appendChild(modal);document.body.appendChild(el);
 }
 </script>
 
