@@ -63,3 +63,17 @@ Decisions may be revised — but only with a new entry, not by editing the old o
 
 *Version 1.0 — OS #7 — June 25, 2026*
 *New decisions added as entries — old decisions never edited*
+
+---
+
+## DECISIONS ADDED — OS #8 (July 1, 2026)
+
+| DEC-ID | Date | Decision | Reason | Alternatives Rejected | Impacted Modules | Status |
+|---|---|---|---|---|---|---|
+| DEC-018 | OS #8 | Design now. Build when the platform is ready. | Designing architecture during implementation leads to redesign and technical debt. Blueprint must always stay ahead of code. | Design during implementation (causes drift) | All | Active — locked |
+| DEC-019 | OS #8 | Workflow Engine is a core enterprise subsystem — not a feature | Stage transitions (Lead→Job→Billing) must be configurable workflows, not hardcoded function chains. WF-01 through WF-10 defined as default workflows. | Hardcoded transitions (already rejecting), manual-only stage changes (insufficient for automation) | All stage transitions, Gatekeeper, Event Engine | Active |
+| DEC-020 | OS #8 | All 10 enterprise subsystems fully designed in Blueprint before Phase 2 build begins | Constitution principle: Blueprint leads implementation. All subsystems (Object Model, Visibility, Event, Workflow, Permissions, Financial, Business Brain, Mobile, API, Integration) designed and documented. | Design subsystems when you build them (causes drift, causes redesign) | All | Active — locked |
+| DEC-021 | OS #8 | GL account hooks reserved on all financial objects going forward | Cost-free to add fields now. Expensive to retrofit after Supabase migration. QBO sync in Phase 3 requires these fields. | Add GL fields at QBO integration time (causes schema migration) | Estimate Items, Budget Lines, Bills, Invoices, Payments | Active — implement immediately on new objects |
+| DEC-022 | OS #8 | Three new permanent documents saved to repo | CORESTONE_CONSTITUTION.md (highest authority), CORESTONE_ARCHITECTURE_DIRECTIVE_OBJECT_MODEL.md, CORESTONE_ARCHITECTURE_LOCKDOWN.md | Chat-only storage (lost between sessions) | All | Active — locked |
+
+*Added OS #8 — July 1, 2026*
