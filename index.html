@@ -1623,7 +1623,7 @@ function showLeadForm(l=null){
           <div class="f2"><div class="fr"><label>Timeline</label><select id="l-tl">${['ASAP','1-3 months','3-6 months','6-12 months','Just exploring','Unknown'].map(t=>`<option${l?.timeline===t?' selected':''}>${t}</option>`).join('')}</select></div><div class="fr"><label>Owns Property?</label><select id="l-owns"><option value="">Unknown</option><option value="yes"${l?.owns_property==='yes'?' selected':''}>Yes — they own it</option><option value="no"${l?.owns_property==='no'?' selected':''}>No</option><option value="land"${l?.owns_property==='land'?' selected':''}>Own land — new build</option></select></div></div>
           <div class="f2"><div class="fr"><label>Financing</label><select id="l-fin"><option>Cash</option><option>Construction loan</option><option>HELOC</option><option>Unknown</option></select></div><div class="fr"><label>Competing Bids?</label><select id="l-bids"><option>Unknown</option><option>No — only us</option><option>Yes — multiple bids</option></select></div></div>
           <div class="fr"><label>Notes / Angi Lead Details</label><textarea id="l-notes" style="min-height:75px" placeholder="Paste Angi notes, what they said, any details...">${l?.notes||''}</textarea></div>
-          <div class="fr"><label>Stage</label><select id="l-stage">${['new','contacted','proposal','negotiating','signed','lost'].map(s=>`<option value="${s}"${l?.stage===s?' selected':''}>${s}</option>`).join('')}</select></div>
+          ${E ? `<div class="fr"><label>Stage</label><select id="l-stage">${['new','contacted','negotiating','lost'].map(s=>`<option value="${s}"${l?.stage===s?' selected':''}>${s}</option>`).join('')}</select><div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:5px;padding:6px 10px;font-size:11px;color:var(--amber);font-weight:600;margin-top:4px">⚠️ Stage is set by workflow actions. Only change to fix a data error. proposal_sent and signed cannot be set manually.</div></div>` : '<input type="hidden" id="l-stage" value="new">'}
         </div>
         <div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-g" onclick="saveLead(${E?`'${l.id}'`:null},false)">Save Only</button><button class="btn btn-p" onclick="saveLead(${E?`'${l.id}'`:null},true)">✨ Save + AI Generate</button></div>
       </div>
@@ -1632,7 +1632,7 @@ function showLeadForm(l=null){
 
 async function saveLead(id=null,runAI=true){
   const name=$('l-name').value.trim();if(!name){toast('Client name required','err');return;}
-  const d={client_name:name,phone:$('l-phone').value,email:$('l-email').value,address:$('l-addr').value,job_type:$('l-type').value,estimated_value:parseFloat($('l-val').value)||0,timeline:$('l-tl').value,lead_source:$('l-src').value,owns_property:$('l-owns').value,financing:$('l-fin').value,competing_bids:$('l-bids').value,notes:$('l-notes').value,stage:$('l-stage').value,next_followup:new Date(Date.now()+7200000).toISOString()};
+  const d={client_name:name,phone:$('l-phone').value,email:$('l-email').value,address:$('l-addr').value,job_type:$('l-type').value,estimated_value:parseFloat($('l-val').value)||0,timeline:$('l-tl').value,lead_source:$('l-src').value,owns_property:$('l-owns').value,financing:$('l-fin').value,competing_bids:$('l-bids').value,notes:$('l-notes').value,stage: id ? ($('l-stage')?.value||'new') : 'new',next_followup:new Date(Date.now()+7200000).toISOString()};
   try{
     let sid;if(id){await dbUpd('leads',id,d);sid=id;}else{const r=await dbIns('leads',d);sid=r[0]?.id;}
     toast(id?'Lead updated':'Lead saved!');closeModal('lf');
@@ -1693,7 +1693,7 @@ async function leadDetail(id){
             </div>
             <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:13px;align-items:center">
               <span style="font-size:11px;color:var(--muted);font-weight:700">Move to:</span>
-              ${['new','contacted','proposal','negotiating','signed','lost'].filter(s=>s!==lead.stage).map(s=>`<button class="btn btn-sm" style="background:${s==='signed'?'var(--green)':s==='lost'?'var(--red)':'var(--bg)'};color:${['signed','lost'].includes(s)?'#fff':'var(--text)'};border:1.5px solid var(--border2)" onclick="stageUp('${lead.id}','${s}')">${s}</button>`).join('')}
+              ${['new','contacted','negotiating','lost'].filter(s=>s!==lead.stage).map(s=>`<button class="btn btn-sm" style="background:${s==='lost'?'var(--red)':'var(--bg)'};color:${s==='lost'?'#fff':'var(--text)'};border:1.5px solid var(--border2)" onclick="stageUp('${lead.id}','${s}')">${s}</button>`).join('')}<span style="font-size:10px;color:var(--muted);margin-left:4px">proposal_sent & signed set automatically by workflow</span>
             </div>
             ${lead.ai_next_action?`<div style="background:var(--green-bg);border:1.5px solid var(--green);border-radius:var(--radius);padding:9px 13px;margin-bottom:13px"><div style="font-size:10px;font-weight:800;color:var(--green);margin-bottom:2px">🤖 AI RECOMMENDED NEXT ACTION</div><div style="font-size:13px;font-weight:800">${lead.ai_next_action}</div></div>`:''}
             <div class="ctabs">${[['script','📞 Call Script'],['intel','📍 Address Intel'],['email','📧 Follow-Up Email'],['notes','📝 Notes']].map(([k,v],i)=>`<div class="ctab${i===0?' active':''}" onclick="switchLTab('${k}',this)">${v}</div>`).join('')}</div>
@@ -1721,7 +1721,47 @@ async function leadDetail(id){
 
 function switchLTab(tab,el){['script','intel','email','notes'].forEach(t=>{const e=$(`lt-${t}`);if(e)e.style.display=t===tab?'block':'none';});document.querySelectorAll('#ld .ctab').forEach(t=>t.classList.remove('active'));el.classList.add('active');}
 async function regenLeadAI(id){toast('🤖 Generating...');const[lead]=await dbGet('leads',`?id=eq.${id}`);if(lead){await generateLeadAI(id,lead);closeModal('ld');leadDetail(id);}}
-async function stageUp(id,stage){try{await dbUpd('leads',id,{stage,last_contact_at:new Date().toISOString()});toast(`Lead → ${stage}`);closeModal('ld');pgSales();}catch(e){toast(e.message,'err');}}
+async function stageUp(id,stage){await advanceLeadWorkflow(id,stage);}
+async function advanceLeadWorkflow(id,targetStage){
+  // Stages that can ONLY be set by workflow actions — never manually
+  const WORKFLOW_ONLY=['proposal_sent','signed'];
+  if(WORKFLOW_ONLY.includes(targetStage)){
+    toast('\"'+targetStage+'\" is set automatically when you complete the workflow action — not manually. Use Send Proposal or the signing flow.','err',5000);
+    return;
+  }
+  try{
+    var leads=await dbGet('leads','?id=eq.'+id);
+    var lead=leads[0];if(!lead)return;
+    var update={stage:targetStage,last_contact_at:new Date().toISOString()};
+    var nextActions=[];
+    if(targetStage==='contacted'){
+      if(!lead.first_contact_at) update.first_contact_at=new Date().toISOString();
+      update.next_followup=new Date(Date.now()+3*86400000).toISOString();
+      nextActions=[
+        {icon:'📞',label:'Start live call',sub:'AI co-pilot coaching',fn:"openCallMode('"+id+"')",primary:true},
+        {icon:'📧',label:'Send follow-up email',sub:'AI-drafted and ready',fn:"leadDetail('"+id+"')"} 
+      ];
+    } else if(targetStage==='negotiating'){
+      update.next_followup=new Date(Date.now()+2*86400000).toISOString();
+      nextActions=[
+        {icon:'📝',label:'Revise proposal',sub:'Adjust scope or price',fn:'pgProposals()',primary:true},
+        {icon:'📞',label:'Call to close',sub:'Address concerns directly',fn:"openCallMode('"+id+"')"}
+      ];
+    } else if(targetStage==='lost'){
+      var reason=prompt('What was the reason for losing this lead? (helps improve future bids)','');
+      if(reason===null) return; // cancelled
+      update.loss_reason=reason||'Not specified';
+      update.lost_at=new Date().toISOString();
+      nextActions=[{icon:'📊',label:'Review active pipeline',sub:'Focus on open leads',fn:'pgSales()',primary:true}];
+    }
+    await dbUpd('leads',id,update);
+    await dbIns('audit_log',{object_type:'leads',object_id:id,action:'stage_changed',field_changed:'stage',old_value:lead.stage,new_value:targetStage,changed_by_ai:false,timestamp:new Date().toISOString()});
+    closeModal('ld');
+    if(nextActions.length) nextStep('Lead → '+targetStage.toUpperCase(),'Stage updated. What next?',nextActions);
+    else{toast('Lead moved to '+targetStage,'ok');pgSales();}
+    pgSales();
+  }catch(e){toast(e.message,'err');}
+}
 async function toJob(lid,name,budget){
   var el=document.createElement('div');
   el.className='ov';el.id='tojob-ov';el.style.zIndex='1002';
@@ -2590,27 +2630,85 @@ async function gkExecuteAction(item) {
       break;
 
     case 'proposal_signed':
-      // Proposal signed — create job record
+      // Proposal signed → create Job + Budget + Deposit Invoice + Survey trigger
       if(item.reference_id) {
         var propData = await dbGet('proposals', '?id=eq.' + item.reference_id);
         var signedProp = propData[0];
         if(signedProp) {
-          await dbIns('jobs', {
+          var contractPrice = signedProp.total_price || 0;
+          var depositAmt = 5000;
+
+          // 1. Create Job record
+          var newJobRec = await dbIns('jobs', {
             lead_id: signedProp.lead_id,
             proposal_id: item.reference_id,
             client_name: signedProp.client_name,
-            address: signedProp.address,
+            address: signedProp.address || signedProp.job_address,
             job_type: signedProp.job_type,
-            contract_price: signedProp.total_price,
+            job_name: signedProp.client_name + ' — ' + (signedProp.job_type||'Project'),
+            contract_price: contractPrice,
             status: 'pre-construction',
             current_phase: 'Pre-Construction',
             progress_pct: 0,
-            budget_baseline: signedProp.total_price,
+            budget_baseline: contractPrice,
             budget_used: 0,
-            created_from: 'signed_proposal'
+            created_from: 'signed_proposal',
+            pm_assigned: null,
+            start_date: null
           });
-          await dbUpd('leads', signedProp.lead_id, { stage: 'signed' });
-          toast('✅ Job created from signed proposal — ' + signedProp.client_name, 'ok', 5000);
+          var newJobId = newJobRec[0]?newJobRec[0].id:null;
+
+          // 2. Create Budget record tied to job
+          if(newJobId){
+            await dbIns('budgets',{
+              job_id: newJobId,
+              lead_id: signedProp.lead_id,
+              proposal_id: item.reference_id,
+              baseline_amount: contractPrice,
+              committed_amount: 0,
+              actual_amount: 0,
+              status: 'active',
+              created_at: new Date().toISOString()
+            });
+          }
+
+          // 3. Create Deposit Invoice (unless one already exists for this lead)
+          if(newJobId){
+            var existingInvs = await dbGet('invoices','?lead_id=eq.'+signedProp.lead_id+'&invoice_type=eq.deposit');
+            if(!existingInvs||existingInvs.length===0){
+              await dbIns('invoices',{
+                job_id: newJobId,
+                lead_id: signedProp.lead_id,
+                client_name: signedProp.client_name,
+                invoice_type: 'deposit',
+                invoice_number: 'DEP-'+Date.now().toString(36).toUpperCase(),
+                amount: depositAmt,
+                description: 'Deposit — '+signedProp.client_name+' project',
+                status: 'draft',
+                due_date: new Date(Date.now()+7*86400000).toISOString().slice(0,10)
+              });
+            }
+          }
+
+          // 4. Update lead stage to 'signed'
+          await dbUpd('leads', signedProp.lead_id, {
+            stage: 'signed',
+            signed_at: new Date().toISOString(),
+            job_id: newJobId
+          });
+          await dbIns('audit_log',{object_type:'leads',object_id:signedProp.lead_id,action:'stage_changed',field_changed:'stage',old_value:'proposal_sent',new_value:'signed',changed_by_ai:false,ai_reasoning:'Proposal e-signed by client — job created automatically',timestamp:new Date().toISOString()});
+
+          // 5. Auto-trigger survey if not already completed
+          var leadRec = await dbGet('leads','?id=eq.'+signedProp.lead_id);
+          var theLead = leadRec[0];
+          if(theLead && !theLead.survey_completed){
+            await addToGatekeeper('survey_needed','Survey needed: '+signedProp.client_name,'Proposal is signed but client survey not yet completed. Send survey link to capture preferences before estimating begins.','high','Send survey link from Lead detail → Survey button.','survey_needed');
+          }
+
+          // 6. Queue PM assignment reminder
+          await addToGatekeeper('job_created','New job ready: '+signedProp.client_name,'Job created from signed proposal. Contract: '+fmt$(contractPrice)+'. Assign PM and schedule kickoff meeting.','high','Assign project manager and set start date in Jobs.','job_created');
+
+          toast('✅ Job + Budget + Deposit Invoice created — ' + signedProp.client_name, 'ok', 5000);
         }
       }
       break;
@@ -4519,6 +4617,7 @@ async function pgDashV2(){
     html+='<div class="card" style="text-align:center;padding:14px"><div style="font-size:22px;font-weight:800;color:#c0392b">'+gk.length+'</div><div style="font-size:10px;color:#4a5a6a;font-weight:700;text-transform:uppercase">Need Approval</div></div>';
     html+='<div class="card" style="text-align:center;padding:14px"><div style="font-size:22px;font-weight:800;color:#d97706">'+overdueTasks.length+'</div><div style="font-size:10px;color:#4a5a6a;font-weight:700;text-transform:uppercase">Overdue Tasks</div></div>';
     html+='</div>';
+    html+='<div style="text-align:right;margin-bottom:12px"><button onclick="showTestingToolbar()" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🧪 Testing Mode</button></div>';
 
     // Phase 1 Pipeline Health Row — B-6
     var surveysNeeded = leads.filter(function(l){ return l.deposit_status && !l.survey_completed && !l.survey_sent_at; });
@@ -7176,8 +7275,36 @@ async function sendProposalToClient(propId) {
     '</div></div></div>';
   document.body.appendChild(el);
 
-  await addToGatekeeper('proposal_sent', 'Proposal sent: ' + prop.client_name, 'Magic Link sent. Awaiting client review and signature.', 'high', 'Follow up if not signed in 48 hours.');
-  toast('Proposal sent — awaiting client signature', 'ok');
+  // Update lead stage to 'proposal_sent' — set by workflow, not manually
+  if(prop.lead_id){
+    await dbUpd('leads', prop.lead_id, {
+      stage: 'proposal_sent',
+      proposal_sent_at: new Date().toISOString(),
+      next_followup: new Date(Date.now()+3*86400000).toISOString()
+    });
+    await dbIns('audit_log',{object_type:'leads',object_id:prop.lead_id,action:'stage_changed',field_changed:'stage',old_value:'contacted',new_value:'proposal_sent',changed_by_ai:false,ai_reasoning:'Proposal sent to client via magic link',timestamp:new Date().toISOString()});
+  }
+
+  // Queue Day 3, 5, 7 follow-up reminders in Gatekeeper
+  var dayMs = 86400000;
+  var followups = [
+    {days:3, msg:'Day 3 follow-up: Has '+prop.client_name+' reviewed the proposal? Send a personal check-in.'},
+    {days:5, msg:'Day 5 follow-up: Still no signature from '+prop.client_name+'. Address objections or offer a call.'},
+    {days:7, msg:'Day 7 follow-up: Proposal to '+prop.client_name+' is 7 days old — consider revised terms or a closing call.'}
+  ];
+  for(var fu of followups){
+    await addToGatekeeper(
+      'followup',
+      'Follow-up Day '+fu.days+': '+prop.client_name,
+      fu.msg,
+      fu.days<=3?'high':'normal',
+      'Proposal link: '+link,
+      'followup'
+    );
+  }
+
+  await addToGatekeeper('proposal_sent', 'Proposal sent: ' + prop.client_name, 'Magic Link sent. Awaiting client review and signature. Day 3/5/7 follow-up reminders queued in Gatekeeper.', 'high', 'Follow up if not signed in 48 hours.');
+  toast('Proposal sent — Day 3/5/7 follow-ups queued in Gatekeeper', 'ok');
 }
 
 async function reviseProposal(propId) {
@@ -9051,6 +9178,136 @@ function showClientPreviewOptions(estId){
 
   modal.appendChild(body);el.appendChild(modal);document.body.appendChild(el);
 }
+
+// ============================================================
+// CORESTONE TESTING FRAMEWORK — SCENARIO LOADER
+// Usage: loadTestScenario('kitchen_remodel') from console or button
+// ============================================================
+async function loadTestScenario(scenario='kitchen_remodel'){
+  if(!confirm('This will load test data for the "'+scenario+'" scenario into your system. Continue?')) return;
+  toast('Loading test scenario...','ok');
+  try{
+    if(scenario==='kitchen_remodel'){
+      // SCENARIO: Sarah & David Goldstein — Kitchen Remodel — Woodstock, NY
+      var leadId = 'test_lead_'+Date.now();
+      var leadData = {
+        id: leadId,
+        client_name: 'Sarah & David Goldstein',
+        phone: '(845) 555-0147',
+        email: 'sarah.goldstein@email.com',
+        address: '87 Overlook Road, Woodstock, NY 12498',
+        job_type: 'Kitchen Remodel',
+        estimated_value: 72000,
+        timeline: '3-6 months',
+        lead_source: 'Referral',
+        owns_property: 'yes',
+        financing: 'Cash',
+        competing_bids: 'No — only us',
+        notes: 'Referred by Oren Saar. Wants to open up wall between kitchen and dining room, custom cabinets from Wellborn, quartz countertops, new island with seating, full appliance package (Sub-Zero fridge, Wolf range). Also interested in new flooring throughout main level. House built 1987 — may have load-bearing wall concern. Client is very detail-oriented. Prefers to meet on weekends.',
+        stage: 'new',
+        deposit_status: null,
+                ai_call_script: "Hi Sarah, this is Feishy from Corestone Developers. Oren Saar referred you -- great to connect. Are you thinking of opening up the wall between kitchen and dining? We do cost-plus 20% -- full transparency on every invoice. The $5,000 deposit applies to construction. Can we schedule a call this week?",        ai_questions: JSON.stringify(["Do you know if the wall between kitchen and dining is load-bearing?","Are you set on the Wellborn cabinets or open to alternatives at a better price point?","What is your target completion date?","Will you be living in the home during construction?"]),
+        ai_objections: JSON.stringify({too_expensive:"Our cost-plus model means you see every dollar -- no hidden markup. You pay exactly what it costs plus our 20% fee.",deposit_concern:"The $5,000 comes off your final construction draw -- it is not extra. It confirms we are both serious before pulling permits.",getting_other_bids:"Absolutely, you should. Ask each contractor to show you their actual supplier invoices after the job -- we are the only ones who will.",not_ready_yet:"No problem -- when does the timing work for you? I can hold a spot on our schedule through the end of the month."}),
+        ai_next_action: 'Call Sarah this week — she was referred directly by Oren Saar and is cash-buyer with no competing bids.',
+        ai_followup_email_subject: 'Following up — Corestone kitchen remodel for 87 Overlook',
+        ai_followup_email_body: "Hi Sarah, great to hear about your kitchen project from Oren. I would love to walk through the space and share ideas. Would Tuesday or Thursday work for a quick call?",
+        next_followup: new Date(Date.now()+24*3600000).toISOString(),
+        created_at: new Date().toISOString()
+      };
+      // Save lead to localStorage
+      var leads = JSON.parse(localStorage.getItem('cs_leads')||'[]');
+      leads.push(leadData);
+      localStorage.setItem('cs_leads', JSON.stringify(leads));
+
+      // Create matching requirements
+      var reqs = [
+        {id:'test_req_1',lead_id:leadId,title:'Open-concept kitchen/dining',description:'Remove wall between kitchen and dining room to create open layout. Engineer sign-off needed for load-bearing determination.',source:'notes',status:'captured',priority:'high',category:'Structural',created_at:new Date().toISOString()},
+        {id:'test_req_2',lead_id:leadId,title:'Custom Wellborn cabinets',description:'Client specified Wellborn brand cabinetry. Full kitchen layout with island.',source:'notes',status:'captured',priority:'high',category:'Millwork',created_at:new Date().toISOString()},
+        {id:'test_req_3',lead_id:leadId,title:'Quartz countertops',description:'Quartz countertops throughout. Client considering Silestone or Caesarstone — selection TBD.',source:'notes',status:'captured',priority:'high',category:'Countertops',created_at:new Date().toISOString()},
+        {id:'test_req_4',lead_id:leadId,title:'Kitchen island with seating',description:'New center island, minimum 4 seats. Needs pendant lighting above.',source:'notes',status:'captured',priority:'high',category:'Millwork',created_at:new Date().toISOString()},
+        {id:'test_req_5',lead_id:leadId,title:'Full appliance package',description:'Sub-Zero refrigerator + Wolf 36" range. Client purchasing direct — Corestone installs.',source:'notes',status:'captured',priority:'medium',category:'Appliances',created_at:new Date().toISOString()},
+        {id:'test_req_6',lead_id:leadId,title:'New flooring main level',description:'Replace existing flooring throughout main level. Client open to hardwood or LVP.',source:'notes',status:'captured',priority:'medium',category:'Flooring',created_at:new Date().toISOString()}
+      ];
+      var existing = JSON.parse(localStorage.getItem('cs_requirements')||'[]');
+      existing.push(...reqs);
+      localStorage.setItem('cs_requirements', JSON.stringify(existing));
+
+      // Create a pre-built estimate
+      var estId = 'test_est_1';
+      var lineItems = [
+        {id:'li1',description:'Structural engineer — wall assessment & beam spec',trade:'Structural',type:'sub',qty:1,unit:'lump sum',unit_cost:2800,markup:20,tax:false},
+        {id:'li2',description:'Demo — remove wall, existing cabinets, countertops, flooring',trade:'Demo',type:'labor',qty:1,unit:'lump sum',unit_cost:3200,markup:20,tax:false},
+        {id:'li3',description:'Framing — install LVL beam, patch ceiling, reframe opening',trade:'Framing',type:'labor',qty:1,unit:'lump sum',unit_cost:4800,markup:20,tax:false},
+        {id:'li4',description:'Electrical — reconfigure kitchen circuits, add island circuits, pendant rough-in (3), under-cabinet rough-in',trade:'Electrical',type:'sub',qty:1,unit:'lump sum',unit_cost:6400,markup:20,tax:false},
+        {id:'li5',description:'Plumbing — relocate sink to island, new fixtures, dishwasher connection',trade:'Plumbing',type:'sub',qty:1,unit:'lump sum',unit_cost:4200,markup:20,tax:false},
+        {id:'li6',description:'Wellborn custom cabinetry — full kitchen + island (material)',trade:'Millwork',type:'material',qty:1,unit:'lump sum',unit_cost:14500,markup:20,tax:true},
+        {id:'li7',description:'Cabinet installation labor',trade:'Millwork',type:'labor',qty:1,unit:'lump sum',unit_cost:3600,markup:20,tax:false},
+        {id:'li8',description:'Quartz countertops — fabrication + install (approx 55 SF)',trade:'Countertops',type:'sub',qty:55,unit:'SF',unit_cost:95,markup:20,tax:false},
+        {id:'li9',description:'Tile backsplash — supply and install (approx 40 SF)',trade:'Tile',type:'sub',qty:40,unit:'SF',unit_cost:28,markup:20,tax:false},
+        {id:'li10',description:'LVP flooring — main level (approx 680 SF)',trade:'Flooring',type:'sub',qty:680,unit:'SF',unit_cost:9.5,markup:20,tax:false},
+        {id:'li11',description:'Paint — kitchen, dining, adjacent hallway',trade:'Paint',type:'sub',qty:1,unit:'lump sum',unit_cost:2800,markup:20,tax:false},
+        {id:'li12',description:'Appliance installation — Sub-Zero + Wolf (client-supplied)',trade:'Appliances',type:'labor',qty:1,unit:'lump sum',unit_cost:1200,markup:20,tax:false},
+        {id:'li13',description:'Building permit — Ulster County',trade:'Permits',type:'permit',qty:1,unit:'lump sum',unit_cost:1400,markup:0,tax:false},
+        {id:'li14',description:'Dumpster rental x2',trade:'General',type:'material',qty:2,unit:'each',unit_cost:450,markup:20,tax:true},
+        {id:'li15',description:'Project management & supervision',trade:'General',type:'labor',qty:8,unit:'weeks',unit_cost:850,markup:0,tax:false}
+      ];
+      var estObj = {
+        id: estId,
+        lead_id: leadId,
+        title: 'Kitchen Remodel — 87 Overlook Road, Woodstock',
+        client_name: 'Sarah & David Goldstein',
+        client_email: 'sarah.goldstein@email.com',
+        job_type: 'Kitchen Remodel',
+        line_items: lineItems,
+        status: 'draft',
+        timeline_weeks: 10,
+        version: 1,
+        created_at: new Date().toISOString()
+      };
+      var ests = JSON.parse(localStorage.getItem('cs_estimates')||'[]');
+      ests.push(estObj);
+      localStorage.setItem('cs_estimates', JSON.stringify(ests));
+
+      toast('✅ Test scenario loaded! Lead + Requirements + Estimate ready.','ok',5000);
+      nextStep('Kitchen Remodel Scenario Loaded 🏗️','Sarah & David Goldstein are in your system. Here is the testing flow:',[
+        {icon:'👤',label:'Step 1: Open the Lead',sub:'Go to Sales → find Goldstein → open lead detail',fn:'pgSales()',primary:true},
+        {icon:'📋',label:'Step 2: View Requirements',sub:'6 requirements auto-captured from notes',fn:'goTab("requirements")'},
+        {icon:'💰',label:'Step 3: Open Estimate',sub:'Pre-built $72k kitchen estimate ready to review',fn:'goTab("estimates")'}
+      ]);
+      pgSales();
+    }
+  }catch(e){toast('Error loading scenario: '+e.message,'err');console.error(e);}
+}
+
+// Testing toolbar — visible in the Summary dashboard for QA use
+function showTestingToolbar(){
+  var existing = document.getElementById('testing-toolbar');
+  if(existing){existing.remove();return;}
+  var bar = document.createElement('div');
+  bar.id='testing-toolbar';
+  bar.style.cssText='position:fixed;bottom:16px;right:16px;background:#1e293b;color:#fff;border-radius:10px;padding:12px 16px;z-index:9999;font-family:inherit;box-shadow:0 4px 20px rgba(0,0,0,0.4);min-width:220px';
+  bar.innerHTML='<div style="font-size:11px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">🧪 Testing Mode</div>'
+    +'<div style="display:flex;flex-direction:column;gap:6px">'
+    +'<button onclick="loadTestScenario(&quot;kitchen_remodel&quot;)" style="background:#0d7a70;color:#fff;border:none;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">🏗️ Load Kitchen Remodel Scenario</button>'
+    +'<button onclick="clearTestData()" style="background:#7f1d1d;color:#fff;border:none;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">🗑️ Clear All Test Data</button>'
+    +'<button onclick="this.parentElement.parentElement.remove()" style="background:#334155;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-family:inherit">Close</button>'
+    +'</div>';
+  document.body.appendChild(bar);
+}
+
+async function clearTestData(){
+  if(!confirm('Clear all test data (leads, estimates, requirements, proposals that start with test_)? This cannot be undone.')) return;
+  var tables = ['cs_leads','cs_estimates','cs_requirements','cs_proposals','cs_jobs','cs_invoices','cs_audit_log'];
+  for(var t of tables){
+    var data = JSON.parse(localStorage.getItem(t)||'[]');
+    var cleaned = data.filter(r=>!r.id||!r.id.toString().startsWith('test_'));
+    localStorage.setItem(t, JSON.stringify(cleaned));
+  }
+  toast('Test data cleared','ok');
+  pgSales();
+}
+// END TESTING FRAMEWORK
+
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
