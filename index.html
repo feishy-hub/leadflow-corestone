@@ -2031,7 +2031,10 @@ async function markPaid(id){try{const[i]=await dbGet('invoices',`?id=eq.${id}`);
 async function getCallBrief(id,amount,due){const el=$(`cb-${id}`);el.innerHTML='<div class="loading" style="padding:8px"><div class="spin"></div></div>';try{const r=await ai(`Collections call brief: Invoice ${fmt$(amount)}, due ${fmtD(due)}. Tone, key talking points, what to avoid. Under 70 words.`);el.innerHTML=`<div class="ai-box" style="margin-top:8px"><div class="ai-lbl">AI Call Brief</div>${r}</div>`;}catch(e){el.innerHTML='';}}
 function showCOForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="cof"><div class="modal"><div class="mh"><div class="mt">New Change Order</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="fr"><label>Title *</label><input id="co-title" placeholder="Under-cabinet lighting addition"></div><div class="fr"><label>Description</label><textarea id="co-desc" style="min-height:70px"></textarea></div><div class="fr"><label>Reason</label><select id="co-reason"><option>Client Request</option><option>Unforeseen Condition</option><option>Design Change</option><option>Owner Directed</option></select></div><div class="f2"><div class="fr"><label>Cost Impact ($)</label><input id="co-cost" type="number"></div><div class="fr"><label>Schedule (days)</label><input id="co-days" type="number" value="0"></div></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveCO()">Create CO</button></div></div></div>`);}
 async function saveCO(){const title=$('co-title').value.trim();if(!title){toast('Title required','err');return;}const cost=parseFloat($('co-cost').value)||0;try{await dbIns('change_orders',{job_id:AJOB?.id||null,title,description:$('co-desc').value,reason:$('co-reason').value,cost_impact:cost,schedule_impact_days:parseInt($('co-days').value)||0,status:'draft'});if(cost>500)await dbIns('gatekeeper_queue',{item_type:'change_order',title:`CO Approval: ${title}`,description:`Cost: ${fmt$(cost)}`,job_id:AJOB?.id||null,amount:cost,status:'pending'});toast('CO created!'+(cost>500?' → Gatekeeper':''));closeModal('cof');finTab('co');nextStep('Change Order Created','What would you like to do next?',[{label:'View Change Orders',fn:'goTab(\'cos\')'},{label:'Go to Gatekeeper',fn:'goTab(\'gatekeeper\')'},{label:'View Budget',fn:'goTab(\'budget\')'}]);}catch(e){toast(e.message,'err');}}
-async function approveCO(id){try{await dbUpd('change_orders',id,{status:'approved'});toast('CO approved!');finTab('co');}catch(e){toast(e.message,'err');}}
+async function approveCO(id){
+  // Route to full approveCOItem so cascade fires
+  await approveCOItem(id, null);
+}
 function showPOForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="pof"><div class="modal"><div class="mh"><div class="mt">New Purchase Order</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="f2"><div class="fr"><label>Supplier *</label><input id="po-sup" placeholder="Lowe's PRO Kingston"></div><div class="fr"><label>Supplier Email</label><input id="po-email" type="email"></div></div><div class="fr"><label>Description *</label><textarea id="po-desc" style="min-height:70px"></textarea></div><div class="f2"><div class="fr"><label>Amount *</label><input id="po-amt" type="number"></div><div class="fr"><label>Delivery Date</label><input id="po-del" type="date"></div></div><div class="fr"><label>Phase</label><select id="po-phase">${phases().map(p=>`<option>${p}</option>`).join('')}</select></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="savePO()">Create PO</button></div></div></div>`);}
 async function savePO(){const sup=$('po-sup').value.trim(),amt=parseFloat($('po-amt').value);if(!sup||!amt){toast('Supplier and amount required','err');return;}try{await dbIns('purchase_orders',{supplier_name:sup,supplier_email:$('po-email').value,description:$('po-desc').value,amount:amt,expected_delivery:$('po-del').value||null,phase:$('po-phase').value,status:'draft',po_number:`PO-${Date.now().toString().slice(-4)}`,job_id:AJOB?.id||null});toast('PO created!');closeModal('pof');finTab('po');nextStep('Purchase Order Created','What would you like to do next?',[{label:'View All POs',fn:'goTab(\'pos\')'},{label:'Add Another PO',fn:'showNewPOForm()'},{label:'View Budget',fn:'goTab(\'budget\')'}]);}catch(e){toast(e.message,'err');}}
 
@@ -2375,7 +2378,15 @@ async function billApproveStage(billId, stage) {
     changed_by_ai: false, timestamp: new Date().toISOString()
   });
 
-  toast(nextAction, 'ok');
+  // Stage 3 = final payment approved — run cascade (PO match, job costing)
+  if(stage === 3) {
+    var freshBill = (await dbGet('bills','?id=eq.'+billId))[0];
+    var cascTriggered = await runBusinessCascade('bill.approved','bill', billId, {bill: freshBill});
+    if(cascTriggered.length) toast('Paid ✅ · '+cascTriggered[0], 'ok', 4000);
+    else toast(nextAction, 'ok');
+  } else {
+    toast(nextAction, 'ok');
+  }
   await pgBills();
 }
 
@@ -4761,8 +4772,22 @@ async function savePunchItem(existingId){
 }
 
 async function completePunchItem(id){
-  await dbUpd('punch_list',id,{status:'complete',completed_date:new Date().toISOString()});
-  toast('✅ Item marked complete','ok');
+  var items = await dbGet('punch_list','?id=eq.'+id);
+  var item = items[0];
+  var idemKey = 'punch_complete_'+id;
+  // Confirm completion with note
+  var note = window.prompt('Brief completion note (or press OK to skip):', '');
+  if(note === null) return; // Cancelled
+  await dbUpd('punch_list', id, {
+    status:'complete',
+    completed_date: new Date().toISOString(),
+    completion_note: note||'Completed',
+    completed_by: 'superintendent'
+  });
+  // Run cascade — checks overall punch list completion, triggers final inspection if 100%
+  var jobId = item ? item.job_id : (AJOB && AJOB.id);
+  var triggered = await runBusinessCascade('punch.completed','punch_list', id, {job_id: jobId});
+  toast('✅ Punch item complete'+(triggered.length?' · '+triggered[0]:''),'ok',4000);
   pgPunchList();
 }
 
@@ -4871,7 +4896,10 @@ async function closeRFI(id){
   var answer=window.prompt('Enter the answer/resolution for this RFI:','');
   if(!answer)return;
   await dbUpd('rfis',id,{status:'closed',answer:answer,date_answered:new Date().toISOString()});
-  toast('✅ RFI closed','ok');
+  // Run cascade — logs resolution, flags if plan revision needed
+  var rfis = await dbGet('rfis','?id=eq.'+id);
+  var triggered = await runBusinessCascade('rfi.closed','rfi', id, {rfi: rfis[0]});
+  toast('✅ RFI closed'+(triggered.length?' · '+triggered[0]:''),'ok',4000);
   pgRFIs();
 }
 
@@ -5211,8 +5239,10 @@ async function saveLienWaiver(){
 async function signLienWaiver(id){
   var date=window.prompt('Enter date signed (or press OK for today):',new Date().toLocaleDateString());
   if(date===null)return;
-  await dbUpd('lien_waivers',id,{status:'signed',signed_date:new Date().toISOString().split('T')[0]});
-  toast('✅ Lien waiver marked signed','ok');
+  await dbUpd('lien_waivers',id,{status:'signed',signed_date:new Date().toISOString().split('T')[0],signed_by:'owner'});
+  var waivers = await dbGet('lien_waivers','?id=eq.'+id);
+  var triggered = await runBusinessCascade('lien_waiver.signed','lien_waiver', id, {waiver: waivers[0]});
+  toast('✅ Lien waiver signed'+(triggered.length?' · '+triggered[0]:''),'ok',4000);
   pgLienWaivers();
 }
 
@@ -7598,13 +7628,15 @@ async function approveCOItem(id,btnEl){
     }
     await dbUpd('change_orders',id,{status:'Approved',approved_at:new Date().toISOString()});
     await aiLogTransaction('CO Approved','Change order #'+id+' approved.','normal');
+    // Run full business cascade — updates budget, contract, queues PM task, drafts client notification
+    var triggered = await runBusinessCascade('co.approved','change_order', id, {co:co});
     pgCOs();
     releaseAction(idemKey,btnEl,true);
   }catch(e){releaseAction(idemKey,btnEl,false);toast('Error: '+e.message,'err');return;}
-  nextStep('Change Order Approved!', 'Budget has been updated. What next?', [
-    {icon:'📄', label:'Create invoice for this CO', sub:'Bill client for the change order', fn:"goTab('invoices')", primary:true},
-    {icon:'📱', label:'Notify client', sub:'AI drafts update message', fn:"goTab('messages')", primary:false},
-    {icon:'💰', label:'View budget', sub:'See updated job costing', fn:"goTab('budget')", primary:false}
+  nextStep('Change Order Approved — cascade complete', 'Budget updated · Client notification drafted · PM task created', [
+    {icon:'📨', label:'Review client notification', sub:'Check the draft in Messages before sending', fn:"goTab('messages')", primary:true},
+    {icon:'📋', label:'View PM execution task', sub:'Coordinate trades and update schedule', fn:"goTab('gatekeeper')", primary:false},
+    {icon:'💰', label:'View updated budget', sub:'See new contract total with CO applied', fn:"goTab('budget')", primary:false}
   ]);
 }
 async function aiDraftCO(){
@@ -9178,6 +9210,391 @@ function showClientPreviewOptions(estId){
 
   modal.appendChild(body);el.appendChild(modal);document.body.appendChild(el);
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BUSINESS CASCADE ENGINE — OS #8
+// Every major business action runs through this engine.
+// The engine asks: "As company president, what should happen next?"
+// and executes ALL downstream workflows, financial updates, notifications,
+// and Gatekeeper items automatically.
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function runBusinessCascade(action, objectType, objectId, context) {
+  var triggered = [];
+  try {
+    switch(action) {
+
+      // ── CHANGE ORDER APPROVED ─────────────────────────────────────────────
+      case 'co.approved': {
+        var co = context.co || (await dbGet('change_orders','?id=eq.'+objectId))[0];
+        if(!co) break;
+        var costDelta = parseFloat(co.cost_impact || co.cost_delta || 0);
+        var schedDelta = parseInt(co.schedule_impact_days || 0);
+        var jobId = co.job_id;
+
+        // 1. Update job contract price
+        if(jobId && costDelta) {
+          var jobs = await dbGet('jobs','?id=eq.'+jobId);
+          var job = jobs[0];
+          if(job) {
+            var newContract = (parseFloat(job.contract_price||0)) + costDelta;
+            var newBudget = (parseFloat(job.budget||0)) + costDelta;
+            await dbUpd('jobs', jobId, {
+              contract_price: newContract,
+              budget: newBudget,
+              last_co_at: new Date().toISOString()
+            });
+            triggered.push('Job contract updated: +'+fmt$(costDelta)+' → new total '+fmt$(newContract));
+          }
+        }
+
+        // 2. Update budget record if exists
+        if(jobId) {
+          var budgets = await dbGet('budgets','?job_id=eq.'+jobId);
+          if(budgets && budgets[0]) {
+            var bud = budgets[0];
+            await dbUpd('budgets', bud.id, {
+              baseline_amount: (parseFloat(bud.baseline_amount||0)) + costDelta,
+              last_updated: new Date().toISOString()
+            });
+            triggered.push('Budget baseline updated');
+          }
+        }
+
+        // 3. Create PM execution task in Gatekeeper
+        await addToGatekeeper('co_execution',
+          'Execute CO: '+(co.title||'Change Order'),
+          'CO approved for '+(co.client_name||'client')+'. Cost: '+fmt$(costDelta)+(schedDelta?' Schedule impact: '+schedDelta+' days.':''),
+          'high',
+          'Coordinate with trades and update schedule if needed.',
+          'co_execution'
+        );
+        triggered.push('PM execution task created in Gatekeeper');
+
+        // 4. Create AI-drafted client notification (staged — not auto-sent)
+        if(jobId) {
+          var clientMsg = 'Hi [Client], just confirming that your approved change order for "' +
+            (co.title||'the recent scope change') + '" has been processed. ' +
+            (costDelta > 0 ? 'Your updated project total is reflected in the job cost summary. ' : '') +
+            (schedDelta > 0 ? 'Please note the project timeline has been extended by '+schedDelta+' day'+(schedDelta>1?'s':'')+'. ' : '') +
+            'We will keep you updated on progress. — Feishy, Corestone Developers';
+          await dbIns('messages', {
+            job_id: jobId,
+            body: '[DRAFT - CO Client Notification]\n\n'+clientMsg,
+            direction: 'outbound',
+            status: 'draft',
+            created_at: new Date().toISOString()
+          });
+          triggered.push('Client notification drafted (review in Messages before sending)');
+        }
+
+        // 5. Audit log
+        await dbIns('audit_log', {
+          object_type:'change_orders', object_id:objectId,
+          action:'approved_with_cascade',
+          new_value: JSON.stringify({cost_delta:costDelta, schedule_impact:schedDelta, triggered:triggered.length}),
+          changed_by_ai:false, timestamp:new Date().toISOString()
+        });
+        break;
+      }
+
+      // ── INVOICE PAYMENT RECORDED ──────────────────────────────────────────
+      case 'invoice.paid': {
+        var inv = context.invoice || (await dbGet('invoices','?id=eq.'+objectId))[0];
+        if(!inv) break;
+        var jobId = inv.job_id;
+        var amount = parseFloat(context.amount || inv.amount || 0);
+        var method = context.method || 'unspecified';
+
+        // 1. Update job costing — record actual revenue received
+        if(jobId) {
+          var jobs = await dbGet('jobs','?id=eq.'+jobId);
+          var job = jobs[0];
+          if(job) {
+            var newReceived = (parseFloat(job.amount_received||0)) + amount;
+            await dbUpd('jobs', jobId, { amount_received: newReceived, last_payment_at: new Date().toISOString() });
+            triggered.push('Job costing updated — received: '+fmt$(newReceived));
+          }
+        }
+
+        // 2. Check if this is the final invoice — trigger warranty if so
+        if(jobId) {
+          var allInvs = await dbGet('invoices','?job_id=eq.'+jobId);
+          var unpaid = (allInvs||[]).filter(function(i){ return i.status !== 'paid' && i.id !== objectId; });
+          if(unpaid.length === 0) {
+            // Final payment received!
+            var warrantyStart = new Date().toISOString();
+            var warrantyEnd = new Date(Date.now() + 365*86400000).toISOString();
+            await dbUpd('jobs', jobId, {
+              status: 'closeout',
+              warranty_start: warrantyStart,
+              warranty_end: warrantyEnd
+            });
+            await addToGatekeeper('warranty_started',
+              'Final payment received — Warranty period started',
+              'All invoices paid for job #'+jobId+'. 1-year warranty period begins today. Closeout checklist should be completed.',
+              'high',
+              'Complete closeout: final walkthrough, punch list sign-off, warranty documentation.',
+              'warranty_started'
+            );
+            triggered.push('FINAL PAYMENT — Warranty period started (1 year from today)');
+            triggered.push('Job status moved to Closeout');
+          }
+        }
+
+        // 3. Check for unsigned lien waivers — create reminder if needed
+        if(jobId) {
+          var waivers = await dbGet('lien_waivers','?job_id=eq.'+jobId);
+          var unsigned = (waivers||[]).filter(function(w){ return w.status !== 'signed'; });
+          if(unsigned.length > 0) {
+            await addToGatekeeper('lien_waivers_needed',
+              unsigned.length+' lien waiver'+(unsigned.length>1?'s':'')+' needed after payment',
+              'Payment of '+fmt$(amount)+' received but '+unsigned.length+' lien waiver'+(unsigned.length>1?'s are':' is')+' not yet signed. Do not release retention until all waivers are collected.',
+              'high',
+              'Collect signed lien waivers from: '+unsigned.map(function(w){return w.sub_name||'sub';}).join(', '),
+              'lien_waivers'
+            );
+            triggered.push(unsigned.length+' unsigned lien waiver reminders created');
+          }
+        }
+
+        // 4. Audit
+        await dbIns('audit_log', {
+          object_type:'invoices', object_id:objectId,
+          action:'paid_with_cascade',
+          new_value: JSON.stringify({amount:amount, method:method, triggered:triggered.length}),
+          changed_by_ai:false, timestamp:new Date().toISOString()
+        });
+        break;
+      }
+
+      // ── PUNCH ITEM COMPLETED ───────────────────────────────────────────────
+      case 'punch.completed': {
+        var jobId = context.job_id || (AJOB && AJOB.id);
+        if(!jobId) break;
+
+        // Check overall punch list completion
+        var allItems = await dbGet('punch_list','?job_id=eq.'+jobId);
+        var complete = (allItems||[]).filter(function(i){ return i.status==='complete'; });
+        var total = (allItems||[]).length;
+        var pct = total > 0 ? Math.round(complete.length/total*100) : 0;
+
+        await dbUpd('jobs', jobId, { punch_pct_complete: pct });
+
+        if(pct === 100 && total > 0) {
+          // All punch items done — prepare final inspection
+          await addToGatekeeper('final_inspection_ready',
+            'Punch list 100% complete — Schedule final inspection',
+            'All '+total+' punch list items are complete. Schedule final inspection with municipality. Prepare final invoice after inspection passes.',
+            'high',
+            'Schedule final inspection and prepare final invoice.',
+            'final_inspection'
+          );
+          triggered.push('100% punch list — Final inspection Gatekeeper item created');
+          triggered.push('Job ready for final invoice after inspection');
+        } else {
+          triggered.push('Punch list now '+pct+'% complete ('+complete.length+'/'+total+')');
+        }
+        break;
+      }
+
+      // ── RFI CLOSED ────────────────────────────────────────────────────────
+      case 'rfi.closed': {
+        var rfi = context.rfi || (await dbGet('rfis','?id=eq.'+objectId))[0];
+        if(!rfi) break;
+        var jobId = rfi.job_id;
+
+        // 1. Log resolution to messages/communications
+        if(jobId && rfi.answer) {
+          await dbIns('messages', {
+            job_id: jobId,
+            body: '[RFI Closed] RFI-'+(rfi.rfi_number||objectId.slice(-4))+': '+rfi.subject+'\n\nResolution: '+rfi.answer,
+            direction: 'internal',
+            status: 'logged',
+            created_at: new Date().toISOString()
+          });
+          triggered.push('RFI resolution logged to project communications');
+        }
+
+        // 2. Check if a plan revision is implied
+        var planKeywords = ['drawing','plan','spec','detail','section','elevation','revision','updated'];
+        var answerLower = (rfi.answer||'').toLowerCase();
+        var needsPlanRev = planKeywords.some(function(kw){ return answerLower.includes(kw); });
+        if(needsPlanRev) {
+          await addToGatekeeper('plan_revision_needed',
+            'RFI resolution may require plan revision',
+            'RFI "'+rfi.subject+'" answer references drawings or specifications. Verify whether architect should issue a revised drawing.',
+            'normal',
+            'Check with architect/engineer if ASI or revised drawing is needed.',
+            'plan_revision'
+          );
+          triggered.push('Plan revision reminder queued (RFI answer references drawings)');
+        }
+
+        // 3. Audit
+        await dbIns('audit_log', {
+          object_type:'rfis', object_id:objectId,
+          action:'closed_with_cascade',
+          new_value: JSON.stringify({answer:rfi.answer, plan_revision_flagged:needsPlanRev}),
+          changed_by_ai:false, timestamp:new Date().toISOString()
+        });
+        break;
+      }
+
+      // ── LIEN WAIVER SIGNED ────────────────────────────────────────────────
+      case 'lien_waiver.signed': {
+        var waiver = context.waiver || (await dbGet('lien_waivers','?id=eq.'+objectId))[0];
+        if(!waiver) break;
+        var jobId = waiver.job_id;
+
+        // Check if all waivers for this job are now signed
+        if(jobId) {
+          var allWaivers = await dbGet('lien_waivers','?job_id=eq.'+jobId);
+          var stillUnsigned = (allWaivers||[]).filter(function(w){ return w.status !== 'signed' && w.id !== objectId; });
+          if(stillUnsigned.length === 0 && allWaivers.length > 0) {
+            await addToGatekeeper('all_waivers_signed',
+              'All lien waivers signed — safe to release final payment',
+              'All '+allWaivers.length+' lien waivers for this job are now signed. Final retention or holdback can be safely released.',
+              'high',
+              'Release final holdback payment to subcontractors.',
+              'payment_release'
+            );
+            triggered.push('All lien waivers signed — payment release approval created');
+          } else if(stillUnsigned.length > 0) {
+            triggered.push(stillUnsigned.length+' lien waiver'+(stillUnsigned.length>1?'s':'')+' still outstanding');
+          }
+        }
+        break;
+      }
+
+      // ── BILL APPROVED (stage 3 — approved to pay) ─────────────────────────
+      case 'bill.approved': {
+        var bill = context.bill || (await dbGet('bills','?id=eq.'+objectId))[0];
+        if(!bill) break;
+        var jobId = bill.job_id;
+
+        // Update job costing committed costs
+        if(jobId) {
+          var jobs = await dbGet('jobs','?id=eq.'+jobId);
+          var job = jobs[0];
+          if(job) {
+            var newCommitted = (parseFloat(job.committed_costs||0)) + parseFloat(bill.amount||0);
+            await dbUpd('jobs', jobId, { committed_costs: newCommitted });
+            triggered.push('Job costing updated — committed: '+fmt$(newCommitted));
+          }
+        }
+
+        // Check for PO mismatch
+        if(bill.po_id) {
+          var pos = await dbGet('purchase_orders','?id=eq.'+bill.po_id);
+          var po = pos[0];
+          if(po && Math.abs(parseFloat(bill.amount||0) - parseFloat(po.amount||0)) > 50) {
+            var delta = parseFloat(bill.amount||0) - parseFloat(po.amount||0);
+            await addToGatekeeper('bill_po_mismatch',
+              'Bill vs PO discrepancy: '+fmt$(Math.abs(delta)),
+              'Bill from '+(bill.vendor_name||'vendor')+' is '+fmt$(Math.abs(delta))+' '+(delta>0?'MORE':'LESS')+' than the PO. Investigate before paying.',
+              'high',
+              'Determine cause: client change (→ CO), contractor error (→ internal), or material cost change.',
+              'bill_discrepancy'
+            );
+            triggered.push('PO mismatch flagged: bill vs PO delta '+fmt$(Math.abs(delta)));
+          }
+        }
+        break;
+      }
+    }
+
+    // Return summary for toast/log
+    return triggered;
+  } catch(e) {
+    console.error('[BusinessCascade] Error in action', action, e);
+    return triggered; // Return what we got even if partial
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RECORD PAYMENT — replaces the thin markPaid() button
+// Collects proper payment details before recording
+// ─────────────────────────────────────────────────────────────────────────────
+async function recordPayment(invoiceId) {
+  var invs = await dbGet('invoices','?id=eq.'+invoiceId);
+  var inv = invs[0]; if(!inv) return;
+  var el = document.createElement('div');
+  el.className='ov'; el.id='rec-pay-ov'; el.style.zIndex='1002';
+  el.innerHTML = '<div class="modal" style="max-width:440px">'
+    +'<div class="mh"><div><div class="mt">Record Payment</div><div class="ms">'+inv.client_name+' · Invoice '+( inv.invoice_number||'—')+'</div></div>'
+    +'<button class="mc" onclick="closeOv(this)">&#x2715;</button></div>'
+    +'<div class="mb">'
+    +'<div style="background:var(--teal-bg);border:1px solid var(--teal);border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">'
+    +'<div style="font-weight:700;color:var(--teal);margin-bottom:4px">Invoice Amount: '+fmt$(inv.amount)+'</div>'
+    +'<div style="color:var(--gray);font-size:12px">'+( inv.description||'')+'</div></div>'
+    +'<div class="f2"><div class="fr"><label>Amount Received *</label>'
+    +'<input id="rp-amount" type="number" value="'+(inv.amount||'')+'" placeholder="0.00"></div>'
+    +'<div class="fr"><label>Payment Method *</label>'
+    +'<select id="rp-method"><option value="check">Check</option><option value="wire">Wire Transfer</option><option value="ach">ACH</option><option value="zelle">Zelle</option><option value="cash">Cash</option><option value="other">Other</option></select></div></div>'
+    +'<div class="f2"><div class="fr"><label>Date Received</label>'
+    +'<input id="rp-date" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+    +'<div class="fr"><label>Reference / Check #</label>'
+    +'<input id="rp-ref" placeholder="Check #1042 or wire ref..."></div></div>'
+    +'<div class="fr"><label>Notes (optional)</label>'
+    +'<input id="rp-notes" placeholder="e.g. Partial payment, client requested split"></div>'
+    +'</div>'
+    +'<div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
+    +'<button class="btn btn-p" onclick="confirmRecordPayment(&quot;'+invoiceId+'&quot;,this)" style="font-weight:800">✅ Record Payment</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+
+async function confirmRecordPayment(invoiceId, btnEl) {
+  var idemKey='record_payment_'+invoiceId;
+  if(!guardAction(idemKey,btnEl)) return;
+  var amount = parseFloat(document.getElementById('rp-amount').value)||0;
+  var method = document.getElementById('rp-method').value;
+  var date = document.getElementById('rp-date').value;
+  var ref = document.getElementById('rp-ref').value;
+  var notes = document.getElementById('rp-notes').value;
+  if(!amount){toast('Amount required','err');releaseAction(idemKey,btnEl,false);return;}
+  btnEl.textContent='Recording...';
+  try {
+    // Update invoice
+    await dbUpd('invoices', invoiceId, {
+      status:'paid', amount_paid:amount,
+      paid_date: date, payment_method: method,
+      payment_reference: ref, payment_notes: notes
+    });
+    // Create payment record
+    await dbIns('payments', {
+      invoice_id: invoiceId,
+      amount: amount, method: method,
+      date: date, reference: ref, notes: notes,
+      recorded_at: new Date().toISOString(),
+      recorded_by: 'owner'
+    });
+    // Run cascade
+    var triggered = await runBusinessCascade('invoice.paid', 'invoice', invoiceId, {
+      amount: amount, method: method, invoice: null
+    });
+    closeOv(document.getElementById('rec-pay-ov'));
+    releaseAction(idemKey,btnEl,true);
+    // Build nextStep based on cascade results
+    var nextActions = [
+      {icon:'📋',label:'Request lien waivers',sub:'Protect against liens before closeout',fn:'goTab("liens")',primary:triggered.some(function(t){return t.includes('waiver');})},
+      {icon:'📊',label:'View job financials',sub:'See updated job costing',fn:'goTab("budget")'},
+      {icon:'⭐',label:'Request client review',sub:'Great time while client is happy',fn:'goTab("messages")'}
+    ];
+    nextStep('Payment Recorded — '+fmt$(amount)+' via '+method,
+      triggered.length ? triggered.join(' · ') : 'Payment logged.',
+      nextActions);
+    pgFinV2();
+  } catch(e) {
+    releaseAction(idemKey,btnEl,false);
+    toast('Error: '+e.message,'err');
+  }
+}
+
+// Keep markPaid as alias that opens the proper flow (backward compat)
+async function markPaid(id){ await recordPayment(id); }
 
 // ============================================================
 // CORESTONE TESTING FRAMEWORK — SCENARIO LOADER
