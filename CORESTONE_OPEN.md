@@ -92,3 +92,17 @@ This document is reviewed at the start of every session.
 
 *Version 1.0 — OS #7 — June 25, 2026*
 *Resolved items move to CLOSED section — never deleted*
+
+---
+
+## ITEMS ADDED — OS #8 (July 1, 2026)
+
+| OQ-ID | Type | Title | Detail | Impact | Owner | Status |
+|---|---|---|---|---|---|---|
+| OQ-019 | Pending Decision | Workflow Engine build timing | WF-01 through WF-03 are hardcoded today. When do we migrate to the Workflow Engine? | Every hardcoded workflow chain must be refactored | Claude + Feishy | Open — Phase 2 per Phase Map |
+| OQ-020 | Risk | GL account codes not reserved in current objects | Current estimate lines and bills have no `gl_account_code` or `cost_code` fields. Adding them retroactively to localStorage objects before Supabase migration is low-risk and high-value. | QBO sync will require schema migration if not added now | Claude | Open — should add to new objects immediately |
+| OQ-021 | Pending Decision | CSI category implementation priority | Architecture Directive requires CSI categories on every Estimate Item. When does CSI get added to the estimating UI? | Estimate Items are currently rows, not rich objects | Feishy | Open — Phase 2 |
+| OQ-022 | Pending Decision | Preview-as-Role priority | Complete target architecture designed. Should a UI-only version (no real permission engine) be built in Phase 1 as a stepping stone? | Client-facing proposal previews exist today; multi-role preview does not | Feishy | Open |
+| OQ-023 | Risk | n8n on Render cold start | Render free tier spins down after 15 min inactivity. Gmail intake can miss emails if n8n is cold. | Inbound leads from Gmail delayed or lost | Claude | Open — upgrade to paid tier or move before going live |
+
+*Added OS #8 — July 1, 2026*
