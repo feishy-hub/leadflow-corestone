@@ -77,3 +77,16 @@ Decisions may be revised — but only with a new entry, not by editing the old o
 | DEC-022 | OS #8 | Three new permanent documents saved to repo | CORESTONE_CONSTITUTION.md (highest authority), CORESTONE_ARCHITECTURE_DIRECTIVE_OBJECT_MODEL.md, CORESTONE_ARCHITECTURE_LOCKDOWN.md | Chat-only storage (lost between sessions) | All | Active — locked |
 
 *Added OS #8 — July 1, 2026*
+
+---
+
+## DECISIONS ADDED — OS #8 Phase 1 Directive (July 1, 2026)
+
+| DEC-ID | Date | Decision | Reason | Impacted Modules | Status |
+|---|---|---|---|---|---|
+| DEC-023 | OS #8 | Architecture freeze — no new Blueprint expansion unless critical flaw discovered | Architecture is sufficiently defined. Priority is now a stable, usable application with real business testing. | All | Active — locked |
+| DEC-024 | OS #8 | Every development cycle delivers one complete, testable business workflow with a professional testing package | Incomplete pages and placeholder buttons are no longer acceptable. Each cycle: build → test internally → break → fix → deliver testing package. | All | Active — locked |
+| DEC-025 | OS #8 | Status must be the result of completing a business action — never a manual button | "Send Proposal" changes status to Sent. "Mark as Sent" button does not exist. Status is a byproduct of workflow, not a manual toggle. | Leads, Estimates, Proposals, Jobs, COs, POs, Bills, Invoices, Payments, Daily Logs, RFIs, Tasks, Warranties | Active — locked |
+| DEC-026 | OS #8 | Build like a CEO, not an architect — demand working product, test like a real construction company, improve from those tests | Corestone proves itself through real business workflows, not further design sessions. | All | Active — locked |
+
+*Added OS #8 — July 1, 2026*
