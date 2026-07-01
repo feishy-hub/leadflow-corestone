@@ -9596,6 +9596,467 @@ async function confirmRecordPayment(invoiceId, btnEl) {
 // Keep markPaid as alias that opens the proper flow (backward compat)
 async function markPaid(id){ await recordPayment(id); }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXECUTIVE TESTING MODE — OS #8
+// Built-in guided walkthrough for Executive Acceptance Testing.
+// One integrated experience: scenario, steps, verification, PASS/FAIL —
+// all without leaving Corestone.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var ETM = {
+  active: false,
+  currentScenario: 0,
+  verdicts: {},      // scenarioIndex → 'pass'|'fail'
+  checks: {},        // 'scenario-item' → true/false
+
+  scenarios: [
+    {
+      id: 1,
+      title: "Bill the Client — Framing Complete",
+      badge: "💰 Milestone Invoice",
+      context: "You walked the Goldstein site this morning. Framing is done — the LVL beam is in, the opening is perfect. Per the signed contract, this triggers the 25% milestone draw: $18,009. Send it now.",
+      steps: [
+        { nav: "Jobs tab", action: "Open the <strong>Goldstein</strong> job" },
+        { nav: "Financial tab", action: "Click inside the job" },
+        { nav: "New Invoice button", action: "Click it" },
+        { nav: "Description field", action: "Type: <strong>Framing Complete — 25% Milestone Draw</strong>" },
+        { nav: "Amount field", action: "Enter <strong>$18,009</strong> · Due date: 7 days from today" },
+        { nav: "Send Invoice button", action: "Click it — not Save Draft" }
+      ],
+      auto: [
+        "Invoice status → <strong>Sent</strong> (by the action — no separate button)",
+        "Sent timestamp recorded with exact date and time",
+        "Gatekeeper item: 'Invoice sent — follow up in 3 days if unpaid'",
+        "Dashboard outstanding balance increases by $18,009",
+        "Draft follow-up communication appears in Messages"
+      ],
+      verify: [
+        { loc: "Financial tab", check: "Invoice row: SENT · $18,009 · today's date" },
+        { loc: "Gatekeeper", check: "Goldstein follow-up item · high priority" },
+        { loc: "Messages", check: "[DRAFT] follow-up message ready" },
+        { loc: "Dashboard", check: "Outstanding balance went up by $18,009" }
+      ],
+      bugs: [
+        "Double-clicking Send created two invoices",
+        "Status still shows 'Draft' after sending",
+        "No Gatekeeper item appeared",
+        "Dashboard balance did not change",
+        "Send button had no protection against repeat clicks"
+      ]
+    },
+    {
+      id: 2,
+      title: "Framing Sub Bill Doesn't Match the PO",
+      badge: "⚠️ Bill Discrepancy",
+      context: "Victory Framing LLC submitted their invoice for $5,200. Your PO was $4,800. The extra $400 is for a TV alcove Sarah asked them to add directly on site — without a CO. You need to enter the bill and let Corestone detect the problem.",
+      steps: [
+        { nav: "Bills tab", action: "Click <strong>New Bill</strong>" },
+        { nav: "Vendor field", action: "Enter <strong>Victory Framing LLC</strong>" },
+        { nav: "Amount field", action: "Enter <strong>$5,200</strong>" },
+        { nav: "PO field", action: "Link to the <strong>Victory Framing PO ($4,800)</strong>" },
+        { nav: "Stage 1 button", action: "Approve Stage 1" },
+        { nav: "Stage 2 button", action: "Approve Stage 2" },
+        { nav: "Stage 3 / Pay Now", action: "Approve Stage 3 — then watch Gatekeeper" }
+      ],
+      auto: [
+        "Stage 3 triggers comparison: bill $5,200 vs PO $4,800",
+        "Gatekeeper item: 'Bill/PO discrepancy $400 — investigate before paying'",
+        "Job committed costs updated: Victory Framing +$5,200",
+        "No CO auto-created — discrepancy flagged for owner decision only"
+      ],
+      verify: [
+        { loc: "Gatekeeper", check: "Discrepancy item showing $400 delta" },
+        { loc: "Bills tab", check: "Status: paid · $5,200 · PO linked" },
+        { loc: "Job → Budget", check: "Committed costs increased by $5,200" },
+        { loc: "Change Orders", check: "Nothing created — suggestion only" }
+      ],
+      bugs: [
+        "Discrepancy silently ignored — no Gatekeeper alert",
+        "A Change Order was auto-created without approval",
+        "Committed costs not updated",
+        "Bill amount was auto-corrected to $4,800 (PO amount)",
+        "Stage 3 clicked twice — two Gatekeeper items appeared"
+      ]
+    },
+    {
+      id: 3,
+      title: "Client Requests Under-Cabinet Lighting",
+      badge: "📋 Change Order",
+      context: "Sarah texted: 'Can we add under-cabinet lighting?' You price it at $1,800 base + 20% markup = $2,160. You draft the CO, send it, and approve it. The moment it's approved, the contract changes — automatically.",
+      steps: [
+        { nav: "Change Orders tab", action: "Click <strong>New CO</strong>" },
+        { nav: "Title field", action: "Enter: <strong>Under-Cabinet LED Lighting</strong>" },
+        { nav: "Labor / Material fields", action: "Labor: $1,200 · Material: $600 · Markup: 20%" },
+        { nav: "AI Draft button", action: "Click to refine description (optional)" },
+        { nav: "Send for Approval", action: "Copy the Magic Link, paste in browser, approve as Sarah" },
+        { nav: "Approve CO button", action: "Back in Corestone — click Approve CO" },
+        { nav: "Jobs tab", action: "Verify contract price updated" }
+      ],
+      auto: [
+        "Contract price: $72,037 + $2,160 = <strong>$74,197</strong>",
+        "Budget baseline updated to $74,197",
+        "Gatekeeper: PM execution task for electrician coordination",
+        "Messages: [DRAFT] client notification — not auto-sent",
+        "Audit log: old contract $72,037 · new $74,197 · who approved · when"
+      ],
+      verify: [
+        { loc: "Goldstein job", check: "Contract price now $74,197" },
+        { loc: "Budget tab", check: "Baseline updated to $74,197" },
+        { loc: "Gatekeeper", check: "PM task: Execute CO — coordinate electrician" },
+        { loc: "Messages", check: "[DRAFT] client confirmation with new total" }
+      ],
+      bugs: [
+        "Contract stayed at $72,037 after approval",
+        "Budget baseline not updated",
+        "Client notification was auto-sent (should be draft only)",
+        "Approving CO twice updated the contract price twice",
+        "CO total calculated wrong (correct answer: $2,160)"
+      ]
+    },
+    {
+      id: 4,
+      title: "Electrician RFI — Island Circuit Spec",
+      badge: "📐 Field RFI",
+      context: "Your electrician Mike Volkov calls: the plan shows 2 island outlets, but Sarah told him she wants 4. He needs a documented answer before pulling wire Monday. You resolve the RFI — and Corestone should detect that the answer may require a plan revision.",
+      steps: [
+        { nav: "RFIs tab", action: "Find Mike's RFI (or create one: Subject: <strong>Island circuit — 2 vs 4 outlets</strong>)" },
+        { nav: "Mark Resolved button", action: "Click it" },
+        { nav: "Resolution field", action: "Enter: <strong>Add dedicated 20A circuit. Wire for 4 outlets. Coordinate with engineer — updated electrical plan may be needed before inspection.</strong>" },
+        { nav: "Confirm", action: "Submit the resolution" },
+        { nav: "Gatekeeper tab", action: "Watch for plan revision flag" }
+      ],
+      auto: [
+        "RFI status → Closed · answer and date_answered recorded",
+        "Resolution logged to project communications",
+        "AI scans answer: detects 'plan' and 'engineer' keywords",
+        "Gatekeeper: 'RFI resolution may require plan revision — verify with engineer'"
+      ],
+      verify: [
+        { loc: "RFIs tab", check: "Status: Closed · answer recorded · date: today" },
+        { loc: "Gatekeeper", check: "Plan revision flag item · normal priority" },
+        { loc: "Messages", check: "[RFI Closed] resolution logged to communications" }
+      ],
+      bugs: [
+        "RFI closed with no answer recorded",
+        "No Gatekeeper item even though resolution mentioned 'plan'",
+        "Closing same RFI twice created two Gatekeeper items",
+        "Resolution not logged to project communications",
+        "Status stayed 'open' after clicking Mark Resolved"
+      ]
+    },
+    {
+      id: 5,
+      title: "Final Payment — Close Out the Job",
+      badge: "🏁 Job Closeout",
+      context: "Fast-forward: the Goldstein kitchen is done. Punch list signed off. This morning $14,403 hit your account — the final balance. Record it. The moment you do, Corestone should recognize this is the last check and close the job automatically.",
+      steps: [
+        { nav: "Invoices tab", action: "Find the final Goldstein invoice" },
+        { nav: "Record Payment button", action: "Click it — this is the full payment flow, not 'Mark Paid'" },
+        { nav: "Amount field", action: "Enter <strong>$14,403</strong>" },
+        { nav: "Method field", action: "Select <strong>Wire Transfer</strong>" },
+        { nav: "Reference field", action: "Enter <strong>WIRE-GOLDSTEIN-FINAL-0701</strong>" },
+        { nav: "Confirm Payment", action: "Click it and watch what happens" }
+      ],
+      auto: [
+        "Invoice → Paid · method, reference, date all recorded",
+        "System detects: ALL invoices for this job are now paid",
+        "Job status → <strong>Closeout</strong> (automatic — no button)",
+        "Warranty recorded: start today · end 1 year from today",
+        "Gatekeeper: 'Final payment received — warranty period started'",
+        "Lien waiver check: reminder if any waivers unsigned"
+      ],
+      verify: [
+        { loc: "Jobs tab", check: "Goldstein status: Closeout (not Active)" },
+        { loc: "Job detail", check: "warranty_start: today · warranty_end: 1 year out" },
+        { loc: "Gatekeeper", check: "Warranty + closeout checklist items" },
+        { loc: "Invoice", check: "Paid · Wire Transfer · WIRE-GOLDSTEIN-FINAL-0701 · today" }
+      ],
+      bugs: [
+        "Job status stayed Active after final payment",
+        "Warranty dates not recorded",
+        "No distinction between partial and final payment",
+        "Gatekeeper warranty item not created",
+        "Clicking Confirm twice recorded two payments"
+      ]
+    }
+  ]
+};
+
+// ─── LAUNCH ──────────────────────────────────────────────────────────────────
+async function launchExecTest() {
+  if(ETM.active) { showExecTestPanel(); return; }
+  if(!confirm('Launch Executive Testing Mode?\n\nThis will load the Goldstein kitchen remodel test data and guide you through 5 business scenarios step-by-step inside Corestone.')) return;
+  ETM.active = true;
+  ETM.currentScenario = 0;
+  ETM.verdicts = {};
+  ETM.checks = {};
+  // Load test data first
+  await loadTestScenario('kitchen_remodel');
+  // Small delay to let toast clear
+  setTimeout(function() { buildExecTestPanel(); showExecTestScenario(0); }, 800);
+}
+
+// ─── BUILD PANEL ─────────────────────────────────────────────────────────────
+function buildExecTestPanel() {
+  var existing = document.getElementById('etm-panel');
+  if(existing) existing.remove();
+
+  var panel = document.createElement('div');
+  panel.id = 'etm-panel';
+  panel.style.cssText = [
+    'position:fixed', 'right:0', 'top:0', 'bottom:0', 'width:380px',
+    'background:#0f172a', 'color:#fff', 'z-index:5000',
+    'display:flex', 'flex-direction:column', 'box-shadow:-4px 0 24px rgba(0,0,0,0.4)',
+    'font-family:inherit', 'font-size:13px', 'transition:transform .25s ease'
+  ].join(';');
+
+  panel.innerHTML = [
+    // Header
+    '<div id="etm-header" style="background:#0d7a70;padding:14px 16px;flex-shrink:0">',
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">',
+        '<div style="font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.6)">🧪 EXECUTIVE TESTING MODE</div>',
+        '<button onclick="toggleExecTestPanel()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;font-family:inherit">Hide</button>',
+      '</div>',
+      '<div id="etm-progress-bar" style="height:4px;background:rgba(255,255,255,0.15);border-radius:2px;overflow:hidden">',
+        '<div id="etm-progress-fill" style="height:100%;background:#2dd4bf;border-radius:2px;width:0%;transition:width .4s ease"></div>',
+      '</div>',
+      '<div id="etm-progress-label" style="font-size:11px;color:rgba(255,255,255,0.65);margin-top:6px">Scenario 1 of 5</div>',
+    '</div>',
+    // Content
+    '<div id="etm-content" style="flex:1;overflow-y:auto;padding:0"></div>',
+    // Footer
+    '<div id="etm-footer" style="padding:12px 16px;background:#1e293b;border-top:1px solid rgba(255,255,255,0.08);flex-shrink:0"></div>'
+  ].join('');
+
+  document.body.appendChild(panel);
+
+  // Adjust main content so panel doesn't overlap
+  var main = document.getElementById('content') || document.querySelector('.content');
+  if(main) main.style.marginRight = '380px';
+  // Also adjust nav
+  var nav = document.querySelector('.bt-nav') || document.querySelector('nav');
+  if(nav) nav.style.paddingRight = '380px';
+}
+
+// ─── TAB TOGGLE ──────────────────────────────────────────────────────────────
+var ETM_VISIBLE = true;
+function toggleExecTestPanel() {
+  var panel = document.getElementById('etm-panel');
+  if(!panel) return;
+  ETM_VISIBLE = !ETM_VISIBLE;
+  panel.style.transform = ETM_VISIBLE ? 'translateX(0)' : 'translateX(360px)';
+  // Tab button
+  var tab = document.getElementById('etm-tab');
+  if(!tab) {
+    tab = document.createElement('button');
+    tab.id = 'etm-tab';
+    tab.onclick = function(){ ETM_VISIBLE = true; panel.style.transform='translateX(0)'; tab.style.display='none'; };
+    tab.style.cssText = 'position:fixed;right:0;top:50%;transform:translateY(-50%);background:#0d7a70;color:#fff;border:none;border-radius:8px 0 0 8px;padding:14px 6px;font-size:11px;font-weight:700;cursor:pointer;z-index:4999;writing-mode:vertical-lr;letter-spacing:1px;font-family:inherit';
+    tab.textContent = '🧪 TESTING';
+    document.body.appendChild(tab);
+  }
+  tab.style.display = ETM_VISIBLE ? 'none' : 'block';
+  // Restore content margin
+  var main = document.getElementById('content');
+  if(main) main.style.marginRight = ETM_VISIBLE ? '380px' : '0';
+}
+
+function showExecTestPanel() {
+  var panel = document.getElementById('etm-panel');
+  if(panel) { ETM_VISIBLE = true; panel.style.transform = 'translateX(0)'; }
+  else buildExecTestPanel();
+}
+
+// ─── RENDER SCENARIO ─────────────────────────────────────────────────────────
+var ETM_ACTIVE_TAB = 'steps'; // steps | watch | verify | bugs
+
+function showExecTestScenario(idx) {
+  ETM.currentScenario = idx;
+  ETM_ACTIVE_TAB = 'steps';
+  var s = ETM.scenarios[idx];
+  if(!s) return;
+
+  // Update header
+  var pct = Math.round((Object.keys(ETM.verdicts).length / ETM.scenarios.length) * 100);
+  var fill = document.getElementById('etm-progress-fill');
+  if(fill) fill.style.width = pct + '%';
+  var lbl = document.getElementById('etm-progress-label');
+  if(lbl) lbl.textContent = 'Scenario ' + (idx+1) + ' of ' + ETM.scenarios.length + ' · ' + Object.values(ETM.verdicts).filter(function(v){return v==='pass';}).length + ' passed';
+
+  renderETMContent();
+  renderETMFooter();
+}
+
+function renderETMContent() {
+  var idx = ETM.currentScenario;
+  var s = ETM.scenarios[idx];
+  var c = document.getElementById('etm-content');
+  if(!c) return;
+
+  var verdict = ETM.verdicts[idx];
+  var verdictBanner = verdict === 'pass'
+    ? '<div style="background:#16a34a;padding:10px 16px;font-weight:800;font-size:13px;text-align:center">✅ SCENARIO PASSED — scroll down for next</div>'
+    : verdict === 'fail'
+    ? '<div style="background:#dc2626;padding:10px 16px;font-weight:800;font-size:13px;text-align:center">✗ SCENARIO FAILED — note the bug below</div>'
+    : '';
+
+  var tabs = ['steps','watch','verify','bugs'].map(function(t) {
+    var labels = {steps:'Steps',watch:'Auto Actions',verify:'Verify',bugs:'Watch For Bugs'};
+    var active = ETM_ACTIVE_TAB === t;
+    return '<button onclick="etmTab(\''+t+'\')" style="flex:1;padding:8px 4px;border:none;background:'+(active?'#0d7a70':'rgba(255,255,255,0.06)')+';color:'+(active?'#fff':'rgba(255,255,255,0.5)')+';font-size:11px;font-weight:'+(active?'800':'600')+';cursor:pointer;font-family:inherit;border-bottom:2px solid '+(active?'#2dd4bf':'transparent')+'">'+labels[t]+'</button>';
+  }).join('');
+
+  var tabContent = '';
+  if(ETM_ACTIVE_TAB === 'steps') {
+    tabContent = '<div style="padding:14px 16px">';
+    s.steps.forEach(function(step, i) {
+      var done = ETM.checks['step-'+idx+'-'+i];
+      tabContent += '<div onclick="etmCheckStep('+idx+','+i+',this)" style="display:flex;gap:12px;padding:11px 12px;margin-bottom:8px;background:'+(done?'rgba(13,122,112,0.25)':'rgba(255,255,255,0.04)')+';border:1px solid '+(done?'#0d7a70':'rgba(255,255,255,0.08)')+';border-radius:8px;cursor:pointer;align-items:flex-start">';
+      tabContent += '<div style="width:22px;height:22px;border-radius:50%;background:'+(done?'#0d7a70':'rgba(255,255,255,0.1)')+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:800;color:#fff;margin-top:1px">'+(done?'✓':(i+1))+'</div>';
+      tabContent += '<div><div style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">'+step.nav+'</div>';
+      tabContent += '<div style="font-size:13px;color:#fff;line-height:1.5">'+step.action+'</div></div></div>';
+    });
+    tabContent += '<div style="padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.4);text-align:center;margin-top:4px">Tap each step as you complete it</div>';
+    tabContent += '</div>';
+  } else if(ETM_ACTIVE_TAB === 'watch') {
+    tabContent = '<div style="padding:14px 16px"><div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:600">Corestone should do all of these automatically — without you doing anything extra:</div>';
+    s.auto.forEach(function(a, i) {
+      tabContent += '<div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);align-items:flex-start">';
+      tabContent += '<span style="color:#2dd4bf;font-weight:800;flex-shrink:0;margin-top:1px">&rarr;</span>';
+      tabContent += '<span style="font-size:13px;line-height:1.5">'+a+'</span></div>';
+    });
+    tabContent += '</div>';
+  } else if(ETM_ACTIVE_TAB === 'verify') {
+    tabContent = '<div style="padding:14px 16px"><div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:600">Go to each location and confirm what you see:</div>';
+    s.verify.forEach(function(v, i) {
+      var done = ETM.checks['verify-'+idx+'-'+i];
+      tabContent += '<div onclick="etmCheckVerify('+idx+','+i+',this)" style="padding:11px 12px;margin-bottom:8px;background:'+(done?'rgba(13,122,112,0.25)':'rgba(255,255,255,0.04)')+';border:1px solid '+(done?'#0d7a70':'rgba(255,255,255,0.08)')+';border-radius:8px;cursor:pointer">';
+      tabContent += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+      tabContent += '<div style="font-size:10px;font-weight:800;color:#2dd4bf;text-transform:uppercase;letter-spacing:.5px">'+v.loc+'</div>';
+      tabContent += '<div style="font-size:13px;color:'+(done?'#2dd4bf':'rgba(255,255,255,0.3)')+'">'+( done ? '✓ Verified' : 'tap to mark')+'</div></div>';
+      tabContent += '<div style="font-size:13px;color:rgba(255,255,255,0.85);line-height:1.5">'+v.check+'</div></div>';
+    });
+    tabContent += '</div>';
+  } else if(ETM_ACTIVE_TAB === 'bugs') {
+    tabContent = '<div style="padding:14px 16px"><div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:600">These would indicate a bug. Mark any you observe:</div>';
+    s.bugs.forEach(function(b, i) {
+      var found = ETM.checks['bug-'+idx+'-'+i];
+      tabContent += '<div onclick="etmCheckBug('+idx+','+i+',this)" style="display:flex;gap:10px;padding:10px 12px;margin-bottom:6px;background:'+(found?'rgba(220,38,38,0.2)':'rgba(255,255,255,0.04)')+';border:1px solid '+(found?'#dc2626':'rgba(255,255,255,0.08)')+';border-radius:8px;cursor:pointer;align-items:flex-start">';
+      tabContent += '<span style="color:'+(found?'#f87171':'rgba(255,255,255,0.25)')+';font-weight:900;flex-shrink:0;margin-top:1px">&times;</span>';
+      tabContent += '<span style="font-size:13px;line-height:1.5;color:'+(found?'#fca5a5':'rgba(255,255,255,0.75)')+'">'+b+'</span></div>';
+    });
+    tabContent += '</div>';
+  }
+
+  c.innerHTML = verdictBanner +
+    '<div style="padding:16px 16px 12px">' +
+      '<div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">' + s.badge + '</div>' +
+      '<div style="font-size:16px;font-weight:900;margin-bottom:10px;line-height:1.25">' + s.title + '</div>' +
+      '<div style="font-size:12px;color:rgba(255,255,255,0.6);line-height:1.65;padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid #0d7a70">' + s.context + '</div>' +
+    '</div>' +
+    '<div style="display:flex;border-top:1px solid rgba(255,255,255,0.08);border-bottom:1px solid rgba(255,255,255,0.08)">' + tabs + '</div>' +
+    tabContent;
+}
+
+function etmTab(tab) {
+  ETM_ACTIVE_TAB = tab;
+  renderETMContent();
+}
+
+function etmCheckStep(scenarioIdx, stepIdx, el) {
+  var key = 'step-'+scenarioIdx+'-'+stepIdx;
+  ETM.checks[key] = !ETM.checks[key];
+  renderETMContent();
+}
+function etmCheckVerify(scenarioIdx, itemIdx, el) {
+  var key = 'verify-'+scenarioIdx+'-'+itemIdx;
+  ETM.checks[key] = !ETM.checks[key];
+  renderETMContent();
+}
+function etmCheckBug(scenarioIdx, bugIdx, el) {
+  var key = 'bug-'+scenarioIdx+'-'+bugIdx;
+  ETM.checks[key] = !ETM.checks[key];
+  renderETMContent();
+}
+
+function renderETMFooter() {
+  var idx = ETM.currentScenario;
+  var verdict = ETM.verdicts[idx];
+  var bugsFound = ETM.scenarios[idx].bugs.some(function(b,i){ return ETM.checks['bug-'+idx+'-'+i]; });
+  var f = document.getElementById('etm-footer');
+  if(!f) return;
+
+  if(!verdict) {
+    // Show PASS/FAIL
+    var warningTxt = bugsFound ? '<div style="background:rgba(220,38,38,0.2);border:1px solid rgba(220,38,38,0.4);border-radius:6px;padding:8px 10px;font-size:11px;color:#fca5a5;margin-bottom:10px">⚠️ You marked bugs — consider marking FAIL</div>' : '';
+    f.innerHTML = warningTxt +
+      '<div style="font-size:11px;color:rgba(255,255,255,0.4);text-align:center;margin-bottom:10px">Did this scenario behave correctly?</div>' +
+      '<div style="display:flex;gap:10px">' +
+        '<button onclick="etmVerdict('+idx+',\'pass\')" style="flex:1;padding:12px;background:rgba(22,163,74,0.15);border:2px solid #16a34a;border-radius:8px;color:#4ade80;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit">✓ PASS</button>' +
+        '<button onclick="etmVerdict('+idx+',\'fail\')" style="flex:1;padding:12px;background:rgba(220,38,38,0.1);border:2px solid #dc2626;border-radius:8px;color:#f87171;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit">✗ FAIL</button>' +
+      '</div>';
+  } else if(verdict === 'pass') {
+    var next = idx + 1;
+    if(next < ETM.scenarios.length) {
+      f.innerHTML =
+        '<div style="text-align:center;margin-bottom:12px">' +
+          '<div style="font-size:24px;margin-bottom:4px">✅</div>' +
+          '<div style="font-weight:900;font-size:15px;color:#4ade80">Scenario ' + (idx+1) + ' Complete</div>' +
+          '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:3px">Next: ' + ETM.scenarios[next].title + '</div>' +
+        '</div>' +
+        '<button onclick="showExecTestScenario('+next+')" style="width:100%;padding:13px;background:#0d7a70;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit">' +
+          'Start Scenario ' + (next+1) + ' &rarr;' +
+        '</button>';
+    } else {
+      // All done
+      var passed = Object.values(ETM.verdicts).filter(function(v){return v==='pass';}).length;
+      var failed = Object.values(ETM.verdicts).filter(function(v){return v==='fail';}).length;
+      f.innerHTML =
+        '<div style="text-align:center;margin-bottom:12px">' +
+          '<div style="font-size:28px;margin-bottom:6px">' + (failed===0?'🏗️':'⚠️') + '</div>' +
+          '<div style="font-weight:900;font-size:15px;color:'+(failed===0?'#4ade80':'#fbbf24')+'">' + passed + ' passed · ' + failed + ' failed</div>' +
+          '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px">' + (failed===0?'All scenarios passed — Corestone ran your company.':'Fix the failures before the next testing cycle.') + '</div>' +
+        '</div>' +
+        '<button onclick="closeExecTestMode()" style="width:100%;padding:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Exit Testing Mode</button>';
+    }
+  } else {
+    // Failed
+    var next = idx + 1;
+    var hasNext = next < ETM.scenarios.length;
+    f.innerHTML =
+      '<div style="background:rgba(220,38,38,0.15);border:1px solid rgba(220,38,38,0.3);border-radius:8px;padding:10px;margin-bottom:10px">' +
+        '<div style="font-size:11px;font-weight:800;color:#f87171;margin-bottom:4px">SCENARIO FAILED</div>' +
+        '<textarea id="etm-fail-note" placeholder="Describe what went wrong..." style="width:100%;background:transparent;border:none;color:rgba(255,255,255,0.7);font-size:12px;font-family:inherit;resize:none;min-height:50px;outline:none"></textarea>' +
+      '</div>' +
+      (hasNext ?
+        '<button onclick="showExecTestScenario('+next+')" style="width:100%;padding:12px;background:#1e293b;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Skip to Scenario '+(next+1)+'</button>' :
+        '<button onclick="closeExecTestMode()" style="width:100%;padding:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Exit Testing Mode</button>'
+      );
+  }
+}
+
+function etmVerdict(idx, verdict) {
+  ETM.verdicts[idx] = verdict;
+  renderETMContent();
+  renderETMFooter();
+  showExecTestScenario(idx); // re-render progress bar
+}
+
+function closeExecTestMode() {
+  ETM.active = false;
+  var panel = document.getElementById('etm-panel');
+  if(panel) panel.remove();
+  var tab = document.getElementById('etm-tab');
+  if(tab) tab.remove();
+  var main = document.getElementById('content');
+  if(main) main.style.marginRight = '0';
+  var nav = document.querySelector('.bt-nav') || document.querySelector('nav');
+  if(nav) nav.style.paddingRight = '0';
+  toast('Testing mode closed. Results saved in session.', 'ok');
+}
+// END EXECUTIVE TESTING MODE
+
 // ============================================================
 // CORESTONE TESTING FRAMEWORK — SCENARIO LOADER
 // Usage: loadTestScenario('kitchen_remodel') from console or button
@@ -9697,20 +10158,7 @@ async function loadTestScenario(scenario='kitchen_remodel'){
 }
 
 // Testing toolbar — visible in the Summary dashboard for QA use
-function showTestingToolbar(){
-  var existing = document.getElementById('testing-toolbar');
-  if(existing){existing.remove();return;}
-  var bar = document.createElement('div');
-  bar.id='testing-toolbar';
-  bar.style.cssText='position:fixed;bottom:16px;right:16px;background:#1e293b;color:#fff;border-radius:10px;padding:12px 16px;z-index:9999;font-family:inherit;box-shadow:0 4px 20px rgba(0,0,0,0.4);min-width:220px';
-  bar.innerHTML='<div style="font-size:11px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">🧪 Testing Mode</div>'
-    +'<div style="display:flex;flex-direction:column;gap:6px">'
-    +'<button onclick="loadTestScenario(&quot;kitchen_remodel&quot;)" style="background:#0d7a70;color:#fff;border:none;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">🏗️ Load Kitchen Remodel Scenario</button>'
-    +'<button onclick="clearTestData()" style="background:#7f1d1d;color:#fff;border:none;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">🗑️ Clear All Test Data</button>'
-    +'<button onclick="this.parentElement.parentElement.remove()" style="background:#334155;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-family:inherit">Close</button>'
-    +'</div>';
-  document.body.appendChild(bar);
-}
+function showTestingToolbar(){ launchExecTest(); }
 
 async function clearTestData(){
   if(!confirm('Clear all test data (leads, estimates, requirements, proposals that start with test_)? This cannot be undone.')) return;
