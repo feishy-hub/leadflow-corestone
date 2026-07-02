@@ -969,3 +969,69 @@ Governing principle locked: "Design now. Build when the platform is ready."
 
 ---
 *OS #8 session complete — July 2, 2026*
+
+---
+
+# OS #8 PHASE COMPLETION — FINAL PUSH
+## Date: July 2, 2026
+
+### M1 Critical Bug Fixes
+
+| Bug | Root Cause | Fix |
+|---|---|---|
+| Tax calculation failing on all new line items | `calcEstTotal` read `l.type` but `saveNewLine` saved `cost_type` — ALL new lines classified as 'other', no tax applied to materials | Added `l.cost_type` to type detection chain |
+| Manual "Mark Sent" / "Mark Approved" buttons | Violated DEC-025 — status must be workflow outcome | Removed; replaced with workflow note |
+| Estimate card transitions | User preference violation | `transition:all 0.15s` removed from estimate cards |
+| No guidance after signature | Dead end — user signed but didn't know to go to Gatekeeper | `nextStep()` added directing to Gatekeeper with "approve to create Job" |
+| executeSignature double-sign possible | No guard | `nameEl.disabled = true` on first submit |
+
+### New Platform Features Built
+
+**Executive Feedback System** (`initExecFeedback`, `openExecFeedback`, `submitFeedback`)
+- Floating 💬 button (bottom-left, always visible)
+- Three modes: Something is broken / Page feels incomplete / Something feels wrong
+- Auto-collects: current page (CUR), active job (AJOB), timestamp, viewport, storage keys, visible errors
+- AI generates structured development report: root cause, affected workflows, blueprint alignment, priority, recommended fix, downstream impact
+- Saves to `cs_feedback` localStorage + creates Gatekeeper item
+- Feishy never needs to describe technical problems — system collects context automatically
+
+**Notification Center** (`addNotification`, `openNotifCenter`, `updateNotifBadge`, `clearNotifications`)
+- Bell icon (🔔) in sidebar header with unread count badge
+- Persistent notification panel (replaces toast-only)
+- Notification types: gk, workflow, ai, system, alert, feedback
+- Last 100 notifications stored; mark-all-read on open
+- Notifications clickable with navigation actions
+
+**Global Search** (`openGlobalSearch`, `runGlobalSearch`)
+- Keyboard shortcut: Cmd+K / Ctrl+K
+- Searches across: Leads, Jobs, Proposals, Estimates, Invoices
+- Results grouped by type with icons
+- Click result → navigate directly to that record
+- Live search (2+ character minimum)
+- ESC to close
+
+### M1 Status After Phase Completion
+
+**Complete (internally QA'd and fixed):**
+- Lead form, pipeline, detail, stage enforcement, AI generation, duplicate-click guard, edit button, audit log
+- Pipeline 'proposal_sent' stage mapping
+- Tax calculation (CRITICAL bug fixed — materials-only 8% NY law)
+- Estimate open, line item CRUD (add/edit/delete)
+- Line item live preview
+- createProposalFromEstimate → 9-section proposal
+- Proposal view (all 9 sections + draw schedule)
+- E-signature flow with guard + Gatekeeper guidance
+- sendProposalToClient cascade
+- proposal_signed Gatekeeper executor (Job + Budget + Deposit Invoice + survey + PM task)
+
+**Still needs ETM verification:**
+- Full flow end-to-end test: Lead → Estimate → Proposal → Sign → Gatekeeper → Job
+- callIntel post-call 12-field persistence (OQ-011)
+
+### Platform at Session End
+
+App: leadflow-corestone.vercel.app
+Repo: github.com/feishy-hub/leadflow-corestone (15 documents + index.html)
+Index.html: ~830KB, 400+ functions
+
+---
