@@ -9615,52 +9615,54 @@ var ETM = {
       id: 1,
       title: "Bill the Client — Framing Complete",
       badge: "💰 Milestone Invoice",
-      context: "You walked the Goldstein site this morning. Framing is done — the LVL beam is in, the opening is perfect. Per the signed contract, this triggers the 25% milestone draw: $18,009. Send it now.",
+      context: "You walked the site this morning. Framing is done — the LVL beam is in, the opening is perfect. Per the signed contract, this triggers the 25% milestone draw: $18,009. Send it now.",
+      nav: { label: "Open Goldstein Job → Financial", fn: "etmGoTo('jobs')" },
       steps: [
-        { nav: "Jobs tab", action: "Open the <strong>Goldstein</strong> job" },
-        { nav: "Financial tab", action: "Click inside the job" },
-        { nav: "New Invoice button", action: "Click it" },
-        { nav: "Description field", action: "Type: <strong>Framing Complete — 25% Milestone Draw</strong>" },
-        { nav: "Amount field", action: "Enter <strong>$18,009</strong> · Due date: 7 days from today" },
-        { nav: "Send Invoice button", action: "Click it — not Save Draft" }
+        { nav: "Jobs tab", action: "Click <strong>Jobs</strong> in the navigation" },
+        { nav: "Goldstein job row", action: "Open <strong>Goldstein — 87 Overlook Road</strong>" },
+        { nav: "Financial tab", action: "Click the <strong>Financial</strong> tab inside the job" },
+        { nav: "New Invoice", action: "Click <strong>New Invoice</strong>" },
+        { nav: "Description field", action: "Type: <em>Framing Complete — 25% Milestone Draw</em>" },
+        { nav: "Amount", action: "Enter <strong>$18,009</strong> · Due: 7 days from today" },
+        { nav: "Send Invoice", action: "Click <strong>Send Invoice</strong> — not Save Draft" }
       ],
       auto: [
-        "Invoice status → <strong>Sent</strong> (by the action — no separate button)",
+        "Invoice status → <strong>Sent</strong> (set by the action — no separate button)",
         "Sent timestamp recorded with exact date and time",
-        "Gatekeeper item: 'Invoice sent — follow up in 3 days if unpaid'",
-        "Dashboard outstanding balance increases by $18,009",
-        "Draft follow-up communication appears in Messages"
+        "Gatekeeper item: follow-up in 3 days if unpaid",
+        "Dashboard outstanding balance +$18,009",
+        "Draft follow-up communication in Messages"
       ],
       verify: [
-        { loc: "Financial tab", check: "Invoice row: SENT · $18,009 · today's date" },
-        { loc: "Gatekeeper", check: "Goldstein follow-up item · high priority" },
-        { loc: "Messages", check: "[DRAFT] follow-up message ready" },
-        { loc: "Dashboard", check: "Outstanding balance went up by $18,009" }
+        { loc: "Financial tab", check: "Invoice: SENT · $18,009 · today's date" },
+        { loc: "Gatekeeper tab", check: "Goldstein follow-up item · high priority" },
+        { loc: "Messages tab", check: "[DRAFT] follow-up message ready" },
+        { loc: "Dashboard", check: "Outstanding receivables increased by $18,009" }
       ],
       bugs: [
         "Double-clicking Send created two invoices",
-        "Status still shows 'Draft' after sending",
+        "Status still shows Draft after sending",
         "No Gatekeeper item appeared",
         "Dashboard balance did not change",
-        "Send button had no protection against repeat clicks"
+        "Send button allowed multiple clicks"
       ]
     },
     {
       id: 2,
       title: "Framing Sub Bill Doesn't Match the PO",
       badge: "⚠️ Bill Discrepancy",
-      context: "Victory Framing LLC submitted their invoice for $5,200. Your PO was $4,800. The extra $400 is for a TV alcove Sarah asked them to add directly on site — without a CO. You need to enter the bill and let Corestone detect the problem.",
+      context: "Victory Framing LLC submitted their invoice for $5,200. Your PO was $4,800. Sarah added a TV alcove on site without a CO — the framing crew did it and billed for it. Enter the bill and watch Corestone detect the discrepancy.",
+      nav: { label: "Open Bills", fn: "etmGoTo('bills')" },
       steps: [
-        { nav: "Bills tab", action: "Click <strong>New Bill</strong>" },
-        { nav: "Vendor field", action: "Enter <strong>Victory Framing LLC</strong>" },
-        { nav: "Amount field", action: "Enter <strong>$5,200</strong>" },
-        { nav: "PO field", action: "Link to the <strong>Victory Framing PO ($4,800)</strong>" },
-        { nav: "Stage 1 button", action: "Approve Stage 1" },
-        { nav: "Stage 2 button", action: "Approve Stage 2" },
-        { nav: "Stage 3 / Pay Now", action: "Approve Stage 3 — then watch Gatekeeper" }
+        { nav: "Bills tab", action: "Click <strong>Bills</strong> in the navigation" },
+        { nav: "New Bill", action: "Click <strong>New Bill</strong>" },
+        { nav: "Vendor", action: "Enter <strong>Victory Framing LLC</strong>" },
+        { nav: "Amount", action: "Enter <strong>$5,200</strong>" },
+        { nav: "Link PO", action: "Link to the existing <strong>Victory Framing PO ($4,800)</strong>" },
+        { nav: "Stage 1 → 2 → 3", action: "Approve each stage · Watch Gatekeeper after Stage 3" }
       ],
       auto: [
-        "Stage 3 triggers comparison: bill $5,200 vs PO $4,800",
+        "Stage 3 compares bill ($5,200) vs PO ($4,800) — $400 delta detected",
         "Gatekeeper item: 'Bill/PO discrepancy $400 — investigate before paying'",
         "Job committed costs updated: Victory Framing +$5,200",
         "No CO auto-created — discrepancy flagged for owner decision only"
@@ -9668,80 +9670,81 @@ var ETM = {
       verify: [
         { loc: "Gatekeeper", check: "Discrepancy item showing $400 delta" },
         { loc: "Bills tab", check: "Status: paid · $5,200 · PO linked" },
-        { loc: "Job → Budget", check: "Committed costs increased by $5,200" },
-        { loc: "Change Orders", check: "Nothing created — suggestion only" }
+        { loc: "Job → Budget", check: "Committed costs +$5,200" },
+        { loc: "Change Orders", check: "Nothing auto-created — suggestion only" }
       ],
       bugs: [
         "Discrepancy silently ignored — no Gatekeeper alert",
         "A Change Order was auto-created without approval",
         "Committed costs not updated",
-        "Bill amount was auto-corrected to $4,800 (PO amount)",
-        "Stage 3 clicked twice — two Gatekeeper items appeared"
+        "Bill amount auto-corrected to PO amount ($4,800)",
+        "Stage 3 clicked twice — two discrepancy items created"
       ]
     },
     {
       id: 3,
       title: "Client Requests Under-Cabinet Lighting",
       badge: "📋 Change Order",
-      context: "Sarah texted: 'Can we add under-cabinet lighting?' You price it at $1,800 base + 20% markup = $2,160. You draft the CO, send it, and approve it. The moment it's approved, the contract changes — automatically.",
+      context: "Sarah texted: 'Can we add under-cabinet lighting?' You price it at $1,800 base + 20% = $2,160. Draft the CO, send it, approve it as Sarah. The moment it's approved, the contract and budget update automatically.",
+      nav: { label: "Open Change Orders", fn: "etmGoTo('co')" },
       steps: [
-        { nav: "Change Orders tab", action: "Click <strong>New CO</strong>" },
-        { nav: "Title field", action: "Enter: <strong>Under-Cabinet LED Lighting</strong>" },
-        { nav: "Labor / Material fields", action: "Labor: $1,200 · Material: $600 · Markup: 20%" },
-        { nav: "AI Draft button", action: "Click to refine description (optional)" },
-        { nav: "Send for Approval", action: "Copy the Magic Link, paste in browser, approve as Sarah" },
-        { nav: "Approve CO button", action: "Back in Corestone — click Approve CO" },
-        { nav: "Jobs tab", action: "Verify contract price updated" }
+        { nav: "Change Orders tab", action: "Click <strong>Change Orders</strong> in navigation" },
+        { nav: "New CO", action: "Click <strong>New Change Order</strong>" },
+        { nav: "Title", action: "Enter: <em>Under-Cabinet LED Lighting</em>" },
+        { nav: "Labor / Material", action: "Labor: $1,200 · Material: $600 · Markup: 20%" },
+        { nav: "Send for Approval", action: "Click <strong>Send for Approval</strong> · copy the Magic Link" },
+        { nav: "Approve as client", action: "Paste link in browser · approve as Sarah Goldstein" },
+        { nav: "Approve CO", action: "Back in Corestone — click <strong>Approve CO</strong>" }
       ],
       auto: [
-        "Contract price: $72,037 + $2,160 = <strong>$74,197</strong>",
+        "Job contract: $72,037 + $2,160 = <strong>$74,197</strong>",
         "Budget baseline updated to $74,197",
-        "Gatekeeper: PM execution task for electrician coordination",
-        "Messages: [DRAFT] client notification — not auto-sent",
-        "Audit log: old contract $72,037 · new $74,197 · who approved · when"
+        "Gatekeeper: PM task — coordinate electrician for CO execution",
+        "Messages: [DRAFT] client confirmation — not auto-sent",
+        "Audit log: old contract · new contract · who approved · when"
       ],
       verify: [
-        { loc: "Goldstein job", check: "Contract price now $74,197" },
+        { loc: "Goldstein Job", check: "Contract price: $74,197 (was $72,037)" },
         { loc: "Budget tab", check: "Baseline updated to $74,197" },
-        { loc: "Gatekeeper", check: "PM task: Execute CO — coordinate electrician" },
+        { loc: "Gatekeeper", check: "PM execution task for under-cabinet lighting" },
         { loc: "Messages", check: "[DRAFT] client confirmation with new total" }
       ],
       bugs: [
         "Contract stayed at $72,037 after approval",
-        "Budget baseline not updated",
+        "Budget not updated",
         "Client notification was auto-sent (should be draft only)",
-        "Approving CO twice updated the contract price twice",
-        "CO total calculated wrong (correct answer: $2,160)"
+        "Approving twice updated the contract price twice",
+        "CO total wrong (correct: $2,160)"
       ]
     },
     {
       id: 4,
       title: "Electrician RFI — Island Circuit Spec",
       badge: "📐 Field RFI",
-      context: "Your electrician Mike Volkov calls: the plan shows 2 island outlets, but Sarah told him she wants 4. He needs a documented answer before pulling wire Monday. You resolve the RFI — and Corestone should detect that the answer may require a plan revision.",
+      context: "Mike Volkov (electrician) opened an RFI: plan shows 2 island outlets but Sarah wants 4. He needs a documented answer before pulling wire Monday. Resolve the RFI — Corestone should detect that the answer may require a revised drawing.",
+      nav: { label: "Open RFIs", fn: "etmGoTo('rfis')" },
       steps: [
-        { nav: "RFIs tab", action: "Find Mike's RFI (or create one: Subject: <strong>Island circuit — 2 vs 4 outlets</strong>)" },
-        { nav: "Mark Resolved button", action: "Click it" },
-        { nav: "Resolution field", action: "Enter: <strong>Add dedicated 20A circuit. Wire for 4 outlets. Coordinate with engineer — updated electrical plan may be needed before inspection.</strong>" },
-        { nav: "Confirm", action: "Submit the resolution" },
-        { nav: "Gatekeeper tab", action: "Watch for plan revision flag" }
+        { nav: "RFIs tab", action: "Click <strong>RFIs</strong> in navigation" },
+        { nav: "Island RFI", action: "Open <strong>RFI-001: Island circuit — 2 vs 4 outlets</strong>" },
+        { nav: "Mark Resolved", action: "Click <strong>Mark Resolved</strong>" },
+        { nav: "Resolution field", action: "Enter: <em>Add dedicated 20A circuit. Wire for 4 outlets. Coordinate with engineer — updated electrical plan may be needed before inspection.</em>" },
+        { nav: "Confirm", action: "Submit the resolution" }
       ],
       auto: [
         "RFI status → Closed · answer and date_answered recorded",
         "Resolution logged to project communications",
-        "AI scans answer: detects 'plan' and 'engineer' keywords",
+        "AI detects keywords 'plan' and 'engineer' in resolution",
         "Gatekeeper: 'RFI resolution may require plan revision — verify with engineer'"
       ],
       verify: [
-        { loc: "RFIs tab", check: "Status: Closed · answer recorded · date: today" },
+        { loc: "RFIs tab", check: "RFI-001: status Closed · answer recorded · today" },
         { loc: "Gatekeeper", check: "Plan revision flag item · normal priority" },
         { loc: "Messages", check: "[RFI Closed] resolution logged to communications" }
       ],
       bugs: [
-        "RFI closed with no answer recorded",
-        "No Gatekeeper item even though resolution mentioned 'plan'",
-        "Closing same RFI twice created two Gatekeeper items",
-        "Resolution not logged to project communications",
+        "RFI closed with no answer saved",
+        "No plan revision Gatekeeper item even though resolution mentions 'plan'",
+        "Closing same RFI twice created duplicate Gatekeeper items",
         "Status stayed 'open' after clicking Mark Resolved"
       ]
     },
@@ -9749,39 +9752,58 @@ var ETM = {
       id: 5,
       title: "Final Payment — Close Out the Job",
       badge: "🏁 Job Closeout",
-      context: "Fast-forward: the Goldstein kitchen is done. Punch list signed off. This morning $14,403 hit your account — the final balance. Record it. The moment you do, Corestone should recognize this is the last check and close the job automatically.",
+      context: "Fast-forward: the Goldstein kitchen is done. Punch list signed off. $14,403 just hit your account — the final balance. Record the payment. Corestone should automatically detect this is the last invoice, close the job, and start the warranty clock.",
+      nav: { label: "Open Invoices", fn: "etmGoTo('invoices')" },
       steps: [
-        { nav: "Invoices tab", action: "Find the final Goldstein invoice" },
-        { nav: "Record Payment button", action: "Click it — this is the full payment flow, not 'Mark Paid'" },
-        { nav: "Amount field", action: "Enter <strong>$14,403</strong>" },
-        { nav: "Method field", action: "Select <strong>Wire Transfer</strong>" },
-        { nav: "Reference field", action: "Enter <strong>WIRE-GOLDSTEIN-FINAL-0701</strong>" },
-        { nav: "Confirm Payment", action: "Click it and watch what happens" }
+        { nav: "Invoices tab", action: "Click <strong>Invoices</strong> in navigation (or Job → Financial → Invoices)" },
+        { nav: "Final Invoice", action: "Find <strong>INV-GOLDSTEIN-FINAL · $14,403</strong>" },
+        { nav: "Record Payment", action: "Click <strong>Record Payment</strong> — the full flow, not 'Mark Paid'" },
+        { nav: "Amount", action: "Enter <strong>$14,403</strong>" },
+        { nav: "Method", action: "Select <strong>Wire Transfer</strong>" },
+        { nav: "Reference", action: "Enter <strong>WIRE-GOLDSTEIN-FINAL-0701</strong>" },
+        { nav: "Confirm", action: "Click <strong>Confirm Payment</strong> and watch the cascade" }
       ],
       auto: [
-        "Invoice → Paid · method, reference, date all recorded",
+        "Invoice → Paid · method, reference, and date all recorded",
         "System detects: ALL invoices for this job are now paid",
-        "Job status → <strong>Closeout</strong> (automatic — no button)",
+        "Job status → <strong>Closeout</strong> automatically — no button needed",
         "Warranty recorded: start today · end 1 year from today",
         "Gatekeeper: 'Final payment received — warranty period started'",
-        "Lien waiver check: reminder if any waivers unsigned"
+        "Lien waiver check: reminder if any waivers are unsigned"
       ],
       verify: [
         { loc: "Jobs tab", check: "Goldstein status: Closeout (not Active)" },
         { loc: "Job detail", check: "warranty_start: today · warranty_end: 1 year out" },
-        { loc: "Gatekeeper", check: "Warranty + closeout checklist items" },
+        { loc: "Gatekeeper", check: "Warranty + closeout checklist Gatekeeper items" },
         { loc: "Invoice", check: "Paid · Wire Transfer · WIRE-GOLDSTEIN-FINAL-0701 · today" }
       ],
       bugs: [
         "Job status stayed Active after final payment",
         "Warranty dates not recorded",
-        "No distinction between partial and final payment",
-        "Gatekeeper warranty item not created",
-        "Clicking Confirm twice recorded two payments"
+        "System did not detect this as the final payment",
+        "No Gatekeeper warranty item created",
+        "Confirm Payment clicked twice — two payment records created"
       ]
     }
   ]
 };
+
+
+// ─── ETM NAVIGATION HELPERS ──────────────────────────────────────────────────
+function etmGoTo(section) {
+  var navMap = {
+    'jobs':     function(){ if(typeof pgJobs==='function') pgJobs(); else goTab('jobs'); },
+    'bills':    function(){ if(typeof pgBills==='function') pgBills(); else goTab('bills'); },
+    'invoices': function(){ if(typeof pgFinV2==='function') pgFinV2(); else goTab('fin'); },
+    'co':       function(){ if(typeof pgCOs==='function') pgCOs(); else goTab('co'); },
+    'rfis':     function(){ if(typeof pgRFIs==='function') pgRFIs(); else goTab('rfis'); },
+    'leads':    function(){ if(typeof pgSales==='function') pgSales(); else goTab('sales'); },
+    'gatekeeper': function(){ if(typeof pgGatekeeper==='function') pgGatekeeper(); else goTab('gk'); }
+  };
+  var fn = navMap[section];
+  if(fn) fn();
+  else toast('Navigate to: ' + section, 'ok');
+}
 
 // ─── LAUNCH ──────────────────────────────────────────────────────────────────
 async function launchExecTest() {
@@ -9791,10 +9813,10 @@ async function launchExecTest() {
   ETM.currentScenario = 0;
   ETM.verdicts = {};
   ETM.checks = {};
-  // Load test data first
+  // Load test data (ETM.active suppresses popup in loadTestScenario)
   await loadTestScenario('kitchen_remodel');
-  // Small delay to let toast clear
-  setTimeout(function() { buildExecTestPanel(); showExecTestScenario(0); }, 800);
+  // Brief pause for localStorage writes to settle, then open panel
+  setTimeout(function() { buildExecTestPanel(); showExecTestScenario(0); }, 400);
 }
 
 // ─── BUILD PANEL ─────────────────────────────────────────────────────────────
@@ -9834,9 +9856,7 @@ function buildExecTestPanel() {
   // Adjust main content so panel doesn't overlap
   var main = document.getElementById('content') || document.querySelector('.content');
   if(main) main.style.marginRight = '380px';
-  // Also adjust nav
-  var nav = document.querySelector('.bt-nav') || document.querySelector('nav');
-  if(nav) nav.style.paddingRight = '380px';
+  // Note: don't adjust nav — it causes layout conflicts. Panel overlaps edge only.
 }
 
 // ─── TAB TOGGLE ──────────────────────────────────────────────────────────────
@@ -9949,11 +9969,13 @@ function renderETMContent() {
     tabContent += '</div>';
   }
 
+  var navBtn = s.nav ? '<button onclick="'+s.nav.fn+'" style="display:block;width:100%;padding:10px 14px;background:#0d7a70;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;text-align:left;margin-top:10px">&#8594; '+s.nav.label+'</button>' : '';
+
   c.innerHTML = verdictBanner +
     '<div style="padding:16px 16px 12px">' +
       '<div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">' + s.badge + '</div>' +
       '<div style="font-size:16px;font-weight:900;margin-bottom:10px;line-height:1.25">' + s.title + '</div>' +
-      '<div style="font-size:12px;color:rgba(255,255,255,0.6);line-height:1.65;padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid #0d7a70">' + s.context + '</div>' +
+      '<div style="font-size:12px;color:rgba(255,255,255,0.6);line-height:1.65;padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid #0d7a70">' + s.context + navBtn + '</div>' +
     '</div>' +
     '<div style="display:flex;border-top:1px solid rgba(255,255,255,0.08);border-bottom:1px solid rgba(255,255,255,0.08)">' + tabs + '</div>' +
     tabContent;
@@ -10051,8 +10073,7 @@ function closeExecTestMode() {
   if(tab) tab.remove();
   var main = document.getElementById('content');
   if(main) main.style.marginRight = '0';
-  var nav = document.querySelector('.bt-nav') || document.querySelector('nav');
-  if(nav) nav.style.paddingRight = '0';
+  // nav padding was not set — nothing to reset
   toast('Testing mode closed. Results saved in session.', 'ok');
 }
 // END EXECUTIVE TESTING MODE
@@ -10061,116 +10082,232 @@ function closeExecTestMode() {
 // CORESTONE TESTING FRAMEWORK — SCENARIO LOADER
 // Usage: loadTestScenario('kitchen_remodel') from console or button
 // ============================================================
-async function loadTestScenario(scenario='kitchen_remodel'){
-  if(!confirm('This will load test data for the "'+scenario+'" scenario into your system. Continue?')) return;
-  toast('Loading test scenario...','ok');
+// ─── STABLE TEST IDs ─────────────────────────────────────────────────────────
+var GTX = {
+  leadId:    'test_lead_goldstein',
+  estId:     'test_est_goldstein',
+  jobId:     'test_job_goldstein',
+  budgetId:  'test_budget_goldstein',
+  poId:      'test_po_framing',
+  rfiId:     'test_rfi_island',
+  invDepId:  'test_inv_deposit',
+  invFinalId:'test_inv_final'
+};
+
+async function loadTestScenario(scenario){
+  // When called from ETM, skip confirm and popup — ETM manages the UX
+  if(!ETM.active){
+    if(!confirm('Load Goldstein Kitchen Remodel test data into Corestone?')) return;
+  }
   try{
-    if(scenario==='kitchen_remodel'){
-      // SCENARIO: Sarah & David Goldstein — Kitchen Remodel — Woodstock, NY
-      var leadId = 'test_lead_'+Date.now();
-      var leadData = {
-        id: leadId,
-        client_name: 'Sarah & David Goldstein',
-        phone: '(845) 555-0147',
-        email: 'sarah.goldstein@email.com',
-        address: '87 Overlook Road, Woodstock, NY 12498',
-        job_type: 'Kitchen Remodel',
-        estimated_value: 72000,
-        timeline: '3-6 months',
-        lead_source: 'Referral',
-        owns_property: 'yes',
-        financing: 'Cash',
-        competing_bids: 'No — only us',
-        notes: 'Referred by Oren Saar. Wants to open up wall between kitchen and dining room, custom cabinets from Wellborn, quartz countertops, new island with seating, full appliance package (Sub-Zero fridge, Wolf range). Also interested in new flooring throughout main level. House built 1987 — may have load-bearing wall concern. Client is very detail-oriented. Prefers to meet on weekends.',
-        stage: 'new',
-        deposit_status: null,
-                ai_call_script: "Hi Sarah, this is Feishy from Corestone Developers. Oren Saar referred you -- great to connect. Are you thinking of opening up the wall between kitchen and dining? We do cost-plus 20% -- full transparency on every invoice. The $5,000 deposit applies to construction. Can we schedule a call this week?",        ai_questions: JSON.stringify(["Do you know if the wall between kitchen and dining is load-bearing?","Are you set on the Wellborn cabinets or open to alternatives at a better price point?","What is your target completion date?","Will you be living in the home during construction?"]),
-        ai_objections: JSON.stringify({too_expensive:"Our cost-plus model means you see every dollar -- no hidden markup. You pay exactly what it costs plus our 20% fee.",deposit_concern:"The $5,000 comes off your final construction draw -- it is not extra. It confirms we are both serious before pulling permits.",getting_other_bids:"Absolutely, you should. Ask each contractor to show you their actual supplier invoices after the job -- we are the only ones who will.",not_ready_yet:"No problem -- when does the timing work for you? I can hold a spot on our schedule through the end of the month."}),
-        ai_next_action: 'Call Sarah this week — she was referred directly by Oren Saar and is cash-buyer with no competing bids.',
-        ai_followup_email_subject: 'Following up — Corestone kitchen remodel for 87 Overlook',
-        ai_followup_email_body: "Hi Sarah, great to hear about your kitchen project from Oren. I would love to walk through the space and share ideas. Would Tuesday or Thursday work for a quick call?",
-        next_followup: new Date(Date.now()+24*3600000).toISOString(),
-        created_at: new Date().toISOString()
-      };
-      // Save lead to localStorage
-      var leads = JSON.parse(localStorage.getItem('cs_leads')||'[]');
-      leads.push(leadData);
-      localStorage.setItem('cs_leads', JSON.stringify(leads));
+    // ── LEAD ──────────────────────────────────────────────────────────────────
+    var leadData = {
+      id: GTX.leadId,
+      client_name: 'Sarah & David Goldstein',
+      phone: '(845) 555-0147',
+      email: 'sarah.goldstein@email.com',
+      address: '87 Overlook Road, Woodstock, NY 12498',
+      job_type: 'Kitchen Remodel',
+      estimated_value: 72037,
+      timeline: '3-6 months',
+      lead_source: 'Referral',
+      notes: 'Referred by Oren Saar. Open concept kitchen/dining, remove load-bearing wall, custom Wellborn cabinets, quartz countertops, island, Sub-Zero + Wolf appliance package (client-supplied). LVP flooring main level. Cash buyer, no competing bids.',
+      stage: 'signed',
+      signed_at: new Date(Date.now()-21*86400000).toISOString(),
+      proposal_sent_at: new Date(Date.now()-25*86400000).toISOString(),
+      job_id: GTX.jobId,
+      ai_call_script: "Hi Sarah, this is Feishy from Corestone. Oren Saar referred you -- great to connect. You are thinking open-concept kitchen with a wall removal? We work cost-plus 20% -- you see every invoice. The $5,000 deposit applies to construction. Can we schedule a site visit this week?",
+      ai_questions: JSON.stringify(["Is the wall between kitchen and dining load-bearing?","Are you set on Wellborn or open to alternatives?","Target completion date?","Living in the home during construction?"]),
+      next_followup: null,
+      created_at: new Date(Date.now()-30*86400000).toISOString()
+    };
 
-      // Create matching requirements
-      var reqs = [
-        {id:'test_req_1',lead_id:leadId,title:'Open-concept kitchen/dining',description:'Remove wall between kitchen and dining room to create open layout. Engineer sign-off needed for load-bearing determination.',source:'notes',status:'captured',priority:'high',category:'Structural',created_at:new Date().toISOString()},
-        {id:'test_req_2',lead_id:leadId,title:'Custom Wellborn cabinets',description:'Client specified Wellborn brand cabinetry. Full kitchen layout with island.',source:'notes',status:'captured',priority:'high',category:'Millwork',created_at:new Date().toISOString()},
-        {id:'test_req_3',lead_id:leadId,title:'Quartz countertops',description:'Quartz countertops throughout. Client considering Silestone or Caesarstone — selection TBD.',source:'notes',status:'captured',priority:'high',category:'Countertops',created_at:new Date().toISOString()},
-        {id:'test_req_4',lead_id:leadId,title:'Kitchen island with seating',description:'New center island, minimum 4 seats. Needs pendant lighting above.',source:'notes',status:'captured',priority:'high',category:'Millwork',created_at:new Date().toISOString()},
-        {id:'test_req_5',lead_id:leadId,title:'Full appliance package',description:'Sub-Zero refrigerator + Wolf 36" range. Client purchasing direct — Corestone installs.',source:'notes',status:'captured',priority:'medium',category:'Appliances',created_at:new Date().toISOString()},
-        {id:'test_req_6',lead_id:leadId,title:'New flooring main level',description:'Replace existing flooring throughout main level. Client open to hardwood or LVP.',source:'notes',status:'captured',priority:'medium',category:'Flooring',created_at:new Date().toISOString()}
-      ];
-      var existing = JSON.parse(localStorage.getItem('cs_requirements')||'[]');
-      existing.push(...reqs);
-      localStorage.setItem('cs_requirements', JSON.stringify(existing));
+    // ── JOB (week 3 of 10, framing complete) ──────────────────────────────────
+    var jobData = {
+      id: GTX.jobId,
+      lead_id: GTX.leadId,
+      estimate_id: GTX.estId,
+      client_name: 'Sarah & David Goldstein',
+      job_name: 'Goldstein — 87 Overlook Road Kitchen Remodel',
+      address: '87 Overlook Road, Woodstock, NY 12498',
+      job_type: 'Kitchen Remodel',
+      contract_price: 72037,
+      status: 'active',
+      current_phase: 'Framing Complete',
+      phase_week: 3,
+      total_weeks: 10,
+      progress_pct: 28,
+      budget_baseline: 72037,
+      budget_used: 14200,
+      committed_costs: 8000,
+      amount_received: 5000,
+      created_from: 'signed_proposal',
+      start_date: new Date(Date.now()-21*86400000).toISOString().slice(0,10),
+      notes: 'Week 3 of 10. Framing complete as of yesterday. LVL beam installed, kitchen-dining opening framed perfectly. Electrical rough-in starts next week.',
+      created_at: new Date(Date.now()-21*86400000).toISOString()
+    };
 
-      // Create a pre-built estimate
-      var estId = 'test_est_1';
-      var lineItems = [
-        {id:'li1',description:'Structural engineer — wall assessment & beam spec',trade:'Structural',type:'sub',qty:1,unit:'lump sum',unit_cost:2800,markup:20,tax:false},
-        {id:'li2',description:'Demo — remove wall, existing cabinets, countertops, flooring',trade:'Demo',type:'labor',qty:1,unit:'lump sum',unit_cost:3200,markup:20,tax:false},
-        {id:'li3',description:'Framing — install LVL beam, patch ceiling, reframe opening',trade:'Framing',type:'labor',qty:1,unit:'lump sum',unit_cost:4800,markup:20,tax:false},
-        {id:'li4',description:'Electrical — reconfigure kitchen circuits, add island circuits, pendant rough-in (3), under-cabinet rough-in',trade:'Electrical',type:'sub',qty:1,unit:'lump sum',unit_cost:6400,markup:20,tax:false},
-        {id:'li5',description:'Plumbing — relocate sink to island, new fixtures, dishwasher connection',trade:'Plumbing',type:'sub',qty:1,unit:'lump sum',unit_cost:4200,markup:20,tax:false},
-        {id:'li6',description:'Wellborn custom cabinetry — full kitchen + island (material)',trade:'Millwork',type:'material',qty:1,unit:'lump sum',unit_cost:14500,markup:20,tax:true},
-        {id:'li7',description:'Cabinet installation labor',trade:'Millwork',type:'labor',qty:1,unit:'lump sum',unit_cost:3600,markup:20,tax:false},
-        {id:'li8',description:'Quartz countertops — fabrication + install (approx 55 SF)',trade:'Countertops',type:'sub',qty:55,unit:'SF',unit_cost:95,markup:20,tax:false},
-        {id:'li9',description:'Tile backsplash — supply and install (approx 40 SF)',trade:'Tile',type:'sub',qty:40,unit:'SF',unit_cost:28,markup:20,tax:false},
-        {id:'li10',description:'LVP flooring — main level (approx 680 SF)',trade:'Flooring',type:'sub',qty:680,unit:'SF',unit_cost:9.5,markup:20,tax:false},
-        {id:'li11',description:'Paint — kitchen, dining, adjacent hallway',trade:'Paint',type:'sub',qty:1,unit:'lump sum',unit_cost:2800,markup:20,tax:false},
-        {id:'li12',description:'Appliance installation — Sub-Zero + Wolf (client-supplied)',trade:'Appliances',type:'labor',qty:1,unit:'lump sum',unit_cost:1200,markup:20,tax:false},
-        {id:'li13',description:'Building permit — Ulster County',trade:'Permits',type:'permit',qty:1,unit:'lump sum',unit_cost:1400,markup:0,tax:false},
-        {id:'li14',description:'Dumpster rental x2',trade:'General',type:'material',qty:2,unit:'each',unit_cost:450,markup:20,tax:true},
-        {id:'li15',description:'Project management & supervision',trade:'General',type:'labor',qty:8,unit:'weeks',unit_cost:850,markup:0,tax:false}
-      ];
-      var estObj = {
-        id: estId,
-        lead_id: leadId,
-        title: 'Kitchen Remodel — 87 Overlook Road, Woodstock',
-        client_name: 'Sarah & David Goldstein',
-        client_email: 'sarah.goldstein@email.com',
-        job_type: 'Kitchen Remodel',
-        line_items: lineItems,
-        status: 'draft',
-        timeline_weeks: 10,
-        version: 1,
-        created_at: new Date().toISOString()
-      };
-      var ests = JSON.parse(localStorage.getItem('cs_estimates')||'[]');
-      ests.push(estObj);
-      localStorage.setItem('cs_estimates', JSON.stringify(ests));
+    // ── BUDGET ────────────────────────────────────────────────────────────────
+    var budgetData = {
+      id: GTX.budgetId,
+      job_id: GTX.jobId,
+      lead_id: GTX.leadId,
+      baseline_amount: 72037,
+      committed_amount: 8000,
+      actual_amount: 5000,
+      status: 'active',
+      created_at: new Date(Date.now()-21*86400000).toISOString()
+    };
 
-      toast('✅ Test scenario loaded! Lead + Requirements + Estimate ready.','ok',5000);
-      nextStep('Kitchen Remodel Scenario Loaded 🏗️','Sarah & David Goldstein are in your system. Here is the testing flow:',[
-        {icon:'👤',label:'Step 1: Open the Lead',sub:'Go to Sales → find Goldstein → open lead detail',fn:'pgSales()',primary:true},
-        {icon:'📋',label:'Step 2: View Requirements',sub:'6 requirements auto-captured from notes',fn:'goTab("requirements")'},
-        {icon:'💰',label:'Step 3: Open Estimate',sub:'Pre-built $72k kitchen estimate ready to review',fn:'goTab("estimates")'}
-      ]);
-      pgSales();
+    // ── PURCHASE ORDER — Victory Framing ─────────────────────────────────────
+    var poData = {
+      id: GTX.poId,
+      job_id: GTX.jobId,
+      vendor_name: 'Victory Framing LLC',
+      vendor_contact: 'Pete Marchetti',
+      description: 'Framing labor and materials — kitchen remodel, LVL beam installation, wall removal, rough opening',
+      amount: 4800,
+      status: 'issued',
+      issued_date: new Date(Date.now()-14*86400000).toISOString().slice(0,10),
+      trade: 'Framing',
+      created_at: new Date(Date.now()-14*86400000).toISOString()
+    };
+
+    // ── RFI — Mike Volkov (electrician) ──────────────────────────────────────
+    var rfiData = {
+      id: GTX.rfiId,
+      job_id: GTX.jobId,
+      rfi_number: 'RFI-001',
+      subject: 'Island circuit — 2 vs 4 outlets',
+      question: 'Current plan shows 2 outlets on the island. Client mentioned wanting 4 outlets (coffee maker, toaster, 2 appliances). Do we run a dedicated 20A circuit or split from existing kitchen circuit? Need answer before rough-in Monday.',
+      submitted_by: 'Mike Volkov (MV Electric)',
+      status: 'open',
+      priority: 'high',
+      date_submitted: new Date(Date.now()-1*86400000).toISOString().slice(0,10),
+      created_at: new Date(Date.now()-86400000).toISOString()
+    };
+
+    // ── DEPOSIT INVOICE (already paid) ───────────────────────────────────────
+    var invDepData = {
+      id: GTX.invDepId,
+      job_id: GTX.jobId,
+      lead_id: GTX.leadId,
+      client_name: 'Sarah & David Goldstein',
+      invoice_type: 'deposit',
+      invoice_number: 'DEP-GOLDSTEIN-001',
+      amount: 5000,
+      amount_paid: 5000,
+      description: 'Deposit — Goldstein Kitchen Remodel',
+      status: 'paid',
+      paid_date: new Date(Date.now()-20*86400000).toISOString().slice(0,10),
+      payment_method: 'check',
+      payment_reference: 'Check #4412',
+      due_date: new Date(Date.now()-21*86400000).toISOString().slice(0,10),
+      created_at: new Date(Date.now()-21*86400000).toISOString()
+    };
+
+    // ── FINAL INVOICE (outstanding — for Scenario 5) ─────────────────────────
+    var invFinalData = {
+      id: GTX.invFinalId,
+      job_id: GTX.jobId,
+      lead_id: GTX.leadId,
+      client_name: 'Sarah & David Goldstein',
+      invoice_type: 'final',
+      invoice_number: 'INV-GOLDSTEIN-FINAL',
+      amount: 14403,
+      description: 'Final Balance — Goldstein Kitchen Remodel (all work complete)',
+      status: 'sent',
+      sent_at: new Date(Date.now()-2*86400000).toISOString(),
+      due_date: new Date(Date.now()+5*86400000).toISOString().slice(0,10),
+      created_at: new Date(Date.now()-2*86400000).toISOString()
+    };
+
+    // ── ESTIMATE (15 line items) ──────────────────────────────────────────────
+    var lineItems = [
+      {id:'li1',description:'Structural engineer — wall assessment & beam spec',trade:'Structural',type:'sub',qty:1,unit:'lump sum',unit_cost:2800,markup:20,tax:false},
+      {id:'li2',description:'Demo — remove wall, cabinets, countertops, flooring',trade:'Demo',type:'labor',qty:1,unit:'lump sum',unit_cost:3200,markup:20,tax:false},
+      {id:'li3',description:'Framing — install LVL beam, reframe opening',trade:'Framing',type:'labor',qty:1,unit:'lump sum',unit_cost:4800,markup:20,tax:false},
+      {id:'li4',description:'Electrical — reconfigure circuits, island circuits, pendant rough-in',trade:'Electrical',type:'sub',qty:1,unit:'lump sum',unit_cost:6400,markup:20,tax:false},
+      {id:'li5',description:'Plumbing — relocate sink to island, new fixtures',trade:'Plumbing',type:'sub',qty:1,unit:'lump sum',unit_cost:4200,markup:20,tax:false},
+      {id:'li6',description:'Wellborn custom cabinetry — full kitchen + island',trade:'Millwork',type:'material',qty:1,unit:'lump sum',unit_cost:14500,markup:20,tax:true},
+      {id:'li7',description:'Cabinet installation labor',trade:'Millwork',type:'labor',qty:1,unit:'lump sum',unit_cost:3600,markup:20,tax:false},
+      {id:'li8',description:'Quartz countertops — fabrication + install (55 SF)',trade:'Countertops',type:'sub',qty:55,unit:'SF',unit_cost:95,markup:20,tax:false},
+      {id:'li9',description:'Tile backsplash — supply and install (40 SF)',trade:'Tile',type:'sub',qty:40,unit:'SF',unit_cost:28,markup:20,tax:false},
+      {id:'li10',description:'LVP flooring — main level (680 SF)',trade:'Flooring',type:'sub',qty:680,unit:'SF',unit_cost:9.5,markup:20,tax:false},
+      {id:'li11',description:'Paint — kitchen, dining, adjacent hallway',trade:'Paint',type:'sub',qty:1,unit:'lump sum',unit_cost:2800,markup:20,tax:false},
+      {id:'li12',description:'Appliance installation — client-supplied Sub-Zero + Wolf',trade:'Appliances',type:'labor',qty:1,unit:'lump sum',unit_cost:1200,markup:20,tax:false},
+      {id:'li13',description:'Building permit — Ulster County',trade:'Permits',type:'permit',qty:1,unit:'lump sum',unit_cost:1400,markup:0,tax:false},
+      {id:'li14',description:'Dumpster rental x2',trade:'General',type:'material',qty:2,unit:'each',unit_cost:450,markup:20,tax:true},
+      {id:'li15',description:'Project management & supervision',trade:'General',type:'labor',qty:8,unit:'weeks',unit_cost:850,markup:0,tax:false}
+    ];
+    var estData = {
+      id: GTX.estId,
+      lead_id: GTX.leadId,
+      job_id: GTX.jobId,
+      title: 'Kitchen Remodel — 87 Overlook Road, Woodstock',
+      client_name: 'Sarah & David Goldstein',
+      client_email: 'sarah.goldstein@email.com',
+      job_type: 'Kitchen Remodel',
+      line_items: lineItems,
+      status: 'approved',
+      timeline_weeks: 10,
+      version: 1,
+      created_at: new Date(Date.now()-28*86400000).toISOString()
+    };
+
+    // ── REQUIREMENTS ─────────────────────────────────────────────────────────
+    var reqs = [
+      {id:'test_req_1',lead_id:GTX.leadId,job_id:GTX.jobId,title:'Open-concept kitchen/dining',description:'Remove wall between kitchen and dining. Engineer needed for load-bearing check.',source:'notes',status:'captured',priority:'high',category:'Structural',created_at:new Date().toISOString()},
+      {id:'test_req_2',lead_id:GTX.leadId,job_id:GTX.jobId,title:'Custom Wellborn cabinets',description:'Full kitchen + island. Wellborn brand specified by client.',source:'notes',status:'captured',priority:'high',category:'Millwork',created_at:new Date().toISOString()},
+      {id:'test_req_3',lead_id:GTX.leadId,job_id:GTX.jobId,title:'Quartz countertops',description:'Silestone or Caesarstone — selection TBD.',source:'notes',status:'captured',priority:'high',category:'Countertops',created_at:new Date().toISOString()},
+      {id:'test_req_4',lead_id:GTX.leadId,job_id:GTX.jobId,title:'Kitchen island with seating',description:'Center island, min 4 seats. Pendant lighting above.',source:'notes',status:'captured',priority:'high',category:'Millwork',created_at:new Date().toISOString()},
+      {id:'test_req_5',lead_id:GTX.leadId,job_id:GTX.jobId,title:'Appliance package (client-supplied)',description:'Sub-Zero fridge + Wolf 36" range. Client buying direct — Corestone installs.',source:'notes',status:'captured',priority:'medium',category:'Appliances',created_at:new Date().toISOString()},
+      {id:'test_req_6',lead_id:GTX.leadId,job_id:GTX.jobId,title:'New flooring main level',description:'Replace existing flooring. Open to hardwood or LVP.',source:'notes',status:'captured',priority:'medium',category:'Flooring',created_at:new Date().toISOString()}
+    ];
+
+    // ── WRITE ALL TO LOCALSTORAGE ─────────────────────────────────────────────
+    // Helper: upsert by id
+    function upsertLS(key, newRec){
+      var arr = JSON.parse(localStorage.getItem(key)||'[]');
+      var idx = arr.findIndex(function(r){return r.id===newRec.id;});
+      if(idx>=0) arr[idx]=newRec; else arr.push(newRec);
+      localStorage.setItem(key, JSON.stringify(arr));
     }
-  }catch(e){toast('Error loading scenario: '+e.message,'err');console.error(e);}
+    upsertLS('cs_leads', leadData);
+    upsertLS('cs_jobs', jobData);
+    upsertLS('cs_budgets', budgetData);
+    upsertLS('cs_purchase_orders', poData);
+    upsertLS('cs_rfis', rfiData);
+    upsertLS('cs_invoices', invDepData);
+    upsertLS('cs_invoices', invFinalData);
+    upsertLS('cs_estimates', estData);
+    reqs.forEach(function(r){ upsertLS('cs_requirements', r); });
+
+    if(ETM.active){
+      // In ETM mode: quiet success, no popup
+      toast('Goldstein test data ready', 'ok', 2000);
+    } else {
+      toast('Test data loaded — Goldstein Kitchen Remodel ready', 'ok', 3000);
+    }
+    pgSales();
+  }catch(e){
+    toast('Error loading test data: '+e.message,'err');
+    console.error(e);
+  }
 }
 
-// Testing toolbar — visible in the Summary dashboard for QA use
-function showTestingToolbar(){ launchExecTest(); }
-
 async function clearTestData(){
-  if(!confirm('Clear all test data (leads, estimates, requirements, proposals that start with test_)? This cannot be undone.')) return;
-  var tables = ['cs_leads','cs_estimates','cs_requirements','cs_proposals','cs_jobs','cs_invoices','cs_audit_log'];
-  for(var t of tables){
-    var data = JSON.parse(localStorage.getItem(t)||'[]');
-    var cleaned = data.filter(r=>!r.id||!r.id.toString().startsWith('test_'));
-    localStorage.setItem(t, JSON.stringify(cleaned));
-  }
+  if(!confirm('Clear all test data? This cannot be undone.')) return;
+  var tables=['cs_leads','cs_jobs','cs_budgets','cs_estimates','cs_requirements','cs_proposals','cs_invoices','cs_purchase_orders','cs_rfis','cs_audit_log','cs_payments','cs_messages','cs_change_orders','cs_bills','cs_lien_waivers'];
+  tables.forEach(function(t){
+    var data=JSON.parse(localStorage.getItem(t)||'[]');
+    var cleaned=data.filter(function(r){return !r.id||!r.id.toString().startsWith('test_');});
+    localStorage.setItem(t,JSON.stringify(cleaned));
+  });
   toast('Test data cleared','ok');
   pgSales();
 }
+
 // END TESTING FRAMEWORK
 
 </script>
