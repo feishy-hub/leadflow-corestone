@@ -9817,19 +9817,24 @@ function etmGoTo(section) {
 // When ETM is active, opening a job goes to the Financial tab (most test scenarios need it).
 // When ETM is NOT active, goes to Schedule (normal behavior).
 function etmAwareJobOpen(id) {
-  // Ensure ALLJOBS is populated from storage if empty
+  // Ensure ALLJOBS is populated
   if(!ALLJOBS || ALLJOBS.length === 0) {
     ALLJOBS = JSON.parse(localStorage.getItem('cs_jobs') || '[]');
   }
-  selectJob(id);
-  if(ETM && ETM.active) {
-    // Go to the tab the current scenario needs
-    var scenarioTabMap = { 0:'financial', 1:'bills', 2:'cos', 3:'rfis', 4:'financial' };
-    var targetTab = scenarioTabMap[ETM.currentScenario] || 'financial';
-    goTab(targetTab);
-  } else {
-    goTab('schedule');
-  }
+  // Set AJOB directly — do NOT call selectJob (it double-renders the page)
+  AJOB = ALLJOBS.find(function(j){ return j.id===id; }) || null;
+  // Update context bar if present
+  var bar = $('ctx-bar');
+  if(bar && AJOB) {
+    bar.classList.remove('hidden');
+    var nm=$('ctx-name');if(nm)nm.textContent=AJOB.job_name;
+    var mt=$('ctx-meta');if(mt)mt.textContent=AJOB.client_name+' · '+(AJOB.address||'');
+    var bg=$('ctx-badge');if(bg){bg.className='badge badge-'+(AJOB.status||'active');bg.textContent=AJOB.status||'';}
+  } else if(bar && !AJOB) { bar.classList.add('hidden'); }
+  // Single navigation — no double render
+  var tabMap = { 0:'financial', 1:'bills', 2:'cos', 3:'rfis', 4:'financial' };
+  var tab = (ETM && ETM.active) ? (tabMap[ETM.currentScenario]||'financial') : 'schedule';
+  goTab(tab);
 }
 
 // Direct ETM navigation — populates ALLJOBS from storage first, then navigates
@@ -9847,10 +9852,22 @@ function etmGoTo(section) {
     'leads':      function(){ goTab('sales'); },
     'gatekeeper': function(){ goTab('gatekeeper'); },
     'job_financial': function(){
-      // Select the Goldstein job then go to Financial
+      // Set AJOB directly — no double render from selectJob
       var job = ALLJOBS.find(function(j){ return j.id === GTX.jobId; });
-      if(job){ selectJob(job.id); goTab('financial'); }
-      else { toast('Goldstein job not found in Jobs list', 'err'); goTab('jobs'); }
+      if(job){
+        AJOB = job;
+        var bar=$('ctx-bar');
+        if(bar){
+          bar.classList.remove('hidden');
+          var nm=$('ctx-name');if(nm)nm.textContent=job.job_name;
+          var mt=$('ctx-meta');if(mt)mt.textContent=job.client_name;
+          var bg=$('ctx-badge');if(bg){bg.className='badge badge-'+(job.status||'active');bg.textContent=job.status||'';}
+        }
+        goTab('financial');
+      } else {
+        toast('Goldstein job not found — tap Testing Mode to reload data','err',4000);
+        goTab('jobs');
+      }
     }
   };
   var fn = navMap[section];
@@ -9877,11 +9894,10 @@ async function launchExecTest() {
   ETM.checks = {};
   // Load all test data silently
   await loadTestScenario('kitchen_remodel');
-  // Build panel immediately, then navigate into the Goldstein job
+  // Build panel and navigate in one synchronous sequence
   buildExecTestPanel();
   showExecTestScenario(0);
-  // Navigate straight to the Goldstein job Financial tab
-  setTimeout(function() { etmGoTo('job_financial'); }, 200);
+  etmGoTo('job_financial');
 }
 
 // ─── BUILD PANEL ─────────────────────────────────────────────────────────────
