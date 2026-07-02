@@ -4194,7 +4194,7 @@ async function pgJobsV2(){
       +'</div>'
       +'<div style="display:flex;gap:8px">'
       +'<input id="job-search" placeholder="Search jobs..." style="width:180px;padding:7px 11px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;font-family:inherit" oninput="filterJobsV2(this.value)">'
-      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button>'+(AJOB?'<button onclick="showJobSettingsOverride(&quot;'+AJOB.id+'&quot;)" style="padding:8px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">&#x2699;&#xFE0F; Job Settings</button>':'')+'<button onclick="aiWeeklySummary()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">AI Summary</button>'
+      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button>'+'<button onclick="aiWeeklySummary()"   style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">AI Summary</button>'
       +'</div></div>'
       
       // Status filter tabs
@@ -4225,7 +4225,7 @@ function renderJobCard(j){
     var d=Math.ceil((new Date(j.end_date)-Date.now())/86400000);
     daysLeft=d>0?'<span style="font-size:10px;color:'+(d<14?'var(--red)':'var(--muted)')+'">'+d+'d left</span>':'<span style="font-size:10px;color:var(--red)">'+Math.abs(d)+'d overdue</span>';
   }
-  return '<div class="card" style="cursor:pointer;border-left:4px solid '+sc+';transition:all 0.15s" onclick="selectJob(\''+j.id+'\');goTab(\'schedule\')" onmouseover="this.style.boxShadow=\'0 4px 16px rgba(0,0,0,0.12)\'" onmouseout="this.style.boxShadow=\'var(--shadow)\'">'
+  return '<div class="card" style="cursor:pointer;border-left:4px solid '+sc+'" onclick="etmAwareJobOpen(\''+j.id+'\')"   onmouseover="this.style.boxShadow=\'0 4px 16px rgba(0,0,0,0.12)\'" onmouseout="this.style.boxShadow=\'var(--shadow)\'">'
     +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">'
     +'<div style="flex:1">'
     +'<div style="font-size:14px;font-weight:800;margin-bottom:2px">'+j.job_name+'</div>'
@@ -4241,7 +4241,7 @@ function renderJobCard(j){
     +'<span style="font-weight:800;color:var(--teal)">'+pct+'%</span>'
     +'</div>'
     +'<div style="background:var(--border);border-radius:4px;height:7px">'
-    +'<div style="background:var(--teal);height:100%;border-radius:4px;width:'+pct+'%;transition:width 0.3s"></div></div></div>'
+    +'<div style="background:var(--teal);height:100%;border-radius:4px;width:'+pct+'%"></div></div></div>'
     
     // Budget vs actual
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">'
@@ -9616,7 +9616,7 @@ var ETM = {
       title: "Bill the Client — Framing Complete",
       badge: "💰 Milestone Invoice",
       context: "You walked the site this morning. Framing is done — the LVL beam is in, the opening is perfect. Per the signed contract, this triggers the 25% milestone draw: $18,009. Send it now.",
-      nav: { label: "Open Goldstein Job → Financial", fn: "etmGoTo('jobs')" },
+      nav: { label: "Open Goldstein Job → Financial tab", fn: "etmGoTo('job_financial')" },
       steps: [
         { nav: "Jobs tab", action: "Click <strong>Jobs</strong> in the navigation" },
         { nav: "Goldstein job row", action: "Open <strong>Goldstein — 87 Overlook Road</strong>" },
@@ -9753,7 +9753,7 @@ var ETM = {
       title: "Final Payment — Close Out the Job",
       badge: "🏁 Job Closeout",
       context: "Fast-forward: the Goldstein kitchen is done. Punch list signed off. $14,403 just hit your account — the final balance. Record the payment. Corestone should automatically detect this is the last invoice, close the job, and start the warranty clock.",
-      nav: { label: "Open Invoices", fn: "etmGoTo('invoices')" },
+      nav: { label: "Open Invoices", fn: "etmGoTo('financial')" },
       steps: [
         { nav: "Invoices tab", action: "Click <strong>Invoices</strong> in navigation (or Job → Financial → Invoices)" },
         { nav: "Final Invoice", action: "Find <strong>INV-GOLDSTEIN-FINAL · $14,403</strong>" },
@@ -9805,6 +9805,52 @@ function etmGoTo(section) {
   else toast('Navigate to: ' + section, 'ok');
 }
 
+
+// ─── JOB OPEN — ETM-AWARE ────────────────────────────────────────────────────
+// When ETM is active, opening a job goes to the Financial tab (most test scenarios need it).
+// When ETM is NOT active, goes to Schedule (normal behavior).
+function etmAwareJobOpen(id) {
+  // Ensure ALLJOBS is populated from storage if empty
+  if(!ALLJOBS || ALLJOBS.length === 0) {
+    ALLJOBS = JSON.parse(localStorage.getItem('cs_jobs') || '[]');
+  }
+  selectJob(id);
+  if(ETM && ETM.active) {
+    // Go to the tab the current scenario needs
+    var scenarioTabMap = { 0:'financial', 1:'bills', 2:'cos', 3:'rfis', 4:'financial' };
+    var targetTab = scenarioTabMap[ETM.currentScenario] || 'financial';
+    goTab(targetTab);
+  } else {
+    goTab('schedule');
+  }
+}
+
+// Direct ETM navigation — populates ALLJOBS from storage first, then navigates
+function etmGoTo(section) {
+  // Always ensure ALLJOBS is fresh from storage before navigating
+  ALLJOBS = JSON.parse(localStorage.getItem('cs_jobs') || '[]');
+
+  var navMap = {
+    'jobs':       function(){ goTab('jobs'); },
+    'bills':      function(){ goTab('bills'); },
+    'invoices':   function(){ goTab('financial'); },
+    'financial':  function(){ goTab('financial'); },
+    'co':         function(){ goTab('cos'); },
+    'rfis':       function(){ goTab('rfis'); },
+    'leads':      function(){ goTab('sales'); },
+    'gatekeeper': function(){ goTab('gatekeeper'); },
+    'job_financial': function(){
+      // Select the Goldstein job then go to Financial
+      var job = ALLJOBS.find(function(j){ return j.id === GTX.jobId; });
+      if(job){ selectJob(job.id); goTab('financial'); }
+      else { toast('Goldstein job not found in Jobs list', 'err'); goTab('jobs'); }
+    }
+  };
+  var fn = navMap[section];
+  if(fn) fn();
+  else toast('Navigating to: ' + section, 'ok');
+}
+
 // ─── LAUNCH ──────────────────────────────────────────────────────────────────
 function showTestingToolbar() {
   try {
@@ -9839,7 +9885,7 @@ function buildExecTestPanel() {
     'position:fixed', 'right:0', 'top:0', 'bottom:0', 'width:380px',
     'background:#0f172a', 'color:#fff', 'z-index:5000',
     'display:flex', 'flex-direction:column', 'box-shadow:-4px 0 24px rgba(0,0,0,0.4)',
-    'font-family:inherit', 'font-size:13px', 'transition:transform .25s ease'
+    'font-family:inherit', 'font-size:13px'
   ].join(';');
 
   panel.innerHTML = [
@@ -9874,13 +9920,13 @@ function toggleExecTestPanel() {
   var panel = document.getElementById('etm-panel');
   if(!panel) return;
   ETM_VISIBLE = !ETM_VISIBLE;
-  panel.style.transform = ETM_VISIBLE ? 'translateX(0)' : 'translateX(360px)';
+  panel.style.display = ETM_VISIBLE ? 'flex' : 'none';
   // Tab button
   var tab = document.getElementById('etm-tab');
   if(!tab) {
     tab = document.createElement('button');
     tab.id = 'etm-tab';
-    tab.onclick = function(){ ETM_VISIBLE = true; panel.style.transform='translateX(0)'; tab.style.display='none'; };
+    tab.onclick = function(){ ETM_VISIBLE = true; panel.style.display='flex'; tab.style.display='none'; };
     tab.style.cssText = 'position:fixed;right:0;top:50%;transform:translateY(-50%);background:#0d7a70;color:#fff;border:none;border-radius:8px 0 0 8px;padding:14px 6px;font-size:11px;font-weight:700;cursor:pointer;z-index:4999;writing-mode:vertical-lr;letter-spacing:1px;font-family:inherit';
     tab.textContent = '🧪 TESTING';
     document.body.appendChild(tab);
