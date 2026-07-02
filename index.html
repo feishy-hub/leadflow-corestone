@@ -1260,6 +1260,20 @@ function filterJobs(q){
   renderJobList(ALLJOBS.filter(j=>j.job_name.toLowerCase().includes(q.toLowerCase())||j.client_name.toLowerCase().includes(q.toLowerCase())||(j.address||'').toLowerCase().includes(q.toLowerCase())));
 }
 
+// Safe job selection — sets AJOB without double-render, then navigates once
+function safeSelectJob(id, tab) {
+  if(!ALLJOBS || !ALLJOBS.length) ALLJOBS = JSON.parse(localStorage.getItem('cs_jobs')||'[]');
+  AJOB = ALLJOBS.find(function(j){ return j.id===id; }) || null;
+  var bar=$('ctx-bar');
+  if(bar && AJOB){
+    bar.classList.remove('hidden');
+    var nm=$('ctx-name');if(nm)nm.textContent=AJOB.job_name;
+    var mt=$('ctx-meta');if(mt)mt.textContent=AJOB.client_name;
+    var bg=$('ctx-badge');if(bg){bg.className='badge badge-'+(AJOB.status||'active');bg.textContent=AJOB.status||'';}
+  }
+  goTab(tab||'schedule');
+}
+
 function selectJob(id){
   AJOB=ALLJOBS.find(j=>j.id===id)||null;
   renderJobList(ALLJOBS);
@@ -4351,10 +4365,10 @@ function renderJobCard(j){
     
     // Action buttons
     +'<div style="display:flex;gap:6px;border-top:1px solid var(--border);padding-top:10px">'
-    +'<button class="btn btn-p btn-sm" onclick="event.stopPropagation();selectJob(\''+j.id+'\');goTab(\'schedule\')">📅 Schedule</button>'
-    +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();selectJob(\''+j.id+'\');goTab(\'financial\')">💰 Financial</button>'
-    +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();updateJobPct(\''+j.id+'\','+pct+')">📊 Update %</button>'
-    +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();quickAIJobNote(\''+j.id+'\')" title="AI Status">🤖</button>'
+    +'<button class="btn btn-p btn-sm" onclick="event.stopPropagation();etmAwareJobOpen(this.dataset.jid)" data-jid="'+j.id+'">📅 Open</button>'
+    +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();safeSelectJob(this.dataset.jid,\'financial\')" data-jid="'+j.id+'">💰 Financial</button>'
+    +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();updateJobPct(this.dataset.jid,'+pct+')" data-jid="'+j.id+'">📊 Update %</button>'
+    +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();quickAIJobNote(this.dataset.jid)" data-jid="'+j.id+'" title="AI Status">🤖</button>'
     +'</div></div>';
 }
 
@@ -9300,6 +9314,31 @@ function showClientPreviewOptions(estId){
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PURCHASE ORDER ARCHITECTURE DIRECTIVE — OS #8
+// Locked: July 1, 2026
+//
+// Purchase Orders represent authorization to commit company funds.
+// They are NEVER created automatically.
+//
+// MANDATORY 3-STAGE APPROVAL SEQUENCE:
+//   Stage 1 — Internal Approval (estimate/bid pricing approved internally)
+//   Stage 2 — Customer Approval (proposal or CO approved by client)
+//   Stage 3 — Gatekeeper Authorization (Feishy approves fund commitment → PO created)
+//
+// Rules:
+//   - POs may be created for all approved items OR only selected items
+//   - Bills MUST always be linked back to their PO
+//   - One PO may have multiple partial bills
+//   - Gatekeeper always mediates between Stage 2 and PO creation
+//
+// Implementation: Phase 2 (after Supabase migration, with Workflow Engine)
+// Current impact: Do not auto-create POs anywhere in the codebase.
+//   Any function that currently auto-creates POs must be flagged and rerouted
+//   through Gatekeeper.
+// ═══════════════════════════════════════════════════════════════════════════
+
 // BUSINESS CASCADE ENGINE — OS #8
 // Every major business action runs through this engine.
 // The engine asks: "As company president, what should happen next?"
