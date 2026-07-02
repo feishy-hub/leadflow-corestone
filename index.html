@@ -209,6 +209,14 @@ tr:hover td{background:#fafbfc}
     <div id="bt-job-list-picker"></div>
   </div>
 
+  <!-- Header actions: Notification Bell + Search -->
+  <div style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:8px">
+    <button onclick="openGlobalSearch()" title="Search (Ctrl+K)" style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:rgba(255,255,255,0.5);cursor:pointer;font-size:11px;font-family:inherit;text-align:left">🔍 Search... ⌘K</button>
+    <button onclick="openNotifCenter()" title="Notifications" style="position:relative;width:32px;height:32px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;color:rgba(255,255,255,0.7)">
+      🔔
+      <span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#dc2626;color:#fff;border-radius:10px;font-size:9px;font-weight:800;padding:1px 4px;min-width:16px;text-align:center;font-family:inherit"></span>
+    </button>
+  </div>
   <!-- Navigation Groups -->
   <nav class="bt-nav">
     <!-- SUMMARY -->
@@ -6515,7 +6523,7 @@ async function pgEstimates(){
       var estLines = est.line_items||[]; if(typeof estLines==='string'){try{estLines=JSON.parse(estLines);}catch(e){estLines=[];}} var total = calcEstTotal(estLines);
       var statusColor = est.status==='sent'?'var(--blue)':est.status==='approved'?'var(--green)':est.status==='draft'?'var(--amber)':'var(--muted)';
       var statusBg = est.status==='sent'?'var(--blue-bg)':est.status==='approved'?'var(--green-bg)':est.status==='draft'?'var(--amber-bg)':'#f6f8fa';
-      html += '<div class="card" style="cursor:pointer;transition:all 0.15s" onclick="openEstimate(\''+est.id+'\')" onmouseover="this.style.borderColor=\'var(--teal)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+      html += '<div class="card" style="cursor:pointer" onclick="openEstimate(\''+est.id+'\')">'
         + '<div style="display:flex;align-items:center;justify-content:space-between">'
         + '<div style="flex:1">'
         + '<div style="font-size:15px;font-weight:800;margin-bottom:3px">'+est.title+'</div>'
@@ -6543,7 +6551,7 @@ function calcEstTotal(lines, jobId) {
     var cost = (l.qty || 0) * (l.unit_cost || 0);
     var markup = cost * ((l.markup_pct || 0) / 100);
     var line_total = cost + markup;
-    var type = (l.type || l.category || 'other').toLowerCase();
+    var type = (l.cost_type || l.type || l.category || 'other').toLowerCase(); // cost_type is the saved field from addLine form
     if (type === 'material' || type === 'materials') subtotal_materials += line_total;
     else if (type === 'labor') subtotal_labor += line_total;
     else if (type === 'sub' || type === 'subcontractor' || type === 'subs') subtotal_subs += line_total;
@@ -6728,9 +6736,8 @@ async function openEstimate(id){
     '<div class="card" style="margin-bottom:12px">',
     '<div style="font-size:12px;font-weight:800;margin-bottom:12px;color:var(--muted);text-transform:uppercase">Status</div>',
     '<div style="display:flex;flex-direction:column;gap:6px">',
-    '<button onclick="setEstStatus(\''+id+'\',\'draft\')" class="btn btn-g btn-sm" style="justify-content:flex-start">📝 Mark Draft</button>',
-    '<button onclick="setEstStatus(\''+id+'\',\'sent\')" class="btn btn-g btn-sm" style="justify-content:flex-start">📧 Mark Sent</button>',
-    '<button onclick="setEstStatus(\''+id+'\',\'approved\')" class="btn btn-green btn-sm" style="justify-content:flex-start">✅ Mark Approved</button>',
+    '<button onclick="setEstStatus(\''+id+'\',\'draft\')" class="btn btn-g btn-sm" style="justify-content:flex-start">📝 Revert to Draft</button>',
+    '<div style="font-size:10px;color:var(--muted);padding:4px 0">Status is set automatically:<br>Send Estimate → Sent · Create Proposal → Proposal Created</div>',
     '<div style="border-top:2px solid var(--teal);margin:8px 0;padding-top:8px">',
     '<button onclick="createProposalFromEstimate(\''+id+'\')" class="btn btn-p btn-sm" style="justify-content:flex-start;width:100%;background:var(--teal);font-weight:800">🚀 Create Proposal from Estimate</button>',
     '</div>',
@@ -7360,6 +7367,9 @@ async function executeSignature(propId) {
   var nameEl = document.getElementById('sig-name-' + propId);
   if(!nameEl || !nameEl.value.trim()) { toast('Please type your full name to sign','err'); return; }
   var name = nameEl.value.trim();
+  // Guard against double-signing
+  if(nameEl.disabled) { toast('Signature already being processed','ok'); return; }
+  nameEl.disabled = true;
 
   await dbUpd('proposals', propId, {
     status: 'signed',
@@ -7393,6 +7403,18 @@ async function executeSignature(propId) {
 
   toast('✅ Proposal signed by ' + name + ' — Gatekeeper notified to create job', 'ok', 5000);
   openProposal(propId);
+  // Guide owner to Gatekeeper to approve job creation
+  if(typeof ETM === 'undefined' || !ETM.active) {
+    setTimeout(function(){
+      nextStep('Proposal Signed! 🎉',
+        name + ' signed the proposal. Go to Gatekeeper and approve to create the Job, Budget, and Deposit Invoice automatically.',
+        [
+          {icon:'⚙️', label:'Approve in Gatekeeper', sub:'Creates Job + Budget + Deposit Invoice', fn:"goTab('gatekeeper')", primary:true},
+          {icon:'📋', label:'View Signed Proposal', sub:'See the signed copy', fn:"openProposal('"+propId+"')"}
+        ]
+      );
+    }, 800);
+  }
 }
 
 async function sendProposalToClient(propId) {
@@ -7463,8 +7485,8 @@ async function reviseProposal(propId) {
 // Add proposal_signed to Gatekeeper executor
 async function sendEstimate(estId){
   var results = await dbGet('estimates','?id=eq.'+estId);
-  var est = results[0];
-  if(!est.client_email){toast('No client email on this estimate','err');return;}
+  var est = results[0]; if(!est){toast('Estimate not found','err');return;}
+  if(!est.client_email){toast('No client email on this estimate — add email first','err');return;}
   
   var lines = est.line_items||[];
   var totals = calcEstTotal(lines);
@@ -10290,6 +10312,376 @@ function closeExecTestMode() {
 }
 // END EXECUTIVE TESTING MODE
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXECUTIVE FEEDBACK SYSTEM — OS #8
+// A permanent floating button for Feishy to report issues, suggest improvements,
+// or ask AI to review — without needing to describe technical problems.
+// The system auto-collects all technical context.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function initExecFeedback() {
+  if(document.getElementById('exec-feedback-btn')) return;
+  var btn = document.createElement('button');
+  btn.id = 'exec-feedback-btn';
+  btn.innerHTML = '💬';
+  btn.title = 'Report Issue / Suggest Improvement / Ask AI to Review';
+  btn.style.cssText = 'position:fixed;bottom:20px;left:20px;width:44px;height:44px;border-radius:50%;background:#1e293b;color:#fff;border:2px solid #334155;font-size:18px;cursor:pointer;z-index:8000;box-shadow:0 4px 12px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-family:inherit';
+  btn.onclick = openExecFeedback;
+  document.body.appendChild(btn);
+}
+
+function openExecFeedback() {
+  var existing = document.getElementById('exec-feedback-ov');
+  if(existing) { existing.remove(); return; }
+
+  // Auto-collect context
+  var ctx = {
+    page: CUR || 'unknown',
+    job: AJOB ? (AJOB.job_name + ' (' + AJOB.id + ')') : 'none',
+    jobStatus: AJOB ? AJOB.status : 'N/A',
+    url: window.location.href,
+    timestamp: new Date().toISOString(),
+    userAgent: navigator.userAgent.substring(0,100),
+    viewport: window.innerWidth + 'x' + window.innerHeight,
+    storageKeys: Object.keys(localStorage).filter(function(k){return k.startsWith('cs_');}).join(', ')
+  };
+
+  // Try to get any visible error messages
+  var errorEls = document.querySelectorAll('.error, .err, [class*="error"]');
+  if(errorEls.length) ctx.visibleErrors = Array.from(errorEls).map(function(e){return e.textContent.substring(0,100);}).join(' | ');
+
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'exec-feedback-ov'; el.style.cssText = 'z-index:9000;align-items:flex-end;justify-content:flex-start;padding:0 0 80px 20px';
+  el.innerHTML = '<div class="modal" style="max-width:460px;border-radius:14px;overflow:hidden">'
+    + '<div style="background:#1e293b;padding:16px 20px;display:flex;align-items:center;justify-content:space-between">'
+    + '<div style="color:#fff;font-size:15px;font-weight:800">Executive Feedback</div>'
+    + '<button onclick="closeOv(this)" style="background:rgba(255,255,255,0.1);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">×</button>'
+    + '</div>'
+    + '<div style="padding:16px 20px;background:#f8fafc">'
+    + '<div style="font-size:12px;color:#64748b;margin-bottom:14px">Tell Corestone what\'s wrong. No technical knowledge needed — just describe what you expected or noticed.</div>'
+    // Quick buttons
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">'
+    + '<button onclick="setFeedbackType(\'issue\',this)" style="padding:10px 6px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit">🐛 Something<br>is broken</button>'
+    + '<button onclick="setFeedbackType(\'incomplete\',this)" style="padding:10px 6px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit">📋 Page feels<br>incomplete</button>'
+    + '<button onclick="setFeedbackType(\'wrong\',this)" style="padding:10px 6px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit">❓ Something<br>feels wrong</button>'
+    + '</div>'
+    + '<input type="hidden" id="fb-type" value="issue">'
+    + '<textarea id="fb-text" style="width:100%;min-height:90px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:10px" placeholder="Describe what you expected to happen, or what doesn\'t feel right...\n\nExamples:\n• \'I clicked Send but nothing happened\'\n• \'This page is missing the invoice list\'\n• \'I expected a Gatekeeper item after approving this\'"></textarea>'
+    + '<div style="background:#f1f5f9;border-radius:8px;padding:10px;font-size:11px;color:#64748b;margin-bottom:12px">'
+    + '<strong style="color:#1e293b">Auto-collected context:</strong><br>'
+    + 'Page: <strong>' + ctx.page + '</strong> · Job: <strong>' + ctx.job + '</strong> · Time: ' + new Date().toLocaleTimeString()
+    + '</div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button onclick="submitFeedback(' + JSON.stringify(ctx).replace(/"/g,"'") + ',this)" style="flex:1;padding:10px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🤖 Submit + AI Analysis</button>'
+    + '</div>'
+    + '</div></div>';
+  document.body.appendChild(el);
+  setTimeout(function(){ var t=document.getElementById('fb-text');if(t)t.focus(); },200);
+}
+
+function setFeedbackType(type, btn) {
+  document.getElementById('fb-type').value = type;
+  document.querySelectorAll('#exec-feedback-ov button[onclick^="setFeedback"]').forEach(function(b){
+    b.style.borderColor='#e2e8f0';b.style.background='#fff';b.style.color='#1e293b';
+  });
+  btn.style.borderColor='#0d7a70';btn.style.background='#e8f5f3';btn.style.color='#0d7a70';
+}
+
+async function submitFeedback(ctx, btnEl) {
+  var text = document.getElementById('fb-text').value.trim();
+  var type = document.getElementById('fb-type').value;
+  if(!text) { toast('Please describe what you noticed', 'err'); return; }
+  btnEl.textContent = '🤖 Analyzing...'; btnEl.disabled = true;
+
+  // AI generates structured development report
+  var prompt = 'You are the development team for Corestone OS, an AI-powered construction management system.\n\n'
+    + 'EXECUTIVE FEEDBACK:\nType: ' + type + '\nDescription: ' + text + '\n\n'
+    + 'CONTEXT:\nPage: ' + ctx.page + '\nActive Job: ' + ctx.job + '\nTime: ' + ctx.timestamp + '\n\n'
+    + 'Generate a structured development report:\n'
+    + '1. ROOT CAUSE (likely technical cause based on context)\n'
+    + '2. AFFECTED WORKFLOWS (which business workflows are impacted)\n'
+    + '3. BLUEPRINT ALIGNMENT (which Blueprint section covers this)\n'
+    + '4. PRIORITY (Critical/High/Medium/Low with reason)\n'
+    + '5. RECOMMENDED FIX (specific technical action)\n'
+    + '6. DOWNSTREAM IMPACT (what else might be affected)\n\n'
+    + 'Keep each section to 1-2 sentences. Be specific and technical.';
+
+  try {
+    var analysis = await ai(prompt, 'You are a senior software architect. Be precise and technical. No markdown headers.', 1500);
+
+    // Save feedback to localStorage
+    var feedbacks = JSON.parse(localStorage.getItem('cs_feedback')||'[]');
+    var fb = {
+      id: 'fb_' + Date.now(),
+      type: type,
+      description: text,
+      context: ctx,
+      ai_analysis: analysis,
+      status: 'open',
+      created_at: new Date().toISOString()
+    };
+    feedbacks.push(fb);
+    localStorage.setItem('cs_feedback', JSON.stringify(feedbacks));
+
+    // Add to Gatekeeper for tracking
+    await addToGatekeeper('feedback',
+      (type==='issue'?'🐛':'type'==='incomplete'?'📋':'❓') + ' Exec Feedback: ' + text.substring(0,60) + (text.length>60?'...':''),
+      'Page: ' + ctx.page + '\nDescription: ' + text + '\n\nAI Analysis:\n' + analysis,
+      type==='issue'?'high':'normal',
+      'Review AI analysis and fix before next Executive Testing.',
+      'feedback'
+    );
+
+    closeOv(document.getElementById('exec-feedback-ov'));
+    nextStep('Feedback Received — AI Report Generated',
+      'Your feedback has been logged and analyzed. The development team will address it before the next Executive Testing session.',
+      [
+        {icon:'⚙️', label:'View in Gatekeeper', sub:'See the development report', fn:"goTab('gatekeeper')", primary:true},
+        {icon:'💬', label:'Submit another', sub:'Report another issue', fn:"openExecFeedback()"}
+      ]
+    );
+  } catch(e) {
+    // Save even without AI
+    var feedbacks = JSON.parse(localStorage.getItem('cs_feedback')||'[]');
+    feedbacks.push({id:'fb_'+Date.now(),type:type,description:text,context:ctx,ai_analysis:'AI unavailable: '+e.message,status:'open',created_at:new Date().toISOString()});
+    localStorage.setItem('cs_feedback', JSON.stringify(feedbacks));
+    toast('Feedback saved (AI analysis unavailable)', 'ok');
+    closeOv(document.getElementById('exec-feedback-ov'));
+    btnEl.textContent='Submit + AI Analysis'; btnEl.disabled=false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATION CENTER — OS #8
+// Replaces toast-only with a real notification panel that persists
+// ═══════════════════════════════════════════════════════════════════════════
+
+var NOTIF_UNREAD = 0;
+
+function addNotification(type, title, body, action) {
+  var notifs = JSON.parse(localStorage.getItem('cs_notifications')||'[]');
+  var n = {
+    id: 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    type: type, // 'gk' | 'workflow' | 'ai' | 'system' | 'alert'
+    title: title,
+    body: body,
+    action: action || null,
+    read: false,
+    created_at: new Date().toISOString()
+  };
+  notifs.unshift(n); // newest first
+  if(notifs.length > 100) notifs = notifs.slice(0,100); // cap at 100
+  localStorage.setItem('cs_notifications', JSON.stringify(notifs));
+  NOTIF_UNREAD++;
+  updateNotifBadge();
+  // Still show toast for immediate feedback
+  return n;
+}
+
+function updateNotifBadge() {
+  var badge = document.getElementById('notif-badge');
+  if(!badge) return;
+  var notifs = JSON.parse(localStorage.getItem('cs_notifications')||'[]');
+  var unread = notifs.filter(function(n){return !n.read;}).length;
+  badge.textContent = unread > 99 ? '99+' : String(unread);
+  badge.style.display = unread > 0 ? 'flex' : 'none';
+}
+
+function openNotifCenter() {
+  var existing = document.getElementById('notif-panel');
+  if(existing) { existing.remove(); return; }
+
+  var notifs = JSON.parse(localStorage.getItem('cs_notifications')||'[]');
+
+  // Mark all as read
+  notifs.forEach(function(n){ n.read = true; });
+  localStorage.setItem('cs_notifications', JSON.stringify(notifs));
+  updateNotifBadge();
+
+  var typeIcon = {gk:'⚙️',workflow:'🔄',ai:'🤖',system:'ℹ️',alert:'⚠️',feedback:'💬'};
+  var typeColor = {gk:'var(--amber)',workflow:'var(--teal)',ai:'var(--blue)',system:'var(--ink3)',alert:'var(--red)',feedback:'var(--purple)'};
+
+  var panel = document.createElement('div');
+  panel.id = 'notif-panel';
+  panel.style.cssText = 'position:fixed;top:52px;right:0;width:360px;height:calc(100vh - 52px);background:#fff;border-left:1px solid #e2e8f0;z-index:4000;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.1);font-family:inherit;overflow:hidden';
+
+  var notifHtml = notifs.length === 0
+    ? '<div style="text-align:center;padding:48px 20px;color:#94a3b8"><div style="font-size:32px;margin-bottom:10px">🔔</div><div style="font-size:13px;font-weight:600">No notifications yet</div><div style="font-size:11px;margin-top:4px">Workflow events, AI alerts, and Gatekeeper items will appear here</div></div>'
+    : notifs.map(function(n) {
+        var icon = typeIcon[n.type] || 'ℹ️';
+        var color = typeColor[n.type] || 'var(--ink3)';
+        var age = Math.round((Date.now() - new Date(n.created_at).getTime()) / 60000);
+        var ageStr = age < 60 ? age + 'm ago' : age < 1440 ? Math.round(age/60) + 'h ago' : Math.round(age/1440) + 'd ago';
+        return '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;cursor:pointer;background:#fff" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'"'
+          + (n.action ? ' onclick="' + n.action.replace(/"/g,"'") + ';document.getElementById(\'notif-panel\').remove()"' : '') + '>'
+          + '<div style="display:flex;align-items:flex-start;gap:10px">'
+          + '<span style="font-size:16px;flex-shrink:0;margin-top:1px">' + icon + '</span>'
+          + '<div style="flex:1;min-width:0">'
+          + '<div style="font-size:12px;font-weight:700;margin-bottom:2px;color:#1e293b">' + n.title + '</div>'
+          + '<div style="font-size:11px;color:#64748b;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + n.body + '</div>'
+          + '</div>'
+          + '<div style="font-size:10px;color:#94a3b8;flex-shrink:0;margin-top:2px">' + ageStr + '</div>'
+          + '</div></div>';
+      }).join('');
+
+  panel.innerHTML = '<div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;background:#f8fafc">'
+    + '<div style="font-size:13px;font-weight:800">Notifications</div>'
+    + '<div style="display:flex;gap:8px;align-items:center">'
+    + '<button onclick="clearNotifications()" style="font-size:11px;color:#64748b;background:none;border:none;cursor:pointer;font-family:inherit">Clear all</button>'
+    + '<button onclick="document.getElementById(\'notif-panel\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">×</button>'
+    + '</div></div>'
+    + '<div style="flex:1;overflow-y:auto">' + notifHtml + '</div>';
+
+  document.body.appendChild(panel);
+}
+
+function clearNotifications() {
+  localStorage.setItem('cs_notifications', '[]');
+  var panel = document.getElementById('notif-panel');
+  if(panel) panel.remove();
+  updateNotifBadge();
+  toast('Notifications cleared', 'ok');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLOBAL SEARCH — OS #8
+// Cmd+K to open. Searches leads, jobs, proposals, estimates, invoices, COs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function openGlobalSearch() {
+  var existing = document.getElementById('global-search-ov');
+  if(existing) { existing.remove(); return; }
+
+  var el = document.createElement('div');
+  el.id = 'global-search-ov';
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,0.6);z-index:7000;display:flex;align-items:flex-start;justify-content:center;padding-top:80px';
+  el.onclick = function(e){ if(e.target===el) el.remove(); };
+
+  el.innerHTML = '<div style="width:600px;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3)">'
+    + '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:10px">'
+    + '<span style="font-size:18px;color:#94a3b8">🔍</span>'
+    + '<input id="gs-input" style="flex:1;border:none;outline:none;font-size:15px;font-family:inherit;color:#1e293b" placeholder="Search leads, jobs, proposals, invoices..." autocomplete="off">'
+    + '<kbd style="font-size:11px;color:#94a3b8;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:2px 6px">ESC</kbd>'
+    + '</div>'
+    + '<div id="gs-results" style="max-height:440px;overflow-y:auto">'
+    + '<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">Start typing to search...</div>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(el);
+  var inp = document.getElementById('gs-input');
+  setTimeout(function(){ inp.focus(); }, 100);
+
+  inp.addEventListener('input', function(){
+    var q = this.value.trim();
+    if(q.length < 2) {
+      document.getElementById('gs-results').innerHTML = '<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">Start typing to search...</div>';
+      return;
+    }
+    runGlobalSearch(q);
+  });
+
+  document.addEventListener('keydown', function esc(e){
+    if(e.key==='Escape'){ var ov=document.getElementById('global-search-ov');if(ov)ov.remove(); document.removeEventListener('keydown',esc); }
+  });
+}
+
+async function runGlobalSearch(q) {
+  var ql = q.toLowerCase();
+  var results = [];
+
+  // Search leads
+  try {
+    var leads = await dbGet('leads','?order=created_at.desc');
+    leads.filter(function(l){
+      return (l.client_name||'').toLowerCase().includes(ql)
+        || (l.address||'').toLowerCase().includes(ql)
+        || (l.job_type||'').toLowerCase().includes(ql)
+        || (l.notes||'').toLowerCase().includes(ql);
+    }).slice(0,3).forEach(function(l){
+      results.push({icon:'👤',type:'Lead',title:l.client_name,sub:l.job_type+' · '+fmt$(l.estimated_value)+' · '+l.stage,fn:"closeOv(document.getElementById('global-search-ov'));leadDetail('"+l.id+"')"});
+    });
+  } catch(e){}
+
+  // Search jobs
+  try {
+    var jobs = await dbGet('jobs','?order=created_at.desc');
+    jobs.filter(function(j){
+      return (j.job_name||'').toLowerCase().includes(ql)
+        || (j.client_name||'').toLowerCase().includes(ql)
+        || (j.address||'').toLowerCase().includes(ql);
+    }).slice(0,3).forEach(function(j){
+      results.push({icon:'🏗️',type:'Job',title:j.job_name,sub:j.client_name+' · '+j.status+' · '+fmt$(j.contract_price||j.budget||0),fn:"closeOv(document.getElementById('global-search-ov'));AJOB=ALLJOBS.find(function(x){return x.id==='"+j.id+"';});"+'if(AJOB){goTab("financial")}else{ALLJOBS.push('+JSON.stringify(j)+');AJOB=ALLJOBS[ALLJOBS.length-1];goTab("financial")}'});
+    });
+  } catch(e){}
+
+  // Search proposals
+  try {
+    var props = await dbGet('proposals','?order=created_at.desc');
+    props.filter(function(p){
+      return (p.client_name||'').toLowerCase().includes(ql)
+        || (p.address||'').toLowerCase().includes(ql);
+    }).slice(0,3).forEach(function(p){
+      results.push({icon:'📋',type:'Proposal',title:'Proposal — '+p.client_name,sub:fmt$(p.total_price||0)+' · '+p.status,fn:"closeOv(document.getElementById('global-search-ov'));openProposal('"+p.id+"')"});
+    });
+  } catch(e){}
+
+  // Search estimates
+  try {
+    var ests = await dbGet('estimates','?order=created_at.desc');
+    ests.filter(function(e){
+      return (e.title||'').toLowerCase().includes(ql)
+        || (e.client_name||'').toLowerCase().includes(ql);
+    }).slice(0,3).forEach(function(e){
+      results.push({icon:'💰',type:'Estimate',title:e.title||e.client_name,sub:e.client_name+' · '+e.status,fn:"closeOv(document.getElementById('global-search-ov'));openEstimate('"+e.id+"')"});
+    });
+  } catch(e){}
+
+  // Search invoices
+  try {
+    var invs = await dbGet('invoices','?order=created_at.desc');
+    invs.filter(function(i){
+      return (i.client_name||'').toLowerCase().includes(ql)
+        || (i.invoice_number||'').toLowerCase().includes(ql);
+    }).slice(0,3).forEach(function(i){
+      results.push({icon:'🧾',type:'Invoice',title:(i.invoice_number||'Invoice')+' — '+i.client_name,sub:fmt$(i.amount)+' · '+i.status,fn:"closeOv(document.getElementById('global-search-ov'));goTab('financial')"});
+    });
+  } catch(e){}
+
+  var rEl = document.getElementById('gs-results');
+  if(!rEl) return;
+
+  if(results.length === 0) {
+    rEl.innerHTML = '<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">No results for "'+q+'"</div>';
+    return;
+  }
+
+  // Group by type
+  var byType = {};
+  results.forEach(function(r){ if(!byType[r.type]) byType[r.type]=[];byType[r.type].push(r); });
+  var html = '';
+  Object.keys(byType).forEach(function(type){
+    html += '<div style="padding:8px 16px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8">' + type + '</div>';
+    byType[type].forEach(function(r){
+      html += '<div onclick="'+r.fn+'" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:12px" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'
+        + '<span style="font-size:18px">' + r.icon + '</span>'
+        + '<div><div style="font-size:13px;font-weight:700;color:#1e293b">' + r.title + '</div>'
+        + '<div style="font-size:11px;color:#64748b">' + r.sub + '</div></div>'
+        + '</div>';
+    });
+  });
+  rEl.innerHTML = html;
+}
+
+// Keyboard shortcut: Cmd+K or Ctrl+K
+document.addEventListener('keydown', function(e){
+  if((e.metaKey || e.ctrlKey) && e.key === 'k'){
+    e.preventDefault();
+    openGlobalSearch();
+  }
+});
+
 // ============================================================
 // CORESTONE TESTING FRAMEWORK — SCENARIO LOADER
 // Usage: loadTestScenario('kitchen_remodel') from console or button
@@ -10520,6 +10912,9 @@ async function clearTestData(){
 
 // END TESTING FRAMEWORK
 
+
+// Initialize Executive Feedback and Notifications on load
+document.addEventListener('DOMContentLoaded', function(){ setTimeout(function(){ initExecFeedback(); updateNotifBadge(); }, 800); });
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
