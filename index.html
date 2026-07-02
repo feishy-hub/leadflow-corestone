@@ -217,6 +217,16 @@ tr:hover td{background:#fafbfc}
       <span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#dc2626;color:#fff;border-radius:10px;font-size:9px;font-weight:800;padding:1px 4px;min-width:16px;text-align:center;font-family:inherit"></span>
     </button>
   </div>
+  <!-- Global Search Button + Notification Bell -->
+  <div style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.1)">
+    <button onclick="toggleGlobalSearch()" style="flex:1;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 10px;color:rgba(255,255,255,0.6);cursor:pointer;font-family:inherit;font-size:12px">
+      🔍 <span>Search everything...</span>
+    </button>
+    <button onclick="toggleNotificationCenter()" style="position:relative;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 9px;color:rgba(255,255,255,0.7);cursor:pointer;font-size:14px" title="Notifications">
+      🔔<span id="nc-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:9px;font-weight:800;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;font-family:inherit">0</span>
+    </button>
+  </div>
+
   <!-- Navigation Groups -->
   <nav class="bt-nav">
     <!-- SUMMARY -->
@@ -2063,7 +2073,7 @@ async function finTab(tab,el){
 
 function showInvForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="ivf"><div class="modal"><div class="mh"><div class="mt">New Invoice</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="f2"><div class="fr"><label>Invoice #</label><input id="iv-num" placeholder="INV-001"></div><div class="fr"><label>Amount *</label><input id="iv-amt" type="number"></div></div><div class="fr"><label>Description</label><input id="iv-desc" placeholder="Progress billing — Phase 3"></div><div class="f2"><div class="fr"><label>Due Date</label><input id="iv-due" type="date"></div><div class="fr"><label>Status</label><select id="iv-status"><option value="draft">Draft</option><option value="sent">Sent</option></select></div></div><div class="fr" style="display:flex;align-items:center;gap:8px"><input id="iv-tax" type="checkbox"><label style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--text);margin:0">Tax exempt client</label></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveInv()">Create</button></div></div></div>`);}
 async function saveInv(){const amt=parseFloat($('iv-amt').value);if(!amt){toast('Amount required','err');return;}try{await dbIns('invoices',{invoice_number:$('iv-num').value||`INV-${Date.now().toString().slice(-4)}`,amount:amt,amount_paid:0,due_date:$('iv-due').value||null,status:$('iv-status').value,tax_exempt:$('iv-tax').checked,job_id:AJOB?.id||null});toast('Invoice created!');closeModal('ivf');finTab('inv');}catch(e){toast(e.message,'err');}}
-async function markPaid(id){try{const[i]=await dbGet('invoices',`?id=eq.${id}`);if(i)await dbUpd('invoices',id,{status:'paid',amount_paid:i.amount,paid_date:new Date().toISOString().split('T')[0]});pgFinV2();nextStep('Payment Recorded! 💰','Money received. What next?',[{icon:'📝',label:'Release lien waiver',sub:'Required after final payment',fn:'goTab("liens")'},{icon:'⭐',label:'Request client review',sub:'Strike while they are happy',fn:'goTab("messages")'},{icon:'📊',label:'Job profitability report',sub:'See how this job performed',fn:'goTab("budget")'}]);}catch(e){toast(e.message,'err');}}
+// markPaid() → replaced by recordPayment() which properly collects payment details.
 async function getCallBrief(id,amount,due){const el=$(`cb-${id}`);el.innerHTML='<div class="loading" style="padding:8px"><div class="spin"></div></div>';try{const r=await ai(`Collections call brief: Invoice ${fmt$(amount)}, due ${fmtD(due)}. Tone, key talking points, what to avoid. Under 70 words.`);el.innerHTML=`<div class="ai-box" style="margin-top:8px"><div class="ai-lbl">AI Call Brief</div>${r}</div>`;}catch(e){el.innerHTML='';}}
 function showCOForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="cof"><div class="modal"><div class="mh"><div class="mt">New Change Order</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="fr"><label>Title *</label><input id="co-title" placeholder="Under-cabinet lighting addition"></div><div class="fr"><label>Description</label><textarea id="co-desc" style="min-height:70px"></textarea></div><div class="fr"><label>Reason</label><select id="co-reason"><option>Client Request</option><option>Unforeseen Condition</option><option>Design Change</option><option>Owner Directed</option></select></div><div class="f2"><div class="fr"><label>Cost Impact ($)</label><input id="co-cost" type="number"></div><div class="fr"><label>Schedule (days)</label><input id="co-days" type="number" value="0"></div></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveCO()">Create CO</button></div></div></div>`);}
 async function saveCO(){const title=$('co-title').value.trim();if(!title){toast('Title required','err');return;}const cost=parseFloat($('co-cost').value)||0;try{await dbIns('change_orders',{job_id:AJOB?.id||null,title,description:$('co-desc').value,reason:$('co-reason').value,cost_impact:cost,schedule_impact_days:parseInt($('co-days').value)||0,status:'draft'});if(cost>500)await dbIns('gatekeeper_queue',{item_type:'change_order',title:`CO Approval: ${title}`,description:`Cost: ${fmt$(cost)}`,job_id:AJOB?.id||null,amount:cost,status:'pending'});toast('CO created!'+(cost>500?' → Gatekeeper':''));closeModal('cof');finTab('co');toast('CO created — check Gatekeeper for approval','ok',3000);}catch(e){toast(e.message,'err');}}
@@ -6873,7 +6883,7 @@ async function editLine(estId, idx){
     +'<div class="fr"><label>Markup %</label><input id="eli-markup" type="number" value="'+l.markup_pct+'" style="width:120px"></div>'
     +'</div>'
     +'<div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-    +'<button class="btn btn-p" onclick="saveEditLine(\''+estId+'\','+idx+')">Save Changes</button></div>'
+    +'<button class="btn btn-p" onclick="saveEditLine(\''+estId+'\','+idx+',this)">Save Changes</button></div>'
     +'</div>';
   document.body.appendChild(el);
 }
@@ -8142,6 +8152,7 @@ async function showClientIntelligence(leadId){
 // Duplicate dead showJobProfitability removed — later (better) version with toast error handling is used
 async function addToGatekeeper(type, title, description, priority, recommendation, actionType){
   priority=priority||'normal';
+  try{ addNotification('gatekeeper', title, (description||'').slice(0,100), "goTab('gatekeeper')"); } catch(nc_e) {}
   try{
     await dbIns('gatekeeper_queue',{
       item_type:type,
@@ -10313,6 +10324,241 @@ function closeExecTestMode() {
 // END EXECUTIVE TESTING MODE
 
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLOBAL SEARCH — OS #8
+// Cross-object search: leads, jobs, estimates, proposals, invoices, bills,
+// COs, RFIs, subcontractors — all in one place.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var GS_VISIBLE = false;
+
+function toggleGlobalSearch() {
+  GS_VISIBLE = !GS_VISIBLE;
+  var panel = document.getElementById('gs-panel');
+  if(!panel) { buildGlobalSearch(); return; }
+  panel.style.display = GS_VISIBLE ? 'flex' : 'none';
+  if(GS_VISIBLE) {
+    setTimeout(function(){ var inp=document.getElementById('gs-input'); if(inp) inp.focus(); }, 100);
+  }
+}
+
+function buildGlobalSearch() {
+  var panel = document.createElement('div');
+  panel.id = 'gs-panel';
+  panel.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,0.75);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;backdrop-filter:blur(4px)';
+  panel.onclick = function(e){ if(e.target===panel) toggleGlobalSearch(); };
+  panel.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:640px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3)">'
+    + '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border)">'
+    + '<span style="font-size:18px">🔍</span>'
+    + '<input id="gs-input" placeholder="Search leads, jobs, estimates, invoices, subs..." style="flex:1;border:none;font-size:16px;outline:none;font-family:inherit;color:var(--text)" oninput="gsSearch(this.value)" onkeydown="gsKeyNav(event)">'
+    + '<kbd style="font-size:11px;background:#f1f5f9;border:1px solid var(--border);border-radius:4px;padding:2px 8px;color:var(--muted)">ESC</kbd>'
+    + '</div>'
+    + '<div id="gs-results" style="max-height:480px;overflow-y:auto;padding:8px 0">'
+    + '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Start typing to search across Corestone...</div>'
+    + '</div>'
+    + '</div>';
+  document.body.appendChild(panel);
+  setTimeout(function(){ var inp=document.getElementById('gs-input'); if(inp) inp.focus(); }, 100);
+  document.addEventListener('keydown', function gsEsc(e){ if(e.key==='Escape'){ toggleGlobalSearch(); document.removeEventListener('keydown', gsEsc); }});
+}
+
+var _gsTimer = null;
+function gsSearch(q) {
+  clearTimeout(_gsTimer);
+  if(!q || q.trim().length < 2) {
+    var r = document.getElementById('gs-results');
+    if(r) r.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Start typing to search across Corestone...</div>';
+    return;
+  }
+  _gsTimer = setTimeout(function(){ gsDoSearch(q.trim()); }, 250);
+}
+
+async function gsDoSearch(q) {
+  var r = document.getElementById('gs-results');
+  if(!r) return;
+  r.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Searching...</div>';
+  var ql = q.toLowerCase();
+  var results = [];
+
+  // Search function helper
+  function searchArr(arr, type, icon, labelFn, subFn, navFn) {
+    (arr||[]).forEach(function(item) {
+      var text = labelFn(item).toLowerCase();
+      var sub = subFn(item).toLowerCase();
+      if(text.includes(ql) || sub.includes(ql) || (item.address||'').toLowerCase().includes(ql)) {
+        results.push({ type:type, icon:icon, label:labelFn(item), sub:subFn(item), fn:navFn(item), id:item.id });
+      }
+    });
+  }
+
+  // Fetch all tables in parallel
+  var [leads, jobs, ests, props, invs, bills, cos, rfis, subs] = await Promise.all([
+    dbGet('leads','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('jobs','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('estimates','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('proposals','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('invoices','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('bills','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('change_orders','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('rfis','?order=created_at.desc').catch(function(){return[];}),
+    dbGet('subcontractors','?order=company_name.asc').catch(function(){return[];})
+  ]);
+
+  searchArr(leads,'Lead','👤',
+    function(l){return l.client_name||'Unknown Lead';},
+    function(l){return (l.job_type||'')+' · '+(l.address||'')+' · '+fmt$(l.estimated_value||0)+' · '+l.stage;},
+    function(l){return "closeModal('gs-panel');GS_VISIBLE=false;document.getElementById('gs-panel').style.display='none';leadDetail('"+l.id+"')";}
+  );
+  searchArr(jobs,'Job','🏗️',
+    function(j){return j.job_name||j.client_name||'Unknown Job';},
+    function(j){return (j.address||'')+' · '+(j.status||'')+' · '+fmt$(j.contract_price||j.budget||0);},
+    function(j){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;etmAwareJobOpen('"+j.id+"')";}
+  );
+  searchArr(ests,'Estimate','💰',
+    function(e){return e.title||e.client_name||'Estimate';},
+    function(e){return (e.client_name||'')+' · '+(e.status||'draft')+' · '+(e.line_items?lineCount(e.line_items)+' lines':'');},
+    function(e){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;goTab('estimates');setTimeout(function(){openEstimate('"+e.id+"')},300)";}
+  );
+  searchArr(props,'Proposal','📄',
+    function(p){return 'Proposal — '+(p.client_name||'Client');},
+    function(p){return (p.address||'')+' · '+(p.status||'draft')+' · '+fmt$(p.total_price||0);},
+    function(p){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;goTab('proposals');setTimeout(function(){openProposal('"+p.id+"')},300)";}
+  );
+  searchArr(invs,'Invoice','🧾',
+    function(i){return 'Invoice — '+(i.client_name||i.description||'');},
+    function(i){return (i.invoice_number||'')+' · '+(i.status||'')+' · '+fmt$(i.amount||0);},
+    function(i){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;goTab('financial')";}
+  );
+  searchArr(bills,'Bill','💸',
+    function(b){return 'Bill — '+(b.vendor_name||'Vendor');},
+    function(b){return fmt$(b.amount||0)+' · '+(b.status||'')+' · '+(b.description||'');},
+    function(b){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;goTab('bills')";}
+  );
+  searchArr(cos,'Change Order','📋',
+    function(c){return 'CO — '+(c.title||c.client_name||'Change Order');},
+    function(c){return fmt$(c.cost_impact||0)+' · '+(c.status||'');},
+    function(c){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;goTab('cos')";}
+  );
+  searchArr(rfis,'RFI','❓',
+    function(r){return 'RFI — '+(r.subject||r.question||'');},
+    function(r){return (r.submitted_by||'')+' · '+(r.status||'open');},
+    function(r){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;goTab('rfis')";}
+  );
+  searchArr(subs,'Subcontractor','👷',
+    function(s){return s.company_name||s.name||'Sub';},
+    function(s){return (s.trade||'')+' · '+(s.phone||'')+' · COI: '+(s.coi_expiry?'on file':'missing');},
+    function(s){return "document.getElementById('gs-panel').style.display='none';GS_VISIBLE=false;goTab('subs')";}
+  );
+
+  if(results.length === 0) {
+    r.innerHTML = '<div style="padding:28px;text-align:center;color:var(--muted);font-size:13px"><div style="font-size:32px;margin-bottom:8px">🔍</div>No results for "' + q + '"</div>';
+    return;
+  }
+
+  // Group by type
+  var grouped = {};
+  results.forEach(function(res){ if(!grouped[res.type]) grouped[res.type]=[];  grouped[res.type].push(res); });
+  var html = '';
+  Object.keys(grouped).forEach(function(type) {
+    html += '<div style="padding:6px 20px 2px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">' + type + 's (' + grouped[type].length + ')</div>';
+    grouped[type].slice(0,5).forEach(function(res, idx) {
+      html += '<div onclick="' + res.fn.replace(/"/g,'&quot;') + '" style="display:flex;gap:12px;align-items:center;padding:10px 20px;cursor:pointer;border-bottom:1px solid #f0f2f6" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\'\'">'
+        + '<span style="font-size:18px;flex-shrink:0">' + res.icon + '</span>'
+        + '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;truncate">' + res.label + '</div>'
+        + '<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + res.sub + '</div></div>'
+        + '</div>';
+    });
+  });
+  html += '<div style="padding:10px 20px;font-size:11px;color:var(--muted);text-align:center">' + results.length + ' result' + (results.length===1?'':'s') + ' across Corestone</div>';
+  r.innerHTML = html;
+}
+
+function gsKeyNav(e) {
+  if(e.key === 'Escape') { toggleGlobalSearch(); }
+}
+// END GLOBAL SEARCH
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATION CENTER — OS #8
+// Real notification panel with history, grouped by type.
+// Replaces toast-only notifications for important events.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var NC = { items: [], isOpen: false };
+
+function addNotification(type, title, body, action) {
+  var item = {
+    id: 'nc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    type: type || 'info',  // 'gatekeeper'|'cascade'|'ai'|'alert'|'success'|'info'
+    title: title,
+    body: body || '',
+    action: action || null,
+    timestamp: new Date().toISOString(),
+    read: false
+  };
+  NC.items.unshift(item);
+  if(NC.items.length > 50) NC.items.pop();
+  updateNotificationBadge();
+  return item;
+}
+
+function updateNotificationBadge() {
+  var unread = NC.items.filter(function(i){ return !i.read; }).length;
+  var badge = document.getElementById('nc-badge');
+  if(badge) {
+    badge.textContent = unread > 0 ? (unread > 99 ? '99+' : unread) : '';
+    badge.style.display = unread > 0 ? 'flex' : 'none';
+  }
+}
+
+function toggleNotificationCenter() {
+  NC.isOpen = !NC.isOpen;
+  var panel = document.getElementById('nc-panel');
+  if(!panel) { buildNotificationCenter(); return; }
+  panel.style.display = NC.isOpen ? 'block' : 'none';
+  if(NC.isOpen) {
+    NC.items.forEach(function(i){ i.read = true; });
+    updateNotificationBadge();
+    renderNotificationList();
+  }
+}
+
+function buildNotificationCenter() {
+  var panel = document.createElement('div');
+  panel.id = 'nc-panel';
+  panel.style.cssText = 'position:fixed;top:52px;right:0;width:360px;height:calc(100vh - 52px);background:#fff;border-left:1px solid var(--border);z-index:6500;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.08);overflow:hidden';
+  panel.innerHTML = '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:#fafbfc">'
+    + '<div style="font-size:14px;font-weight:800">🔔 Notifications</div>'
+    + '<div style="display:flex;gap:8px;align-items:center">'
+    + '<button onclick="NC.items.forEach(function(i){i.read=true;});updateNotificationBadge();renderNotificationList();" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;font-family:inherit">Mark all read</button>'
+    + '<button onclick="toggleNotificationCenter()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>'
+    + '</div></div>'
+    + '<div id="nc-list" style="flex:1;overflow-y:auto"></div>';
+  document.body.appendChild(panel);
+  NC.isOpen = true;
+  NC.items.forEach(function(i){ i.read = true; });
+  updateNotificationBadge();
+  renderNotificationList();
+}
+
+function renderNotificationList() {
+  var list = document.getElementById('nc-list');
+  if(!list) return;
+  if(NC.items.length === 0) {
+    list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)"><div style="font-size:32px;margin-bottom:8px">🔔</div><div style="font-size:13px">No notifications yet</div></div>';
+    return;
+  }
+  var icons = { gatekeeper:'⚙️', cascade:'⚡', ai:'🤖', alert:'⚠️', success:'✅', info:'ℹ️' };
+  var colors = { gatekeeper:'var(--amber)', cascade:'var(--teal)', ai:'var(--blue)', alert:'var(--red)', success:'var(--green)', info:'var(--muted)' };
+  list.innerHTML = NC.items.map(function(item) {
+    var age = Math.round((Date.now() - new Date(item.timestamp).getTime()) / 60000);
+    var ageStr = age < 1 ? 'just now' : age < 60 ? age + 'm ago' : Math.round(age/60) + 'h ago';
+    return '<div style="padding:12px 16px;border-bottom:1px solid #f0f2f6;cursor:'+(item.action?'pointer':'default')+';background:'+(item.read?'#fff':'#f8fbff')+'" '+(item.action?'onclick="'+item.action.replace(/"/g,'&quot;')+';toggleNotificationCenter()"':'')+' onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\''+(item.read?'#fff':'#f8fbff')+'\'"><div style="display:flex;align-items:flex-start;gap:10px"><span style="font-size:16px;flex-shrink:0">'+(icons[item.type]||'ℹ️')+'</span><div style="flex:1"><div style="font-size:13px;font-weight:'+(item.read?'600':'800')+'">'+(item.title||'')+'</div>'+(item.body?'<div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">'+item.body+'</div>':'')+'</div><div style="font-size:10px;color:var(--muted);flex-shrink:0">'+ageStr+'</div></div></div>';
+  }).join('');
+}
+// END NOTIFICATION CENTER
+
 // ═══════════════════════════════════════════════════════════════════════════
 // EXECUTIVE FEEDBACK SYSTEM — OS #8
 // A permanent floating button for Feishy to report issues, suggest improvements,
@@ -10681,6 +10927,259 @@ document.addEventListener('keydown', function(e){
     openGlobalSearch();
   }
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXECUTIVE FEEDBACK SYSTEM — OS #8
+// Feishy clicks one button, says what feels wrong,
+// and Corestone auto-collects all technical context.
+// He should never have to diagnose software.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var EFS = {
+  isOpen: false,
+  mode: null, // 'report'|'suggest'|'ai_review'
+  capturedContext: null
+};
+
+function capturePageContext() {
+  // Auto-collect everything needed for a dev report
+  var errors = [];
+  // Capture console errors if any stored
+  if(window._consoleErrors) errors = window._consoleErrors.slice(-5);
+
+  return {
+    timestamp: new Date().toISOString(),
+    current_tab: CUR || 'unknown',
+    active_job: AJOB ? { id: AJOB.id, name: AJOB.job_name, status: AJOB.status } : null,
+    active_lead: typeof ACTIVE_LEAD !== 'undefined' && ACTIVE_LEAD ? { id: ACTIVE_LEAD.id, name: ACTIVE_LEAD.client_name } : null,
+    page_title: document.title,
+    viewport: window.innerWidth + 'x' + window.innerHeight,
+    url: window.location.href,
+    recent_errors: errors,
+    etm_active: typeof ETM !== 'undefined' && ETM.active,
+    etm_scenario: typeof ETM !== 'undefined' && ETM.active ? ETM.currentScenario : null,
+    blueprint_section: getBlueprintSection(CUR),
+    visible_content_snippet: (document.getElementById('content') || {}).textContent
+      ? document.getElementById('content').textContent.slice(0,300).replace(/\s+/g,' ').trim()
+      : 'content not captured'
+  };
+}
+
+function getBlueprintSection(tab) {
+  var map = {
+    sales: 'Lead Capture & CRM (WF-01)',
+    proposals: 'Proposal Generation (WF-03)',
+    estimates: 'Estimating Module',
+    jobs: 'Job Management',
+    financial: 'Financial Architecture',
+    bills: 'Accounts Payable',
+    invoices: 'Accounts Receivable',
+    cos: 'Change Orders (WF-05)',
+    gatekeeper: 'Gatekeeper Queue',
+    rfis: 'RFI Management (WF-04)',
+    punchlist: 'Punch List',
+    schedule: 'Schedule Management',
+    budget: 'Job Costing Budget',
+    pos: 'Purchase Orders (3-stage Directive)',
+    daily: 'Daily Logs',
+    dashboard: 'Executive Dashboard',
+  };
+  return map[tab] || 'General Platform';
+}
+
+// Intercept console errors
+(function() {
+  window._consoleErrors = [];
+  var orig = console.error.bind(console);
+  console.error = function() {
+    window._consoleErrors.push({
+      msg: Array.from(arguments).join(' ').slice(0,200),
+      time: new Date().toISOString()
+    });
+    if(window._consoleErrors.length > 20) window._consoleErrors.shift();
+    orig.apply(console, arguments);
+  };
+})();
+
+function launchExecFeedback(mode) {
+  EFS.mode = mode || 'report';
+  EFS.capturedContext = capturePageContext();
+  var existing = document.getElementById('efs-panel');
+  if(existing) existing.remove();
+
+  var titles = {
+    report: '🐛 Report an Issue',
+    suggest: '💡 Suggest an Improvement',
+    ai_review: '🤖 Ask AI to Review This Page'
+  };
+  var placeholders = {
+    report: 'Describe what happened vs what you expected. Be as specific or as vague as you want — Corestone collects the technical details automatically.',
+    suggest: 'What would make this better? What feels missing or incomplete?',
+    ai_review: 'What should the AI focus on? (leave blank for a complete review)'
+  };
+
+  var panel = document.createElement('div');
+  panel.id = 'efs-panel';
+  panel.style.cssText = 'position:fixed;bottom:0;right:16px;width:400px;background:#fff;border:1px solid var(--border);border-top-left-radius:14px;border-top-right-radius:14px;box-shadow:0 -4px 24px rgba(0,0,0,0.12);z-index:8000;font-family:inherit;overflow:hidden';
+
+  panel.innerHTML = '<div style="background:linear-gradient(135deg,#1e293b,#334155);padding:14px 18px;display:flex;align-items:center;justify-content:space-between">'
+    + '<div><div style="font-size:14px;font-weight:800;color:#fff">' + titles[EFS.mode] + '</div>'
+    + '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">Page: ' + (EFS.capturedContext.current_tab||'?') + (EFS.capturedContext.active_job?' · Job: '+EFS.capturedContext.active_job.name:'') + '</div></div>'
+    + '<button onclick="document.getElementById(\'efs-panel\').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:12px">✕ Close</button>'
+    + '</div>'
+    + '<div style="padding:16px">'
+    + '<textarea id="efs-text" placeholder="' + placeholders[EFS.mode] + '" style="width:100%;min-height:100px;border:1.5px solid var(--border);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:12px"></textarea>'
+    + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">'
+    + '<button onclick="efsMicInput()" style="background:var(--teal-bg);color:var(--teal);border:1px solid var(--teal);border-radius:6px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice</button>'
+    + '<span style="font-size:11px;color:var(--muted)">Or speak your feedback directly</span>'
+    + '</div>'
+    + '<div style="background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--muted)">'
+    + '🔍 <strong>Auto-captured:</strong> Tab: ' + (EFS.capturedContext.current_tab||'?')
+    + (EFS.capturedContext.active_job ? ' · Job: ' + EFS.capturedContext.active_job.name : '')
+    + ' · Blueprint: ' + EFS.capturedContext.blueprint_section
+    + (EFS.capturedContext.recent_errors.length ? ' · ⚠️ ' + EFS.capturedContext.recent_errors.length + ' console error(s) captured' : '')
+    + '</div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button onclick="document.getElementById(\'efs-panel\').remove()" style="flex:1;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13px">Cancel</button>'
+    + '<button onclick="efsSubmit()" style="flex:2;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-family:inherit;font-size:13px">Submit Feedback</button>'
+    + '</div></div>';
+
+  document.body.appendChild(panel);
+  setTimeout(function(){ var t=document.getElementById('efs-text'); if(t) t.focus(); }, 200);
+}
+
+function efsMicInput() {
+  if(typeof micFillField === 'function') {
+    micFillField('efs-text', 'Describe the issue or suggestion', null);
+  } else {
+    toast('Voice input requires Chrome browser','ok',3000);
+  }
+}
+
+async function efsSubmit() {
+  var text = (document.getElementById('efs-text') || {}).value || '';
+  if(!text.trim() && EFS.mode !== 'ai_review') {
+    toast('Please describe the issue or suggestion', 'err'); return;
+  }
+
+  var ctx = EFS.capturedContext || capturePageContext();
+  var modeLabels = { report: 'Issue Report', suggest: 'Improvement Suggestion', ai_review: 'AI Page Review' };
+
+  // If AI review, run the analysis
+  if(EFS.mode === 'ai_review') {
+    document.getElementById('efs-panel').remove();
+    toast('🤖 AI reviewing page...', 'ok', 8000);
+    await efsAIReview(ctx, text);
+    return;
+  }
+
+  // Build structured report
+  var report = {
+    type: EFS.mode,
+    user_description: text,
+    auto_context: ctx,
+    generated_at: new Date().toISOString()
+  };
+
+  // Save to Gatekeeper as development item
+  await addToGatekeeper(
+    'efs_' + EFS.mode,
+    '[' + modeLabels[EFS.mode] + '] ' + (text.slice(0,80) || 'No description'),
+    'Page: ' + ctx.current_tab
+      + (ctx.active_job ? ' | Job: ' + ctx.active_job.name : '')
+      + '\nBlueprint section: ' + ctx.blueprint_section
+      + '\nUser said: ' + text
+      + '\nErrors captured: ' + (ctx.recent_errors.length ? JSON.stringify(ctx.recent_errors) : 'none')
+      + '\nPage content: ' + ctx.visible_content_snippet,
+    'normal',
+    'Development team: investigate and fix.',
+    'efs_feedback'
+  );
+
+  // Also log to audit trail
+  await dbIns('audit_log', {
+    object_type: 'executive_feedback',
+    object_id: 'efs_' + Date.now(),
+    action: EFS.mode,
+    new_value: JSON.stringify(report),
+    changed_by_ai: false,
+    timestamp: new Date().toISOString()
+  });
+
+  document.getElementById('efs-panel').remove();
+  nextStep('Feedback Received', 'Your ' + modeLabels[EFS.mode].toLowerCase() + ' was captured with full context and added to the development queue.', [
+    {icon:'⚙️', label:'View in Gatekeeper', sub:'See the development item', fn:"goTab('gatekeeper')", primary:true}
+  ]);
+}
+
+async function efsAIReview(ctx, focus) {
+  try {
+    var prompt = 'You are a senior construction software QA director reviewing a page in Corestone OS — an AI-powered construction operating system for Corestone Developers (Hudson Valley NY).\n\nCURRENT PAGE: ' + ctx.current_tab + '\nBLUEPRINT SECTION: ' + ctx.blueprint_section + '\nACTIVE JOB: ' + (ctx.active_job ? ctx.active_job.name : 'None') + '\nPAGE CONTENT SAMPLE: ' + ctx.visible_content_snippet + '\nCONSOLE ERRORS: ' + (ctx.recent_errors.length ? JSON.stringify(ctx.recent_errors) : 'None') + '\nFOCUS: ' + (focus || 'Complete review') + '\n\nReview this page/module and identify:\n1. Missing workflows (what should happen automatically but doesn\'t)\n2. Missing downstream actions (what should cascade but doesn\'t)\n3. Missing UI elements (what a construction company president would expect to see)\n4. Blueprint alignment issues (what was designed but not built)\n5. Business process gaps (what a real construction workflow requires)\n6. Top 3 improvements to make this feel like enterprise construction software\n\nBe specific and actionable. Reference real construction company workflows.';
+
+    var result = await ai(prompt, 'Senior QA Director + Construction PM. Be specific and actionable.', 1200);
+
+    // Show results
+    var panel = document.createElement('div');
+    panel.className = 'ov';
+    panel.id = 'efs-ai-review';
+    panel.innerHTML = '<div class="modal modal-lg" style="max-width:700px">'
+      + '<div class="mh" style="background:linear-gradient(135deg,#1e293b,#334155)"><div><div class="mt" style="color:#fff">🤖 AI Page Review — ' + ctx.current_tab + '</div><div class="ms" style="color:rgba(255,255,255,0.6)">' + ctx.blueprint_section + '</div></div>'
+      + '<button class="mc" style="color:#fff" onclick="this.closest(\'.ov\').remove()">×</button></div>'
+      + '<div class="mb" style="padding:18px 20px"><div style="font-size:13px;line-height:1.8;white-space:pre-wrap;color:var(--text)">' + result + '</div></div>'
+      + '<div class="mf"><button class="btn btn-g" onclick="this.closest(\'.ov\').remove()">Close</button>'
+      + '<button class="btn btn-p" onclick="efsSubmitAIReview(\'' + ctx.current_tab + '\',this)">📋 Add to Dev Queue</button></div></div>';
+    document.body.appendChild(panel);
+
+    // Log audit
+    await dbIns('audit_log', {
+      object_type: 'executive_feedback', object_id: 'efs_ai_' + Date.now(),
+      action: 'ai_review', new_value: JSON.stringify({page: ctx.current_tab, review: result.slice(0,500)}),
+      changed_by_ai: true, timestamp: new Date().toISOString()
+    });
+  } catch(e) {
+    toast('AI review error: ' + e.message, 'err');
+  }
+}
+
+async function efsSubmitAIReview(page, btnEl) {
+  var content = document.querySelector('#efs-ai-review .mb div');
+  var text = content ? content.textContent : 'AI review completed';
+  await addToGatekeeper('efs_ai_review', '[AI Review] ' + page, text.slice(0,500), 'normal', 'Development team: review AI findings.', 'efs_feedback');
+  btnEl.textContent = '✓ Added to queue';
+  btnEl.disabled = true;
+  toast('AI review added to development queue', 'ok');
+}
+
+// Build the floating Executive Feedback Button
+function buildExecFeedbackBtn() {
+  if(document.getElementById('efs-fab')) return;
+  var fab = document.createElement('div');
+  fab.id = 'efs-fab';
+  fab.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:7000;display:flex;flex-direction:column;gap:6px;align-items:flex-start';
+  fab.innerHTML = '<div id="efs-fab-menu" style="display:none;flex-direction:column;gap:4px;margin-bottom:6px">'
+    + '<button onclick="launchExecFeedback(\'report\')" style="background:#fff;border:1.5px solid var(--red);color:var(--red);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.1)">🐛 Report Issue</button>'
+    + '<button onclick="launchExecFeedback(\'suggest\')" style="background:#fff;border:1.5px solid var(--teal);color:var(--teal);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.1)">💡 Suggest Improvement</button>'
+    + '<button onclick="launchExecFeedback(\'ai_review\')" style="background:#fff;border:1.5px solid var(--blue);color:var(--blue);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.1)">🤖 Ask AI to Review</button>'
+    + '</div>'
+    + '<button onclick="toggleEFSMenu()" id="efs-main-btn" style="background:var(--teal);color:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:18px;cursor:pointer;box-shadow:0 3px 12px rgba(13,122,112,0.35);transition:transform .15s" title="Executive Feedback">💬</button>';
+  document.body.appendChild(fab);
+}
+
+function toggleEFSMenu() {
+  var menu = document.getElementById('efs-fab-menu');
+  var btn = document.getElementById('efs-main-btn');
+  if(!menu) return;
+  var isOpen = menu.style.display !== 'none';
+  menu.style.display = isOpen ? 'none' : 'flex';
+  btn.style.transform = isOpen ? '' : 'rotate(45deg)';
+  btn.textContent = isOpen ? '💬' : '✕';
+}
+
+// Initialize feedback button on page load
+document.addEventListener('DOMContentLoaded', function(){ buildExecFeedbackBtn(); });
+setTimeout(buildExecFeedbackBtn, 1000); // Fallback if DOMContentLoaded already fired
+// END EXECUTIVE FEEDBACK SYSTEM
 
 // ============================================================
 // CORESTONE TESTING FRAMEWORK — SCENARIO LOADER
