@@ -9806,6 +9806,15 @@ function etmGoTo(section) {
 }
 
 // ─── LAUNCH ──────────────────────────────────────────────────────────────────
+function showTestingToolbar() {
+  try {
+    launchExecTest();
+  } catch(e) {
+    console.error('[ETM] Launch error:', e);
+    toast('Testing mode error: ' + e.message, 'err');
+  }
+}
+
 async function launchExecTest() {
   if(ETM.active) { showExecTestPanel(); return; }
   if(!confirm('Launch Executive Testing Mode?\n\nThis will load the Goldstein kitchen remodel test data and guide you through 5 business scenarios step-by-step inside Corestone.')) return;
