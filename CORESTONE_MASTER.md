@@ -1,194 +1,125 @@
-# CORESTONE OS — MASTER DOCUMENT
-Last Updated: 2026-06-21
-Live URL: https://leadflow-corestone.vercel.app
-Repo: feishy-hub/leadflow-corestone
+# CORESTONE MASTER — Session Front Door
+## Read this first. Then follow the reading order below.
+## Last updated: OS #8 — July 2, 2026
 
-SESSION START
-Tell Claude: I am Feishy, owner of Corestone Developers. Read the CORESTONE_MASTER.md file in my project files and then tell me you are ready.
+---
 
-PLATFORM
-- Vercel (NOT Lovable, NOT Base44, NOT Netlify -- all abandoned)
-- GitHub repo: feishy-hub/leadflow-corestone
-- Auto-deploys every push to main (30-45 seconds)
-- API proxy: /api/claude.js (Vercel serverless)
-- API key: ANTHROPIC_API_KEY in Vercel environment variables
-- GitHub PAT: Classic token only (fine-grained fail with 403)
-  Token prefix: ghp_ followed by a1witGJA8STynnfSPfZw97FD6TnVuw1ydZ7j
-- Database: localStorage
+## WHAT CORESTONE IS
 
-CRITICAL RULES
-1. Push directly to GitHub -- never ask Feishy manually
-2. Classic PAT only
-3. All changes in ONE push per session
-4. Run node --check before EVERY push
-5. Nothing removed -- only additions
-6. Every form has mic button (micFillField)
-7. Every action shows nextStep() modal
-8. Syntax check: extract JS, write to .js, run node --check, push only if return code is 0
+AI-powered Enterprise Construction Operating System for Corestone Developers
+(Feishy Felberbaum, President). Residential construction in Ulster/Sullivan/Dutchess NY.
+Replacing Buildertrend. Live at leadflow-corestone.vercel.app
 
-TWO-MODE WORK SYSTEM
-Big work: This chat (claude.ai Corestone Project)
-Bug fixes: Claude Code -- Windows+R, cmd, type claude
-- Say: My app is at github.com/feishy-hub/leadflow-corestone, file is index.html. Bug: [describe]. Fix and push to GitHub.
+---
 
-FILE STATS
-- Size: ~505,000 chars
-- Functions: ~265, Buttons: ~375, AI calls: ~37, Mic buttons: ~20, nextStep calls: ~26
-- Syntax: Verified clean by Node.js
+## DOCUMENT READING ORDER (every session, before any code)
 
-KEY ARCHITECTURE FUNCTIONS
-micFillField(fieldId, hint) -- voice input with permission check
-showMicError(msg) -- visible error banner if mic blocked
-startMicRecording(fieldId, hint, callback) -- recording with live preview
-nextStep(title, message, actions) -- full-screen modal after every action
-safeJSON(str) -- robust JSON parser
-aiLogTransaction(type, desc, priority) -- logs every transaction
-aiBudgetGuard(jobId) -- fires at 90% of budget
-aiCheckOverdue() -- scans invoices on load
-runReminderEngine() -- runs 4s after load, checks all pending items
-docPreview(table, id, docType, name) -- client view before sending
-openEsignRequest(table, id, docType, name, email) -- send for e-signature
-docRecall(table, id) -- pull back sent document
-confirmEsign(table, id, docType) -- saves signing token, notifies GK
-checkSigningLink() -- handles client signing URL on load
-showSignPage(doc, table, token) -- client signing canvas experience
-submitSig(table, id, token) -- client signs, saves image to record
-showBugPanel() -- bug tracker, auto-catches JS errors
-reportBug() -- manual bug reporting
-aiProcessDailyLog(text, jobId) -- structures log, auto-drafts COs
-sendReminder(table, id, docType) -- AI drafts follow-up message
-snoozeReminder(key, days) -- snooze reminder in GK
+| # | Document | What It Contains | When to Read |
+|---|---|---|---|
+| 1 | **CORESTONE_ROADMAP.md** | 30-second status: where we are, what's next, blockers | Always first |
+| 2 | **CORESTONE_EXECUTIVE_DIRECTIVE.md** | 10 governing development standards | Always |
+| 3 | **CORESTONE_CONSTITUTION.md** | 15 permanent principles — never violated | Always |
+| 4 | **CORESTONE_SUBSYSTEM_STATUS.md** | Honest: what's built vs designed vs missing | Always |
+| 5 | **CORESTONE_BLUEPRINT.md** | Complete target architecture (957 lines, 10 subsystems) | Before architecture decisions |
+| 6 | **CORESTONE_DECISIONS.md** | All locked decisions DEC-001 through DEC-026 | Before any workflow changes |
+| 7 | **CORESTONE_OPEN.md** | Open questions OQ-001 through OQ-029 | Before starting work |
+| 8 | **CORESTONE_TESTING_STANDARD.md** | 9-section Executive Acceptance Testing format | Before building test packages |
+| 9 | **CORESTONE_COMPLETE_MASTER.md** | Full implementation history every session | For deep context |
+| 10 | **CORESTONE_RELEASES.md** | What was built each session | For session continuity |
 
-ALL MODULES (ALL COMPLETE)
+**This file stays short intentionally.** All detail lives in the documents above.
 
-SALES
-- Leads: pipeline, AI scoring, Angi email scan, call scripts, Follow Up button
-- Live Call Mode: 9 situation buttons, AI coaching, transcript, back button
-- Proposals: Sent/Viewed/Signed/Approved pipeline
+---
 
-FINANCIAL
-- Estimates: line items, markup, AI helper, Preview/Send/Recall/Delete
-- Change Orders: lifecycle, AI draft, voice, markup calc, Preview/Send/Recall
-- Purchase Orders: line items, AI materials, budget guard
-- Invoices: AR, AI suggest amount, mark paid, Remind button per row
-- Bills/AP: vendor bills, AI verify, dispute, pay bill
-- Budget: real-time cost vs budget, Cash Flow and Weekly Summary buttons
-- Lien Waivers: AI generate button
+## INFRASTRUCTURE
 
-PROJECT MANAGEMENT
-- Schedule: phases, AI generate, Gantt-style bars
-- Daily Logs: voice, AI Process and Auto-CO button, auto-drafts COs from scope
-- Punch List: AI generates, priority levels
-- RFIs: log, AI draft, status
-- Photo Log: upload, AI analysis
-- Plans: PDF upload, AI takeoff
+| Item | Value |
+|---|---|
+| Live app | https://leadflow-corestone.vercel.app |
+| GitHub | https://github.com/feishy-hub/leadflow-corestone |
+| AI proxy | /api/claude (Vercel serverless) |
+| Supabase | corestone-os project — deployed, NOT connected (Phase 2) |
+| n8n | on Render — deployed, NOT connected (Phase 1 completion) |
+| Token type | Classic PAT (ghp_ prefix). Fine-grained tokens fail 403. |
 
-BIDDING AND SUBS
-- Bidding: packages, AI ranking, voice bid
-- Subcontractors: W9/COI status shown, auto-request on add
-- Selections: AI suggest, status cycling
-- Specifications: AI generate, voice
-- Warranty: AI analysis (covered/not/responsible)
+---
 
-INTELLIGENCE
-- Gatekeeper: ALL AI actions here, Approve/Reject/Delegate, Remind/Resend/Snooze on reminders
-- Reports: KPI, AI Weekly Summary, Cash Flow buttons
-- Bug Tracker: auto-catches errors, manual reporting
+## PHASE IMPACT REPORT — REQUIRED BEFORE EVERY SESSION
 
-DOCUMENT LIFECYCLE
-Save, Preview, Send, E-Sign (built-in, no DocuSign), Recall, Delete
-- Client gets URL, signs with finger or mouse on canvas
-- Signature saved as image to record
-- Feishy notified in Gatekeeper
-- Reminders auto-fire at Day 3/7/14 if not signed/paid
+Before writing any code, generate a Phase Impact Report covering:
 
-REMINDER SYSTEM (auto on load)
-Leads: Day 1, 3, 5, 7, 14
-Estimates: Day 3, 7, 14 if not signed
-Change Orders: Day 2, 5, 10 if not signed
-Invoices: Day 3, 7, 14, 21 if unpaid
-All appear in Gatekeeper with Remind Now / Resend / Snooze
+1. **What changed since last session** — documents updated, bugs fixed, decisions made
+2. **Documents changed** — which permanent files were modified and why
+3. **Milestones affected** — which M1-M5 milestones does this session touch
+4. **Dependencies** — what does this session require to already be working
+5. **Risks** — what could go wrong or break something
+6. **Session plan** — exactly what will be built or fixed this session
+7. **Success criteria** — what does "done" look like before writing code
 
-AI AUTOMATION (NO BUTTON PRESS NEEDED)
-- New sub: W9+COI drafted, Gatekeeper
-- New lead: AI scores + call script generated
-- New job: Onboarding checklist in GK
-- CO/PO saved: Budget guard fires
-- App opens: Overdue scan + Reminder engine
-- Daily log: AI structures, detects scope, auto-drafts CO
-- Photo uploaded: AI analysis, issues to GK
-- JS error: Auto-logged to bug tracker
-- Every transaction: aiLogTransaction
+Do not write a single line of code before this report is complete.
 
-LIVE CALL MODE
-- Opens from any lead
-- Script auto-generates if missing
-- Mic permission checked first
-- 9 situations: Price/Deposit/Bids/NotReady/Timeline/Credentials/Permit/Scope/Ready
-- 50+ trigger phrases auto-detect
-- Back button to lead
+---
 
-STRATEGIC VISION -- 2080 AI ARCHITECTURE (June 21 Review)
+## CURRENT MILESTONE: M1 (62% complete)
 
-Three Missing Layers:
-1. Memory Layer -- closed jobs teach future jobs
-2. Reasoning Layer -- AI runs continuously, not only when asked
-3. Advisory Layer -- ranked priorities surfaced, not raw data
+See CORESTONE_ROADMAP.md for full status.
 
-Top 5 Evolution Priorities:
-1. Business Brain -- continuously running AI with full business model
-2. Organizational Memory -- institutional knowledge from every job
-3. Predictive Job Profitability -- live final profit prediction
-4. Client Intelligence Profile -- behavior, payment, scope patterns
-5. Daily Briefing -- 3 things that matter every morning
+Remaining M1 items:
+- Estimate CRUD (open/edit/delete line items)
+- Tax calculation verification
+- Proposal 9-section render
+- Magic link client view
+- E-signature → Job creation
+- callIntel 12-field persistence (OQ-011)
 
-Core Insight:
-Corestone must become a business partner that knows more about Corestone
-than any human employee. Not software. A partner that compounds knowledge
-from every job, every client, every mistake -- every single day.
+---
 
-25 Ranked Ideas (from architecture review):
-1. The Business Brain
-2. Predictive Job Profitability
-3. Organizational Memory
-4. Client Intelligence Profile
-5. Sub Performance Intelligence
-6. Scope Creep Early Warning
-7. Cash Flow Intelligence (CFO-level)
-8. Competitive Intelligence
-9. Schedule Intelligence (live prediction)
-10. Estimation Engine (from history)
-11. Collections Intelligence
-12. Job Risk Score per Job
-13. Photo Intelligence
-14. Opportunity Detection
-15. Contract Intelligence
-16. Pattern Recognition Engine
-17. Predictive Sub Availability
-18. Autonomous Daily Briefing
-19. The Advisor Conversation
-20. Client Sentiment Tracking
-21. Permit Intelligence
-22. Material Price Intelligence
-23. Learning Proposal
-24. Warranty Pattern Intelligence
-25. Business Health Score
+## NON-NEGOTIABLE RULES
 
-CREDENTIALS
-- GitHub: feishy-hub/leadflow-corestone
-- Vercel: leadflow-corestone.vercel.app
-- Anthropic API key: sk-ant-api03... (in Vercel env vars)
-- n8n: corestone-n8n.onrender.com (planned)
-- QBO: Advanced plan (deferred -- 30 day parallel test first)
-- Google Maps API: needed for address autocomplete (not yet set up)
-- DocuSign: NOT needed -- e-signature built into app
+1. POs NEVER auto-created — 3-stage Gatekeeper approval (PO Directive, OS #8)
+2. Status = workflow outcome — no manual status buttons (DEC-025)
+3. Design now, build when ready — Blueprint leads implementation (DEC-018)
+4. Never say "stub" — say "partially implemented" (avoids sub/subs confusion)
+5. QBO connects last — after 30-day parallel verification
+6. Internal QA before Executive QA — every button tested before delivery
+7. Update all docs at session end — Blueprint, Master, Roadmap, Decisions, Open Items
 
-NEXT PRIORITIES
-1. Gmail integration (OAuth credentials exist)
-2. Address autocomplete (needs Google Maps API key -- free)
-3. QBO sync (after 30 days parallel)
-4. Mobile PWA -- Add to Home Screen
-5. Business Brain -- continuously running AI
-6. Organizational Memory
-7. Client Intelligence Profiles
-8. n8n automation workflows
+---
+
+## CODING PATTERNS
+
+```python
+# Syntax check
+python3 -c "
+content=open('index.html','r',encoding='utf-8').read()
+js=content[content.find('>',content.find('<script'))+1:content.rfind('</script>')]
+open('/tmp/check.js','w').write(js)
+" && node --check /tmp/check.js
+
+# GitHub push pattern (Classic PAT only)
+import base64, json, urllib.request
+TOKEN = "ghp_" + "[get from Feishy or password manager]"  # Never store full token in docs
+# GET → extract sha → PUT with b64 content + sha
+```
+
+Python string replacement: exact literals only. Never regex on HTML.
+Always verify fix is in file with grep before pushing.
+Always run syntax check before push.
+
+---
+
+## SESSION END CHECKLIST (mandatory)
+
+Before declaring any session done:
+- [ ] Blueprint updated (if architecture changed)
+- [ ] CORESTONE_COMPLETE_MASTER.md — session log appended
+- [ ] CORESTONE_ROADMAP.md — milestone status updated
+- [ ] CORESTONE_DECISIONS.md — new decisions added
+- [ ] CORESTONE_OPEN.md — new open items added, resolved items closed
+- [ ] CORESTONE_SUBSYSTEM_STATUS.md — implementation status updated
+- [ ] All pushed to GitHub
+- [ ] index.html syntax check passed before final push
+
+---
+*This file is intentionally short. Detail lives in the documents above.*
+*Updated: OS #8 — July 2, 2026*
