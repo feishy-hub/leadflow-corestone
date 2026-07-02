@@ -895,6 +895,7 @@ if(!document.getElementById('next-step-style')){
 }
 
 function nextStep(title, message, actions){
+  if(typeof ETM !== 'undefined' && ETM && ETM.active) return;
   var ex=document.getElementById('ns-panel');
   if(ex) ex.remove();
 
@@ -1263,15 +1264,16 @@ function selectJob(id){
   AJOB=ALLJOBS.find(j=>j.id===id)||null;
   renderJobList(ALLJOBS);
   const bar=$('ctx-bar');
-  if(AJOB){
-    bar.classList.remove('hidden');
-    $('ctx-name').textContent=AJOB.job_name;
-    $('ctx-meta').textContent=AJOB.client_name+' · '+(AJOB.address||'No address');
-    $('ctx-badge').className=`badge badge-${AJOB.status}`;
-    $('ctx-badge').textContent=AJOB.status;
-    $('ctx-phase').textContent=AJOB.current_phase||'';
-    $('ctx-pct').textContent=AJOB.percent_complete?AJOB.percent_complete+'% complete':'';
-  } else {bar.classList.add('hidden');}
+  if(bar){
+    if(AJOB){
+      bar.classList.remove('hidden');
+      var nm=$('ctx-name');if(nm)nm.textContent=AJOB.job_name;
+      var mt=$('ctx-meta');if(mt)mt.textContent=AJOB.client_name+' · '+(AJOB.address||'No address');
+      var bg=$('ctx-badge');if(bg){bg.className='badge badge-'+(AJOB.status||'active');bg.textContent=AJOB.status;}
+      var ph=$('ctx-phase');if(ph)ph.textContent=AJOB.current_phase||'';
+      var pc=$('ctx-pct');if(pc)pc.textContent=AJOB.percent_complete?AJOB.percent_complete+'% complete':'';
+    } else {bar.classList.add('hidden');}
+  }
   renderPage(CUR);
 }
 
@@ -2030,7 +2032,7 @@ async function saveInv(){const amt=parseFloat($('iv-amt').value);if(!amt){toast(
 async function markPaid(id){try{const[i]=await dbGet('invoices',`?id=eq.${id}`);if(i)await dbUpd('invoices',id,{status:'paid',amount_paid:i.amount,paid_date:new Date().toISOString().split('T')[0]});pgFinV2();nextStep('Payment Recorded! 💰','Money received. What next?',[{icon:'📝',label:'Release lien waiver',sub:'Required after final payment',fn:'goTab("liens")'},{icon:'⭐',label:'Request client review',sub:'Strike while they are happy',fn:'goTab("messages")'},{icon:'📊',label:'Job profitability report',sub:'See how this job performed',fn:'goTab("budget")'}]);}catch(e){toast(e.message,'err');}}
 async function getCallBrief(id,amount,due){const el=$(`cb-${id}`);el.innerHTML='<div class="loading" style="padding:8px"><div class="spin"></div></div>';try{const r=await ai(`Collections call brief: Invoice ${fmt$(amount)}, due ${fmtD(due)}. Tone, key talking points, what to avoid. Under 70 words.`);el.innerHTML=`<div class="ai-box" style="margin-top:8px"><div class="ai-lbl">AI Call Brief</div>${r}</div>`;}catch(e){el.innerHTML='';}}
 function showCOForm(){document.body.insertAdjacentHTML('beforeend',`<div class="ov" id="cof"><div class="modal"><div class="mh"><div class="mt">New Change Order</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb"><div class="fr"><label>Title *</label><input id="co-title" placeholder="Under-cabinet lighting addition"></div><div class="fr"><label>Description</label><textarea id="co-desc" style="min-height:70px"></textarea></div><div class="fr"><label>Reason</label><select id="co-reason"><option>Client Request</option><option>Unforeseen Condition</option><option>Design Change</option><option>Owner Directed</option></select></div><div class="f2"><div class="fr"><label>Cost Impact ($)</label><input id="co-cost" type="number"></div><div class="fr"><label>Schedule (days)</label><input id="co-days" type="number" value="0"></div></div></div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveCO()">Create CO</button></div></div></div>`);}
-async function saveCO(){const title=$('co-title').value.trim();if(!title){toast('Title required','err');return;}const cost=parseFloat($('co-cost').value)||0;try{await dbIns('change_orders',{job_id:AJOB?.id||null,title,description:$('co-desc').value,reason:$('co-reason').value,cost_impact:cost,schedule_impact_days:parseInt($('co-days').value)||0,status:'draft'});if(cost>500)await dbIns('gatekeeper_queue',{item_type:'change_order',title:`CO Approval: ${title}`,description:`Cost: ${fmt$(cost)}`,job_id:AJOB?.id||null,amount:cost,status:'pending'});toast('CO created!'+(cost>500?' → Gatekeeper':''));closeModal('cof');finTab('co');nextStep('Change Order Created','What would you like to do next?',[{label:'View Change Orders',fn:'goTab(\'cos\')'},{label:'Go to Gatekeeper',fn:'goTab(\'gatekeeper\')'},{label:'View Budget',fn:'goTab(\'budget\')'}]);}catch(e){toast(e.message,'err');}}
+async function saveCO(){const title=$('co-title').value.trim();if(!title){toast('Title required','err');return;}const cost=parseFloat($('co-cost').value)||0;try{await dbIns('change_orders',{job_id:AJOB?.id||null,title,description:$('co-desc').value,reason:$('co-reason').value,cost_impact:cost,schedule_impact_days:parseInt($('co-days').value)||0,status:'draft'});if(cost>500)await dbIns('gatekeeper_queue',{item_type:'change_order',title:`CO Approval: ${title}`,description:`Cost: ${fmt$(cost)}`,job_id:AJOB?.id||null,amount:cost,status:'pending'});toast('CO created!'+(cost>500?' → Gatekeeper':''));closeModal('cof');finTab('co');toast('CO created — check Gatekeeper for approval','ok',3000);}catch(e){toast(e.message,'err');}}
 async function approveCO(id){
   // Route to full approveCOItem so cascade fires
   await approveCOItem(id, null);
@@ -2320,15 +2322,20 @@ async function pgBills(){
 function showBillForm(){var f=$('bill-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
 async function saveNewBill(){
   try{
-  var vendor=($('nbill-vendor')||{}).value||'';var amount=parseFloat(($('nbill-amount')||{}).value||0);
+  var vendor=($('nbill-vendor')||{}).value||'';
+  var amount=parseFloat(($('nbill-amount')||{}).value||0);
   if(!vendor||!amount){toast('Vendor and amount required','err');return;}
-  await dbIns('bills',{job_id:($('nbill-job')||{}).value||null,vendor_name:vendor,amount:amount,description:($('nbill-desc')||{}).value||'',due_date:($('nbill-due')||{}).value||null,status:'Unpaid'});
+  var poId = ($('nbill-po')||{}).value || null;
+  await dbIns('bills',{
+    job_id:($('nbill-job')||{}).value||(AJOB?AJOB.id:null),
+    vendor_name:vendor, amount:amount,
+    description:($('nbill-desc')||{}).value||'',
+    due_date:($('nbill-due')||{}).value||null,
+    po_id: poId || null,
+    status:'Unpaid'
+  });
   await aiLogTransaction('Bill Added','New bill from '+vendor+': '+fmt$(amount),'normal');
   pgBills();
-  nextStep('Bill Saved!', 'Bill is logged. Anything to do now?', [
-    {icon:'💳', label:'Pay this bill now', sub:'Mark as paid immediately', fn:"pgBills()", primary:true},
-    {icon:'📊', label:'Check cash flow', sub:'See money in vs money out', fn:"goTab('budget')", primary:false}
-  ]);
   }catch(e){toast('Bill error: '+e.message,'err');console.error('saveNewBill',e);}
 }
 // B-2: 3-stage bill approval chain (REQ: DEC-011 compliant)
@@ -9685,15 +9692,15 @@ var ETM = {
       id: 3,
       title: "Client Requests Under-Cabinet Lighting",
       badge: "📋 Change Order",
-      context: "Sarah texted: 'Can we add under-cabinet lighting?' You price it at $1,800 base + 20% = $2,160. Draft the CO, send it, approve it as Sarah. The moment it's approved, the contract and budget update automatically.",
+      context: "Sarah texted: 'Can we add under-cabinet lighting?' You price it at $1,800 base + 20% = $2,160. Create the CO in Corestone, then approve it from the Gatekeeper queue. The moment it's approved, the contract and budget update automatically.",
       nav: { label: "Open Change Orders", fn: "etmGoTo('co')" },
       steps: [
         { nav: "Change Orders tab", action: "Click <strong>Change Orders</strong> in navigation" },
         { nav: "New CO", action: "Click <strong>New Change Order</strong>" },
         { nav: "Title", action: "Enter: <em>Under-Cabinet LED Lighting</em>" },
         { nav: "Labor / Material", action: "Labor: $1,200 · Material: $600 · Markup: 20%" },
-        { nav: "Send for Approval", action: "Click <strong>Send for Approval</strong> · copy the Magic Link" },
-        { nav: "Approve as client", action: "Paste link in browser · approve as Sarah Goldstein" },
+        { nav: "Create CO", action: "Click <strong>Create CO</strong> to save" },
+        { nav: "Gatekeeper tab", action: "Open <strong>Gatekeeper</strong> from the navigation" },
         { nav: "Approve CO", action: "Back in Corestone — click <strong>Approve CO</strong>" }
       ],
       auto: [
@@ -9863,15 +9870,18 @@ function showTestingToolbar() {
 
 async function launchExecTest() {
   if(ETM.active) { showExecTestPanel(); return; }
-  if(!confirm('Launch Executive Testing Mode?\n\nThis will load the Goldstein kitchen remodel test data and guide you through 5 business scenarios step-by-step inside Corestone.')) return;
+  // No confirm dialog — user already pressed the button intentionally
   ETM.active = true;
   ETM.currentScenario = 0;
   ETM.verdicts = {};
   ETM.checks = {};
-  // Load test data (ETM.active suppresses popup in loadTestScenario)
+  // Load all test data silently
   await loadTestScenario('kitchen_remodel');
-  // Brief pause for localStorage writes to settle, then open panel
-  setTimeout(function() { buildExecTestPanel(); showExecTestScenario(0); }, 400);
+  // Build panel immediately, then navigate into the Goldstein job
+  buildExecTestPanel();
+  showExecTestScenario(0);
+  // Navigate straight to the Goldstein job Financial tab
+  setTimeout(function() { etmGoTo('job_financial'); }, 200);
 }
 
 // ─── BUILD PANEL ─────────────────────────────────────────────────────────────
@@ -10338,13 +10348,11 @@ async function loadTestScenario(scenario){
     upsertLS('cs_estimates', estData);
     reqs.forEach(function(r){ upsertLS('cs_requirements', r); });
 
-    if(ETM.active){
-      // In ETM mode: quiet success, no popup
-      toast('Goldstein test data ready', 'ok', 2000);
-    } else {
+    if(!ETM.active){
       toast('Test data loaded — Goldstein Kitchen Remodel ready', 'ok', 3000);
+      pgSales();
     }
-    pgSales();
+    // In ETM mode: silent load, launchExecTest handles navigation
   }catch(e){
     toast('Error loading test data: '+e.message,'err');
     console.error(e);
