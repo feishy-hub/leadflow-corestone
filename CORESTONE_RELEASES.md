@@ -203,3 +203,64 @@ Versions are never deleted.
 **Breaking Changes:** None — all additive
 
 **Known Issues:** None from this release
+
+---
+
+# OS #8 RELEASE NOTES
+## Date: July 2, 2026
+
+### Root Cause Fixes
+- **Nested job cards** ("the cascade") — Root cause: malformed HTML escaping in 🤖 button onclick attribute. `\'` and `\"` caused HTML parser to misread attribute boundary. Every subsequent job card parsed as nested child. Fix: replaced with `data-jid` attribute.
+- **selectJob null crash** — "Cannot read properties of null (reading classList)". All $() calls in selectJob wrapped in null checks.
+
+### M1 Internal QA
+- Pipeline stages corrected: 'proposal' → 'proposal_sent' (leads disappearing from pipeline)
+- saveLead duplicate-click protection (input disabled during submit)
+- Edit lead: JSON-in-onclick → safe editLeadById(id)
+- "Convert to Job" → "Create Estimate" (enforces correct M1 flow)
+- saveLead nextStep uses correct lead ID
+- Audit log added to lead save and update
+
+### Business Cascade Engine
+- `runBusinessCascade()` — 6 cascade types fully wired:
+  - co.approved, invoice.paid, punch.completed, rfi.closed, lien_waiver.signed, bill.approved
+- `markPaid()` → `recordPayment()` (collects amount, method, date, reference)
+- Bill form: po_id field added for PO discrepancy detection
+
+### Workflow-Driven Lead Flow
+- New leads locked to stage 'new' (no dropdown for new lead form)
+- advanceLeadWorkflow() blocks proposal_sent/signed from manual buttons
+- sendProposalToClient: auto-updates lead stage + queues Day 3/5/7 Gatekeeper follow-ups
+- proposal_signed executor: creates Job + Budget + Deposit Invoice + survey trigger + PM task
+
+### Executive Testing Mode
+- Built-in guided testing panel (380px right-side)
+- 5 scenarios, 4 tabs each (Steps / Auto Actions / Verify / Watch For Bugs)
+- PASS/FAIL verdicts, scenario progression, direct navigation buttons
+- nextStep() suppressed in ETM mode (no competing popups)
+- Silent test data load in ETM mode
+- Test data: stable IDs, upsert-safe, creates Job + Budget + PO + RFI + invoices
+
+### Architecture
+- Blueprint: 266 → 957 lines
+- 10 enterprise subsystems fully designed (Object Model, Visibility, Event, Workflow, Permissions, Financial, Business Brain, Mobile, API, Integration)
+- Governing principle locked: "Design now. Build when the platform is ready."
+- PO Architecture Directive: 3-stage approval, never auto-created
+- Workflow Engine: 10 default workflows (WF-01 through WF-10) defined
+
+### Permanent Documents Added
+- CORESTONE_CONSTITUTION.md
+- CORESTONE_ARCHITECTURE_DIRECTIVE_OBJECT_MODEL.md
+- CORESTONE_ARCHITECTURE_LOCKDOWN.md
+- CORESTONE_TESTING_STANDARD.md
+- CORESTONE_EXECUTIVE_DIRECTIVE.md
+- CORESTONE_SUBSYSTEM_STATUS.md
+- CORESTONE_COMMAND_CENTER.html (Command Center dashboard)
+
+### Job Cards
+- safeSelectJob() helper — sets AJOB directly, single goTab call, no double-render
+- etmAwareJobOpen() — scenario-aware navigation
+- All card buttons use data-jid (safe ID passing)
+- Job Settings removed from Jobs list header
+- All CSS transitions removed from job cards
+
