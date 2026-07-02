@@ -772,3 +772,200 @@ Read the master doc. Tell me you are ready. Then audit the system and tell me wh
 *This document captures everything from OS #1 through OS #7.*
 *Nothing is lost. Everything is here.*
 *Last updated: June 25, 2026*
+
+---
+
+# OS #8 — SESSION LOG
+## Date: July 2, 2026
+## Focus: Architecture Governance, M1 Internal QA, Foundation Fixes, Executive Directive
+
+---
+
+## PERMANENT DOCUMENTS ADDED THIS SESSION
+
+| Document | Purpose |
+|---|---|
+| CORESTONE_CONSTITUTION.md | Highest authority — 15 principles governing all development |
+| CORESTONE_ARCHITECTURE_DIRECTIVE_OBJECT_MODEL.md | Object Model, Visibility Engine, Proposal System architecture |
+| CORESTONE_ARCHITECTURE_LOCKDOWN.md | Future-proofing directive, complete workflow review requirement |
+| CORESTONE_TESTING_STANDARD.md | Executive Acceptance Testing Standard v1.0 — 9 mandatory sections |
+| CORESTONE_EXECUTIVE_DIRECTIVE.md | NEW — Governing standard for all future development |
+| CORESTONE_SUBSYSTEM_STATUS.md | NEW — Honest implementation status of every enterprise subsystem |
+| CORESTONE_COMMAND_CENTER.html | NEW — Visual project management dashboard |
+
+---
+
+## BLUEPRINT EXPANSION
+
+Blueprint grew from 266 to 957 lines.
+Added complete target architecture for 10 enterprise subsystems:
+1. Object Model (40 business objects, full catalog)
+2. Visibility Engine (field/object/role-level, Preview-as-role)
+3. Event Engine (25 events, subscriber pattern, Gatekeeper integration)
+4. Workflow Engine (NEW — Feishy's addition; 10 default workflows WF-01 through WF-10)
+5. Enterprise Permission System (role hierarchy, runtime evaluation)
+6. Financial Architecture (Estimate→GL chain, GL hooks reserved)
+7. Business Brain (what it holds, outputs, when it builds)
+8. Mobile Architecture (offline sync queue, PWA, biometric)
+9. API Architecture (24 endpoint groups, versioned, webhooks)
+10. Integration Architecture (Gmail/n8n/Stripe/QBO adapter pattern)
+
+Governing principle locked: "Design now. Build when the platform is ready."
+
+---
+
+## CODE CHANGES — INDEX.HTML
+
+### ROOT CAUSE BUG FIX
+- **Nested job cards** ("the cascade"): Root cause was malformed HTML escaping in 🤖 AI Status button
+  - `onclick="quickAIJobNote(\'id\\')"` — `\'` and `\"` caused HTML parser to misread attribute boundary
+  - Every subsequent job card parsed as child of previous card
+  - Fix: replaced with `data-jid` attribute — verified 21 opens / 21 closes in renderJobCard
+
+### SELECTJOB NULL-SAFETY
+- All `$('ctx-bar')`, `$('ctx-name')`, `$('ctx-badge')`, etc. wrapped in null checks
+- Crash: "Cannot read properties of null (reading classList)" — FIXED
+
+### BUSINESS CASCADE ENGINE
+- `runBusinessCascade(action, objectType, objectId, context)` added
+- Cascades built:
+  - `co.approved` → job contract update + budget + PM task + client notification draft
+  - `invoice.paid` → job costing + final payment detection → warranty + Closeout status
+  - `punch.completed` → overall % + final inspection trigger at 100%
+  - `rfi.closed` → resolution logged + plan revision flag
+  - `lien_waiver.signed` → all-signed check → payment release
+  - `bill.approved` → job costing committed + PO mismatch detection
+
+### WORKFLOW-DRIVEN LEAD FLOW
+- `showTestingToolbar()` replaced by `launchExecTest()`
+- New leads locked to stage 'new' (form dropdown removed for new leads)
+- `stageUp` → `advanceLeadWorkflow()` — blocks 'proposal_sent' and 'signed' from manual buttons
+- `sendProposalToClient` → auto-updates lead stage + Day 3/5/7 follow-up Gatekeeper items
+- `proposal_signed` Gatekeeper executor → Job + Budget + Deposit Invoice + survey trigger + PM assignment
+
+### M1 INTERNAL QA FIXES
+- Pipeline stages: 'proposal' → 'proposal_sent' (leads were disappearing from pipeline)
+- `saveLead` duplicate-click protection (input disabled on submit)
+- Edit lead button: JSON-in-onclick → safe `editLeadById(id)` (was breaking on special characters)
+- "Convert to Job" → "Create Estimate" (enforces Lead→Estimate→Proposal→Job flow)
+- `saveLead` nextStep uses `sid` not "latest lead" from DB
+- Audit log entry added to saveLead on create and update
+
+### JOB CARD IMPROVEMENTS
+- All card action buttons (`📅 Schedule`, `💰 Financial`, `📊 Update %`) use `data-jid` safely
+- `safeSelectJob(id, tab)` added — sets AJOB directly, single goTab call, no double-render
+- `etmAwareJobOpen(id)` — single render, navigates to scenario-appropriate tab
+- Job Settings button removed from Jobs list header (belongs inside job detail only)
+- All CSS transitions removed from job cards (user preference — no visual animations)
+- Progress bar transition removed
+
+### EXECUTIVE TESTING MODE (ETM)
+- Built as fixed right-side panel (380px)
+- No blocking confirm dialog on launch
+- Silent test data load in ETM mode
+- `nextStep()` suppressed when ETM active (no competing popups)
+- 5 scenarios with Steps / Auto Actions / Verify / Watch For Bugs tabs
+- PASS/FAIL buttons with scenario progression
+- Direct navigation buttons per scenario
+- `showTestingToolbar()` → unified `launchExecTest()` entry point
+
+### TEST DATA LOADER
+- `loadTestScenario('kitchen_remodel')` with stable IDs (GTX object)
+- Creates: Lead + Job + Budget + PO (Victory Framing $4,800) + RFI (Mike Volkov) + invoices
+- `upsertLS()` — idempotent; re-running doesn't duplicate records
+- Silent in ETM mode; toast only in standalone mode
+
+### RECORD PAYMENT FLOW
+- `markPaid()` deprecated → `recordPayment()` collects: amount, method, date, reference
+- `confirmRecordPayment()` wired to cascade
+
+### BILL FORM
+- `po_id` field added to saveNewBill — enables PO discrepancy detection
+
+### PO ARCHITECTURE DIRECTIVE
+- Locked: POs NEVER auto-created
+- 3-stage: Internal → Customer → Gatekeeper → PO
+- Directive comment block added to codebase
+- DEC-022 recorded
+
+### MISCELLANEOUS
+- `quickAIJobNote()` — AI job status in 2 sentences
+- `safeSelectJob()` helper
+- `editLeadById()` helper
+- ETM navigation helpers (etmGoTo, etmAwareJobOpen)
+
+---
+
+## DECISIONS LOCKED THIS SESSION
+
+| ID | Decision |
+|---|---|
+| DEC-018 | Design now. Build when the platform is ready |
+| DEC-019 | Workflow Engine is a core enterprise subsystem |
+| DEC-020 | All 10 subsystems fully designed in Blueprint before Phase 2 |
+| DEC-021 | GL hooks reserved on all financial objects going forward |
+| DEC-022 | Three new permanent documents saved to repo |
+| DEC-023 | Architecture freeze — no Blueprint expansion unless critical flaw |
+| DEC-024 | Every dev cycle = one complete testable workflow with testing package |
+| DEC-025 | Status = result of business action, never manual button |
+| DEC-026 | CEO mindset: show working product, test, critique, improve |
+| PO Directive | POs never auto-created. 3-stage Gatekeeper approval required. |
+| Terminology | Never use "stub" — say "partially implemented" (avoids sub/stub confusion) |
+
+---
+
+## OPEN ITEMS AFTER OS #8
+
+| ID | Priority | Item |
+|---|---|---|
+| OQ-011 | High | Call Intelligence post-call saves only 4 of 12 fields |
+| OQ-019 | M2 | Workflow Engine build timing — currently hardcoded transitions |
+| OQ-020 | Immediate | GL account codes not reserved on current financial objects |
+| OQ-021 | M2 | CSI category implementation priority |
+| OQ-022 | M2 | Preview-as-Role UI-only version for Phase 1 stepping stone |
+| OQ-023 | Pre-launch | n8n on Render cold-starts — upgrade to paid tier before live email intake |
+| OQ-024 | M1 | Estimate line item CRUD — open/edit/delete each line needs verification |
+| OQ-025 | M1 | Tax calculation verification (materials-only, 8% Ulster County) |
+| OQ-026 | M1 | Proposal 9-section render verification |
+| OQ-027 | M1 | Magic link client view completeness |
+| OQ-028 | M1 | E-signature → Job creation ETM verification |
+| OQ-029 | M2 | PO 3-stage authorization workflow — must be built before M2 |
+
+---
+
+## M1 STATUS AT SESSION END
+
+**Done (internally QA'd):**
+- Lead form, creation, AI generation, duplicate-click guard
+- Pipeline kanban with correct stage mapping
+- Lead detail modal with all buttons working
+- Stage enforcement (proposal_sent/signed workflow-only)
+- sendProposalToClient cascade
+- proposal_signed Gatekeeper executor
+- Audit log on lead save
+- Edit lead safe approach
+- "Create Estimate" navigation from lead
+
+**Needs Internal QA (before Executive Testing):**
+- Estimate CRUD (open, edit line items, delete)
+- Tax calculation on 15-line estimate
+- createProposalFromEstimate → 9 sections render
+- Magic link client view
+- E-signature → Gatekeeper → Job creation
+- callIntel 12-field post-call persistence
+- Delete lead audit trail
+
+**M1 cannot go to Executive Testing until all of the above pass internal QA.**
+
+---
+
+## INFRASTRUCTURE AT SESSION END
+
+- **Repo:** github.com/feishy-hub/leadflow-corestone
+- **Live app:** leadflow-corestone.vercel.app (auto-deploys from main)
+- **Supabase:** corestone-os project deployed, NOT connected
+- **n8n:** on Render, deployed, NOT connected
+- **AI Proxy:** /api/claude on Vercel, working
+
+---
+*OS #8 session complete — July 2, 2026*
