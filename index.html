@@ -1550,8 +1550,8 @@ async function pgSales(){
     const leads=await dbGet('leads','?order=created_at.desc');
     const now=Date.now();
     const newL=leads.filter(l=>l.stage==='new'&&now-new Date(l.created_at)<7200000);
-    const stages=['new','contacted','proposal','negotiating','signed','lost'];
-    const slbl={new:'New',contacted:'Contacted',proposal:'Proposal',negotiating:'Negotiating',signed:'Signed ✓',lost:'Lost'};
+    const stages=['new','contacted','proposal_sent','negotiating','signed','lost'];
+    const slbl={new:'New',contacted:'Contacted',proposal_sent:'Proposal Sent',negotiating:'Negotiating',signed:'Signed ✓',lost:'Lost'};
     const g={};stages.forEach(s=>g[s]=leads.filter(l=>l.stage===s));
     $('content').innerHTML=`
       ${newL.length?`<div class="alert-red" onclick="leadDetail('${newL[0].id}')"><span style="font-size:22px">🚨</span><div style="flex:1"><strong style="color:#fff;font-size:14px">${newL.length} NEW LEAD${newL.length>1?'S':''} — CALL NOW!</strong><div style="font-size:12px;color:rgba(255,255,255,0.85)">${newL.map(l=>l.client_name).join(', ')}</div></div><span style="color:#fff;font-weight:800">Tap to open →</span></div>`:''}
@@ -1646,20 +1646,32 @@ function showLeadForm(l=null){
     </div>`);
 }
 
+async function editLeadById(id){
+  var leads = await dbGet('leads','?id=eq.'+id);
+  var lead = leads[0];
+  if(!lead){ toast('Lead not found','err'); return; }
+  showLeadForm(lead);
+}
+
 async function saveLead(id=null,runAI=true){
+  var _idemKey='saveLead_'+(id||'new');
+  if(document.getElementById('l-name')&&document.getElementById('l-name').disabled){toast('Already saving...','ok');return;}
   const name=$('l-name').value.trim();if(!name){toast('Client name required','err');return;}
+  if($('l-name'))$('l-name').disabled=true;
   const d={client_name:name,phone:$('l-phone').value,email:$('l-email').value,address:$('l-addr').value,job_type:$('l-type').value,estimated_value:parseFloat($('l-val').value)||0,timeline:$('l-tl').value,lead_source:$('l-src').value,owns_property:$('l-owns').value,financing:$('l-fin').value,competing_bids:$('l-bids').value,notes:$('l-notes').value,stage: id ? ($('l-stage')?.value||'new') : 'new',next_followup:new Date(Date.now()+7200000).toISOString()};
   try{
     let sid;if(id){await dbUpd('leads',id,d);sid=id;}else{const r=await dbIns('leads',d);sid=r[0]?.id;}
+    if($('l-name'))$('l-name').disabled=false;
     toast(id?'Lead updated':'Lead saved!');closeModal('lf');
     nextStep('Lead Saved!', 'Lead is in your pipeline. What now?', [
-      {icon:'📞', label:'Call them right now', sub:'Open live call with AI coaching', fn:"(async function(){var l=await dbGet('leads','?order=created_at.desc&limit=1');if(l&&l[0])openCallMode(l[0].id);})()", primary:true},
+      {icon:'📞', label:'Call them right now', sub:'Open live call with AI coaching', fn:"openCallMode('"+sid+"')" , primary:true},
       {icon:'📋', label:'View lead details', sub:'See full lead info and AI script', fn:"pgSales()", primary:false},
       {icon:'✉️', label:'Send follow-up email', sub:'AI drafts it for you', fn:"goTab('messages')", primary:false}
     ]);
+    await dbIns('audit_log',{object_type:'leads',object_id:sid,action:id?'updated':'created',new_value:JSON.stringify({stage:d.stage,client_name:d.client_name}),changed_by_ai:false,timestamp:new Date().toISOString()});
     if(runAI&&sid){toast('🤖 Generating AI script...');generateLeadAI(sid,d);}
     pgSales();
-  }catch(e){toast(e.message,'err');}
+  }catch(e){if($('l-name'))$('l-name').disabled=false;toast(e.message,'err');}
 }
 
 async function generateLeadAI(leadId,data){
@@ -1703,8 +1715,8 @@ async function leadDetail(id){
               <button class="btn btn-g btn-sm" onclick="showClientIntelligence('${lead.id}')">🧠 Intelligence</button>
               <button class="btn btn-g btn-sm" onclick="viewLeadRequirements('${lead.id}')">📋 Requirements</button>
               <button class="btn btn-g btn-sm" onclick="sendSurveyLink('${lead.id}')">📝 Survey</button>
-              <button class="btn btn-g btn-sm" onclick="closeModal('ld');showLeadForm(${JSON.stringify(lead).replace(/"/g,'&quot;')})">✏️ Edit</button>
-              <button class="btn btn-g btn-sm" onclick="toJob('${lead.id}','${lead.client_name}',${lead.estimated_value||0})">🏗️ Convert to Job</button>
+              <button class="btn btn-g btn-sm" onclick="closeModal('ld');editLeadById('${lead.id}')">✏️ Edit</button>
+              <button class="btn btn-g btn-sm" onclick="closeModal('ld');goTab('estimates')">💰 Create Estimate</button>
               <button class="btn btn-d btn-sm" onclick="delLead('${lead.id}','${lead.client_name}')">🗑️ Delete</button>
             </div>
             <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:13px;align-items:center">
