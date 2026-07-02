@@ -4186,40 +4186,120 @@ async function pgReportsV2(){
 // ═══════════════════════════════════════════════════════════════
 
 // ── JOBS PAGE — full detail cards with progress, budget, phase, actions ──
+var JOBS_VIEW = 'grid'; // 'grid' or 'list'
+
 async function pgJobsV2(){
   try{
-    var jobs=await dbGet('jobs','?order=created_at.desc');
-    ALLJOBS=jobs;
-    var active=jobs.filter(function(j){return j.status==='active';});
-    var complete=jobs.filter(function(j){return j.status==='complete';});
-    var onHold=jobs.filter(function(j){return j.status==='on_hold';});
-    
-    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
-      +'<div>'
-      +'<div style="font-size:18px;font-weight:800">🏗️ Jobs</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+active.length+' active · '+complete.length+' complete · '+fmt$(active.reduce(function(s,j){return s+(j.budget||0);},0))+' total active budget</div>'
-      +'</div>'
-      +'<div style="display:flex;gap:8px">'
+    var jobs = await dbGet('jobs','?order=created_at.desc');
+    ALLJOBS = jobs;
+    var active   = jobs.filter(function(j){return j.status==='active';});
+    var complete = jobs.filter(function(j){return j.status==='complete';});
+    var onHold   = jobs.filter(function(j){return j.status==='on_hold';});
+    var totalBudget = active.reduce(function(s,j){return s+(parseFloat(j.contract_price)||parseFloat(j.budget)||0);},0);
+
+    $('content').innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+      +'<div><div style="font-size:18px;font-weight:800">🏗️ Jobs</div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+active.length+' active · '+complete.length+' complete · '+fmt$(totalBudget)+' total active contracts</div></div>'
+      +'<div style="display:flex;gap:8px;align-items:center">'
       +'<input id="job-search" placeholder="Search jobs..." style="width:180px;padding:7px 11px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;font-family:inherit" oninput="filterJobsV2(this.value)">'
-      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button>'+'<button onclick="aiWeeklySummary()"   style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-left:6px">AI Summary</button>'
+      // View toggle
+      +'<div style="display:flex;border:1.5px solid var(--border2);border-radius:var(--radius-sm);overflow:hidden">'
+      +'<button id="view-grid-btn" onclick="setJobsView(\'grid\')" title="Grid view" style="padding:6px 10px;background:'+(JOBS_VIEW==='grid'?'var(--teal)':'var(--bg)')+';color:'+(JOBS_VIEW==='grid'?'#fff':'var(--muted)')+';border:none;cursor:pointer;font-size:14px">⊞</button>'
+      +'<button id="view-list-btn" onclick="setJobsView(\'list\')" title="List view" style="padding:6px 10px;background:'+(JOBS_VIEW==='list'?'var(--teal)':'var(--bg)')+';color:'+(JOBS_VIEW==='list'?'#fff':'var(--muted)')+';border:none;cursor:pointer;font-size:14px;border-left:1px solid var(--border2)">☰</button>'
+      +'</div>'
+      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button>'
+      +'<button onclick="aiWeeklySummary()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">AI Summary</button>'
       +'</div></div>'
-      
-      // Status filter tabs
+      // Status filters
       +'<div style="display:flex;gap:8px;margin-bottom:16px">'
       +['all','active','on_hold','complete','cancelled'].map(function(s){
         var count=s==='all'?jobs.length:jobs.filter(function(j){return j.status===s;}).length;
-        return '<button onclick="filterJobsV2(null,\''+s+'\')" style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid var(--border2);background:#fff;font-family:inherit;transition:all 0.15s" onmouseover="this.style.borderColor=\'var(--teal)\'" onmouseout="this.style.borderColor=\'var(--border2)\'">'+s.replace('_',' ').replace(/\b\w/g,function(c){return c.toUpperCase();})+' ('+count+')</button>';
+        return '<button onclick="filterJobsV2(null,\''+s+'\')" style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid var(--border2);background:var(--bg);font-family:inherit">'+s.replace('_',' ').replace(/\b\w/g,function(c){return c.toUpperCase();})+' ('+count+')</button>';
       }).join('')
       +'</div>'
-      
-      +'<div id="jobs-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">'
-      +(!jobs.length
-        ?'<div class="empty"><div class="ei">🏗️</div><div class="et">No jobs yet</div><button class="btn btn-p" style="margin-top:12px" onclick="showJobForm()">Create First Job</button></div>'
-        :jobs.map(function(j){return renderJobCard(j);}).join('')
-      )+'</div>';
-    renderJobList(jobs);
-  }catch(e){$('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';}
+      // Jobs container
+      +'<div id="jobs-grid"></div>';
+
+    renderJobsContent(jobs);
+  }catch(e){
+    console.error('pgJobsV2',e);
+    $('content').innerHTML='<div class="empty"><div class="et">Error loading jobs: '+e.message+'</div><button class="btn btn-p" style="margin-top:12px" onclick="pgJobsV2()">Retry</button></div>';
+  }
 }
+
+function setJobsView(view){
+  JOBS_VIEW = view;
+  var gBtn = document.getElementById('view-grid-btn');
+  var lBtn = document.getElementById('view-list-btn');
+  if(gBtn){gBtn.style.background=view==='grid'?'var(--teal)':'var(--bg)';gBtn.style.color=view==='grid'?'#fff':'var(--muted)';}
+  if(lBtn){lBtn.style.background=view==='list'?'var(--teal)':'var(--bg)';lBtn.style.color=view==='list'?'#fff':'var(--muted)';}
+  var jobs = ALLJOBS || [];
+  renderJobsContent(jobs);
+}
+
+function renderJobsContent(jobs){
+  var grid = document.getElementById('jobs-grid');
+  if(!grid) return;
+  if(!jobs.length){
+    grid.innerHTML='<div class="empty"><div class="ei">🏗️</div><div class="et">No jobs yet</div><button class="btn btn-p" style="margin-top:12px" onclick="showJobForm()">Create First Job</button></div>';
+    return;
+  }
+  if(JOBS_VIEW === 'list'){
+    grid.style.display='block';
+    grid.innerHTML = renderJobsListView(jobs);
+  } else {
+    grid.style.display='grid';
+    grid.style.gridTemplateColumns='repeat(auto-fill,minmax(300px,1fr))';
+    grid.style.gap='14px';
+    grid.innerHTML = jobs.map(function(j){return renderJobCard(j);}).join('');
+  }
+}
+
+function renderJobsListView(jobs){
+  var statusColors={active:'var(--green)',complete:'var(--blue)',on_hold:'var(--amber)',cancelled:'var(--red)'};
+  var rows = jobs.map(function(j){
+    var sc = statusColors[j.status]||'var(--muted)';
+    var pct = j.percent_complete||0;
+    return '<div style="display:grid;grid-template-columns:2fr 1fr 100px 100px 100px 130px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--card)" onclick="etmAwareJobOpen(\''+j.id+'\')" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\'var(--card)\'">'
+      +'<div><div style="font-weight:700;font-size:13px">'+j.job_name+'</div><div style="font-size:11px;color:var(--muted)">'+j.client_name+(j.address?' · '+j.address.split(',')[0]:'')+'</div></div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+( j.current_phase||'Pre-Construction')+'</div>'
+      +'<div style="font-size:13px;font-weight:700;color:var(--teal)">'+fmt$(j.contract_price||j.budget||0)+'</div>'
+      +'<div style="font-size:12px;font-weight:700;color:var(--teal)">'+pct+'%</div>'
+      +'<div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:'+sc+'20;color:'+sc+';border:1px solid '+sc+'40">'+( j.status||'active')+'</span></div>'
+      +'<div style="display:flex;gap:4px" onclick="event.stopPropagation()">'
+      +'<button onclick="etmAwareJobOpen(\''+j.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--teal);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit">Open</button>'
+      +'<button onclick="AJOB=ALLJOBS.find(function(x){return x.id===\''+j.id+'\';});AJOB&&goTab(\'financial\')" style="font-size:11px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-family:inherit">💰</button>'
+      +'</div>'
+      +'</div>';
+  }).join('');
+  return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius)">'
+    +'<div style="display:grid;grid-template-columns:2fr 1fr 100px 100px 100px 130px;padding:8px 16px;border-bottom:2px solid var(--border);background:var(--bg)">'
+    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Job</div>'
+    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Phase</div>'
+    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Contract</div>'
+    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Progress</div>'
+    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Status</div>'
+    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Actions</div>'
+    +'</div>'
+    + rows
+    +'</div>';
+}
+
+async function filterJobsV2(q,status){
+  var jobs = await dbGet('jobs','?order=created_at.desc');
+  ALLJOBS = jobs;
+  var filtered = jobs;
+  if(status && status!=='all') filtered=filtered.filter(function(j){return j.status===status;});
+  if(q && q.trim()){
+    var s=q.toLowerCase();
+    filtered=filtered.filter(function(j){
+      return (j.job_name||'').toLowerCase().includes(s)||(j.client_name||'').toLowerCase().includes(s)||(j.address||'').toLowerCase().includes(s);
+    });
+  }
+  renderJobsContent(filtered);
+}
+
 
 function renderJobCard(j){
   var pct=j.percent_complete||0;
@@ -4236,7 +4316,7 @@ function renderJobCard(j){
     +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">'
     +'<div style="flex:1">'
     +'<div style="font-size:14px;font-weight:800;margin-bottom:2px">'+j.job_name+'</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+j.client_name+' · '+(j.address||'No address').split(',')[1]||''+'</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+j.client_name+(j.address?' · '+j.address.split(',').slice(0,2).join(','):'')+'</div>'
     +'</div>'
     +'<span class="badge" style="background:'+sc+'20;color:'+sc+';border:1px solid '+sc+'40;flex-shrink:0">'+j.status+'</span>'
     +'</div>'
