@@ -1035,3 +1035,90 @@ Repo: github.com/feishy-hub/leadflow-corestone (15 documents + index.html)
 Index.html: ~830KB, 400+ functions
 
 ---
+
+---
+
+# OS #8 PHASE COMPLETION — FINAL BUILD
+## Date: July 2, 2026
+
+## COMPLETE M1 INTERNAL QA — RESULTS
+
+### ALL M1 FUNCTIONS AUDITED:
+
+**Estimates (fully verified):**
+- pgEstimates: list renders, cards click to openEstimate ✅
+- openEstimate: full detail, line items grouped by trade, totals panel ✅
+- calcEstTotal: tax materials-only (8%), 20% contractor fee, locked comment ✅
+- addLine: form with all fields, saves correctly ✅
+- editLine/saveEditLine: edit form, guardAction FIXED (was missing 'this') ✅
+- deleteLine: confirm + guardAction ✅
+- sendEstimate: full preview modal, sets status to 'sent' automatically ✅
+- confirmSendEstimate: guardAction protection ✅
+
+**Proposals (fully verified):**
+- createProposalFromEstimate: 9-section proposal built from estimate lines + requirements ✅
+- Draw schedule: 6 milestones, deposit through final payment ✅
+- openProposal: renders all 9 sections + draw schedule + signature block ✅
+- executeSignature: proposal_signed Gatekeeper item created, name captured ✅
+- proposal_signed executor: Job + Budget + Deposit Invoice + survey trigger ✅
+- sendProposalToClient: stage updated, Day 3/5/7 queued ✅
+
+**callIntel (resolved):**
+- generatePostCallReport: saves ALL 12+ fields (was OQ-011) ✅ RESOLVED
+- Saves: sentiment, interest_score, what_client_said, objections_raised, agreements_made,
+  what_client_must_send, what_we_must_send, bid_notes, permit_flags, timeline_impact,
+  finish_estimate_recommendation, follow_up_sequence, recommendation, priority,
+  call_intel_snapshot, notes, stage, call_count, next_followup ✅
+
+## NEW FEATURES BUILT
+
+### 1. Executive Feedback System (EFS)
+- Floating 💬 button (bottom-left, always visible)
+- Three modes: 🐛 Report Issue | 💡 Suggest Improvement | 🤖 Ask AI to Review
+- Auto-captures on open: current tab, active job, blueprint section, console errors, page content
+- Voice input via existing micFillField
+- Submits to Gatekeeper as development item with full technical context
+- AI Review mode: analyzes page against Blueprint requirements, identifies missing workflows
+- Console error interceptor: window._consoleErrors captures last 20 errors automatically
+
+### 2. Global Search
+- 🔍 button in sidebar nav (above navigation groups)
+- Modal overlay with keyboard shortcut (ESC to close)
+- Searches in parallel: leads, jobs, estimates, proposals, invoices, bills, COs, RFIs, subs
+- Results grouped by type with icon + label + subtitle
+- Click navigates directly to the record
+- 250ms debounce, minimum 2 characters
+
+### 3. Notification Center
+- 🔔 bell button in sidebar nav with unread count badge
+- Slide-in panel (360px right side)
+- addToGatekeeper() auto-creates notification on every GK item
+- Grouped by type: gatekeeper ⚙️ | cascade ⚡ | ai 🤖 | alert ⚠️ | success ✅
+- Mark all read, relative timestamps, click to navigate
+- Stores 50 most recent notifications in session
+
+### 4. M1 Bug Fixes
+- saveEditLine: 'this' added to onclick for guardAction protection
+- Old thin markPaid() removed — recordPayment() is the only path
+- callIntel OQ-011 RESOLVED — all 12+ fields persist on call end
+
+## M1 COMPLETION STATUS: 95%
+
+Remaining 5% (documentation reference only — not blocking Executive Testing):
+- callIntel post-call UI display of all new fields in leadDetail (data saves but not all shown in UI)
+- Audit Trail Viewer UI (data writes correctly; no read-back UI yet)
+
+RECOMMENDATION: M1 is ready for Executive Testing.
+
+## SUBSYSTEMS IMPLEMENTED THIS SESSION
+
+| Subsystem | Before | After |
+|---|---|---|
+| Executive Feedback System | NOT BUILT | ✅ BUILT |
+| Global Search | NOT BUILT | ✅ BUILT |
+| Notification Center | NOT BUILT | ✅ BUILT |
+| callIntel Persistence | PARTIAL (4/12 fields) | ✅ BUILT (12+ fields) |
+| M1 Estimate CRUD guard | PARTIAL | ✅ BUILT |
+
+---
+*OS #8 Phase Complete — July 2, 2026*
