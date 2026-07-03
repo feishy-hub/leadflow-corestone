@@ -4827,6 +4827,22 @@ async function deleteSub(id){
   pgSubsV2();
 }
 
+async function aiCheckSubCerts(id){
+  var subs=await dbGet('subcontractors','?id=eq.'+id)||[];
+  var sub=subs[0];if(!sub){toast('Sub not found','err');return;}
+  var today=new Date();
+  var issues=[];
+  if(sub.coi_expiry){var d=new Date(sub.coi_expiry);var days=Math.floor((d-today)/86400000);if(days<0)issues.push('COI EXPIRED '+Math.abs(days)+' days ago');else if(days<30)issues.push('COI expires in '+days+' days');}
+  if(sub.workers_comp_expiry){var d2=new Date(sub.workers_comp_expiry);var days2=Math.floor((d2-today)/86400000);if(days2<0)issues.push("Workers Comp EXPIRED "+Math.abs(days2)+' days ago');else if(days2<30)issues.push("Workers Comp expires in "+days2+' days');}
+  if(issues.length){
+    await addToGatekeeper('cert_expiry','Cert Alert: '+sub.company_name,issues.join('. ')+'. Obtain updated certificates before scheduling work.','urgent','Contact '+sub.company_name+' for updated certificates.','cert_expiry',id);
+    toast('⚠️ '+issues.length+' cert issue(s) — Gatekeeper alerted','err',5000);
+  } else {
+    toast('✅ '+sub.company_name+' — certificates appear current','ok');
+  }
+}
+
+
 async function editSub(subId){
   var subs=await dbGet('subcontractors','?id=eq.'+subId);
   var s=subs[0];if(!s)return;
