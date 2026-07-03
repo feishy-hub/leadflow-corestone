@@ -1456,7 +1456,7 @@ function closeSearchDd() {
 function renderPage(tab){
   // Only show spinner for tabs that take time — not dashboard
   if(tab!=='dashboard') $('content').innerHTML='<div class="loading"><div class="spin"></div></div>';
-  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,requirements:pgRequirements,survey:pgSurveyMgr,settings:pgSettings,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgPlans,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
+  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,requirements:pgRequirements,survey:pgSurveyMgr,settings:pgSettings,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgFiles,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
 }
 
 // DASHBOARD
@@ -2591,6 +2591,7 @@ async function gkApprove(id, btnEl) {
       status: 'approved',
       resolved_at: new Date().toISOString()
     });
+    await auditLog('gatekeeper_queue',id,'gk_approved',null,'approved',false,'Gatekeeper item approved: '+item.title);
 
     // EXECUTE the action based on action_type
     try {
@@ -2703,6 +2704,15 @@ async function gkExecuteAction(item) {
       toast('Email reviewed and filed','ok');
       break;
 
+    case 'survey_needed':
+      // Survey needed — open lead detail survey section
+      if(item.lead_id){
+        toast('Open the lead → Survey tab to send the survey link','ok',5000);
+      } else {
+        toast('Go to Leads → find the client → Survey button','ok',5000);
+      }
+      break;
+
     case 'survey_sent':
       toast('Survey send acknowledged','ok');
       break;
@@ -2760,6 +2770,17 @@ async function gkExecuteAction(item) {
 
     case 'punch_list_review':
       toast('Punch list review acknowledged — open Jobs → Punch List','ok');
+      break;
+    case 'rfi_open':
+      toast('RFI reviewed — check RFI Log for action','ok');
+      break;
+
+    case 'photo_issue':
+      toast('Photo issue acknowledged — check Photo Log','ok');
+      break;
+
+    case 'warranty_claim':
+      toast('Warranty claim reviewed — schedule inspection','ok');
       break;
 
     case 'deposit_invoice_review':
@@ -4681,7 +4702,7 @@ async function pgSubsV2(){
         +(s.hold_harmless_expiry?certBadge('HHA',certStatus(s.hold_harmless_expiry)):'')
         +'</div>'
         +(s.notes?'<div style="font-size:11px;color:var(--dim);border-top:1px solid var(--border);padding-top:8px">'+s.notes.substring(0,80)+'</div>':'')
-        +'</div>';
+        +'<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px">'+'<button onclick="aiCheckSubCerts(\''+s.id+'\')" style="font-size:11px;padding:4px 10px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:4px;cursor:pointer;font-family:inherit;font-weight:700" onclick="event.stopPropagation()">🤖 Check Certs</button>'+'<button onclick="event.stopPropagation();openSubForm(\''+s.id+'\')" style="font-size:11px;padding:4px 10px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer;font-family:inherit;font-weight:700">✏️ Edit</button>'+'<button onclick="event.stopPropagation();deleteSub(\''+s.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕ Remove</button>'+'</div>'+'</div>';
     });
     html += '</div>';
   }
@@ -4939,6 +4960,9 @@ async function pgDashV2(){
     var jobs=await dbGet('jobs','?order=created_at.desc')||[];
     var gk=await dbGet('gatekeeper_queue','?status=eq.pending')||[];
     var todos=await dbGet('todos','?order=due_date.asc')||[];
+    var invs=await dbGet('invoices','?order=created_at.desc')||[];
+    var bills=await dbGet('bills','?order=created_at.desc')||[];
+    var pos=await dbGet('purchase_orders','?order=created_at.desc')||[];
     var activeJobs=jobs.filter(function(j){return j.status==='active';});
     var now=Date.now();
     var newLeads=leads.filter(function(l){return l.stage==='new'&&now-new Date(l.created_at)<7200000;});
@@ -4994,6 +5018,17 @@ async function pgDashV2(){
       html+='<div style="color:#7a8a9a;font-size:13px;text-align:center;padding:16px">No active jobs yet</div>';
     }
     html+='</div>';
+    // Financial summary row
+    var outstandingAR=invs.filter(function(i){return i.status!=='paid'&&i.status!=='Paid';}).reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var billsDue=bills.filter(function(b){return b.status==='pending'||b.status==='Pending';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var poPending=pos.filter(function(p){return p.status==='Pending Authorization';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var collected=invs.filter(function(i){return i.status==='paid'||i.status==='Paid';}).reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">';
+    html+='<div class="card" style="text-align:center;padding:14px;border-left:3px solid var(--green)"><div style="font-size:16px;font-weight:800;color:var(--green)">'+fmt$(collected)+'</div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Collected</div></div>';
+    html+='<div class="card" style="text-align:center;padding:14px;border-left:3px solid var(--amber)"><div style="font-size:16px;font-weight:800;color:var(--amber)">'+fmt$(outstandingAR)+'</div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Outstanding AR</div></div>';
+    html+='<div class="card" style="text-align:center;padding:14px;border-left:3px solid var(--red)"><div style="font-size:16px;font-weight:800;color:var(--red)">'+fmt$(billsDue)+'</div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Bills Due</div></div>';
+    html+='<div class="card" style="text-align:center;padding:14px;border-left:3px solid var(--blue)"><div style="font-size:16px;font-weight:800;color:var(--blue)">'+fmt$(poPending)+'</div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">POs Awaiting Auth</div></div>';
+    html+='</div>';
     // Actions panel
     html+='<div class="card"><div style="font-size:14px;font-weight:800;margin-bottom:12px">Quick Actions</div><div style="display:flex;flex-direction:column;gap:8px">';
     html+='<button class="btn btn-g" onclick="goTab(\'sales\')" style="justify-content:flex-start">📥 Add New Lead</button>';
@@ -5029,59 +5064,80 @@ async function pgPunchList(){
     var items=await dbGet('punch_list',jf);
     var open=items.filter(function(i){return i.status!=='complete';});
     var done=items.filter(function(i){return i.status==='complete';});
-    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    var urgent=open.filter(function(i){return i.priority==='urgent';});
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
       +'<div><div style="font-size:18px;font-weight:800">✅ Punch List</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+open.length+' open · '+done.length+' complete</div></div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+open.length+' open · '+done.length+' complete'+(urgent.length?' · <span style="color:var(--red);font-weight:700">'+urgent.length+' urgent</span>':'')+'</div></div>'
       +'<div style="display:flex;gap:8px">'
-      +'<button class="btn btn-g btn-sm" onclick="aiGeneratePunchList()">🤖 AI Generate</button>'
-      +'<button class="btn btn-p" onclick="showPunchForm()">+ Add Item</button></div></div>'
-      +(!items.length
-        ?'<div class="empty"><div class="ei">✅</div><div class="et">No punch list items yet</div>'
-          +'<div style="color:var(--dim);font-size:12px;margin:8px 0 16px">AI can generate a full punch list from the project scope automatically</div>'
-          +'<button class="btn btn-p" onclick="aiGeneratePunchList()">🤖 AI Generate Punch List</button></div>'
-        :'<div style="display:flex;flex-direction:column;gap:6px">'
-          +items.map(function(item){
-            var pct=item.status==='complete'?100:item.status==='in_progress'?50:0;
-            return '<div class="card" style="border-left:4px solid '+(item.status==='complete'?'var(--green)':item.status==='in_progress'?'var(--amber)':'var(--red)')+';padding:12px 14px">'
-              +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-              +'<div style="flex:1">'
-              +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
-              +statusBadge(item.status||'open')
-              +(item.priority==='urgent'?'<span style="color:var(--red);font-size:11px;font-weight:800">🚨 URGENT</span>':'')
-              +'</div>'
-              +'<div style="font-size:14px;font-weight:700;margin-bottom:3px">'+item.title+'</div>'
-              +(item.description?'<div style="font-size:12px;color:var(--muted)">'+item.description+'</div>':'')
-              +'<div style="font-size:11px;color:var(--dim);margin-top:6px">'
-              +(item.assigned_to?'👤 '+item.assigned_to+' · ':'')
-              +(item.due_date?'📅 Due: '+fmtD(item.due_date):'')
-              +'</div></div>'
-              +'<div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">'
-              +(item.photo_url?'<img src="'+item.photo_url+'" style="width:60px;height:60px;object-fit:cover;border-radius:5px;border:1px solid var(--border)">':'')
-              +'<div style="display:flex;gap:5px;margin-top:4px">'
-              +(item.status!=='complete'?'<button class="btn btn-green btn-sm" onclick="completePunchItem(\''+item.id+'\')">✅ Done</button>':'')
-              +'<button class="btn btn-g btn-sm" onclick="editPunchItem(\''+item.id+'\')">✏️</button>'
-              +'<button class="btn btn-red btn-sm" onclick="confirmDel(\'punch item\',function(){delPunchItem(\''+item.id+'\')})">🗑️</button>'
-              +'</div></div></div></div>';
-          }).join('')+'</div>'
-      );
+      +(AJOB?'<button onclick="aiGeneratePunchList()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Generate</button>':'')
+      +'<button onclick="showPunchForm()" class="btn btn-p">+ Add Item</button></div></div>'
+      +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +[{l:'Open Items',v:open.length,c:'var(--amber)'},{l:'Completed',v:done.length,c:'var(--green)'},{l:'Urgent',v:urgent.length,c:'var(--red)'}]
+      .map(function(k){return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:22px;font-weight:800;color:'+k.c+'">'+k.v+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">'+k.l+'</div></div>';}).join('')
+      +'</div>';
+    if(!items.length){
+      html+='<div class="empty"><div class="ei">✅</div><div class="et">No punch list items</div>'
+        +'<div style="color:var(--dim);font-size:12px;margin:8px 0 16px">Add items manually or let AI generate from job scope</div>'
+        +(AJOB?'<button onclick="aiGeneratePunchList()" class="btn btn-p">🤖 AI Generate Punch List</button>':'')+'</div>';
+    } else {
+      ['urgent','high','normal','low'].forEach(function(pri){
+        var grp=open.filter(function(i){return (i.priority||'normal')===pri;});
+        if(!grp.length) return;
+        var priColor={urgent:'var(--red)',high:'var(--amber)',normal:'var(--teal)',low:'var(--muted)'}[pri]||'var(--muted)';
+        html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:'+priColor+';margin:12px 0 6px">'+pri+' ('+grp.length+')</div>';
+        grp.forEach(function(pl){
+          html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;border-left:3px solid '+priColor+'">'
+            +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+            +'<div style="flex:1"><div style="font-weight:700;font-size:13px">'+pl.title+'</div>'
+            +(pl.description?'<div style="font-size:12px;color:var(--muted);margin-top:3px">'+pl.description+'</div>':'')
+            +(pl.assigned_to?'<div style="font-size:11px;color:var(--blue);margin-top:4px">👤 '+pl.assigned_to+'</div>':'')
+            +(pl.due_date?'<div style="font-size:11px;color:var(--muted);margin-top:2px">📅 Due: '+pl.due_date+'</div>':'')
+            +'</div>'
+            +'<div style="display:flex;gap:6px;margin-left:12px">'
+            +'<button data-plid="'+pl.id+'" onclick="completePunchItem(this.dataset.plid)" style="font-size:11px;padding:4px 10px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit;font-weight:700">✓ Done</button>'
+            +'<button data-plid="'+pl.id+'" onclick="delRecord(this.dataset.plid,\'punch_list\',pgPunchList)" style="font-size:11px;padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
+            +'</div></div></div>';
+        });
+      });
+      if(done.length){
+        html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--green);margin:12px 0 6px">COMPLETE ('+done.length+')</div>';
+        done.slice(0,5).forEach(function(pl){
+          html+='<div style="background:#f9fafb;border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;margin-bottom:6px;opacity:0.7">'
+            +'<div style="display:flex;justify-content:space-between"><div style="font-weight:700;font-size:12px;text-decoration:line-through;color:var(--muted)">'+pl.title+'</div>'
+            +'<div style="font-size:10px;color:var(--green)">✓ Done</div></div></div>';
+        });
+      }
+    }
+    $('content').innerHTML=html;
   }catch(e){$('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';}
 }
 
-function showPunchForm(existing){
-  var el=document.createElement('div');el.className='ov';el.id='punch-form';
-  el.innerHTML='<div class="modal"><div class="mh"><div class="mt">'+(existing?'✏️ Edit':'+ New')+' Punch List Item</div>'
-    +'<button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
-    +'<div class="fr"><label>Item Title *</label><input id="pf-title" value="'+(existing&&existing.title||'')+'" placeholder="e.g. Paint touch-up — master bedroom door"></div>'
-    +'<div class="fr"><label>Description</label><textarea id="pf-desc">'+(existing&&existing.description||'')+'</textarea></div>'
-    +'<div class="f2"><div class="fr"><label>Assigned To (Sub)</label><input id="pf-sub" value="'+(existing&&existing.assigned_to||'')+'" placeholder="e.g. Miguel Santos — Drywall"></div>'
-    +'<div class="fr"><label>Due Date</label><input type="date" id="pf-due" value="'+(existing&&existing.due_date||'')+'"></div></div>'
-    +'<div class="f2"><div class="fr"><label>Priority</label><select id="pf-pri"><option '+(existing&&existing.priority==='urgent'?'selected':'')+'>urgent</option><option '+(existing&&existing.priority==='high'?'selected':'')+'>high</option><option '+((!existing||existing.priority==='normal')?'selected':'')+'>normal</option><option '+(existing&&existing.priority==='low'?'selected':'')+'>low</option></select></div>'
-    +'<div class="fr"><label>Status</label><select id="pf-status"><option '+((!existing||existing.status==='open')?'selected':'')+'>open</option><option '+(existing&&existing.status==='in_progress'?'selected':'')+'>in_progress</option><option '+(existing&&existing.status==='complete'?'selected':'')+'>complete</option></select></div></div>'
-    +'<div class="fr"><label>📸 Photo (optional)</label><input type="file" id="pf-photo" accept="image/*"></div>'
-    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-    +'<button class="btn btn-p" onclick="savePunchItem('+(existing?'\''+existing.id+'\'':'')+')">Save Item</button></div></div>';
-  document.body.appendChild(el);
+
+async function completePunchItem(id){
+  await dbUpd('punch_list',id,{status:'complete',completed_at:new Date().toISOString()});
+  await auditLog('punch_list',id,'punch_completed','open','complete',false,'Punch item marked complete');
+  toast('Item marked complete ✅','ok');
+  pgPunchList();
 }
+
+async function aiGeneratePunchList(){
+  if(!AJOB){toast('Select a job first','err');return;}
+  toast('🤖 AI generating punch list from job scope...','ok',8000);
+  try{
+    var sched=await dbGet('schedule','?job_id=eq.'+AJOB.id);
+    var ctx='Job: '+AJOB.job_name+'\nType: '+(AJOB.job_type||'General')+'\nPhase: '+(AJOB.current_phase||'Unknown')+'\nProgress: '+(AJOB.progress_pct||0)+'%\nSchedule phases: '+(sched.map(function(s){return s.phase_name+' ('+s.percent_complete+'%)';}).join(', ')||'None');
+    var r=await ai('Generate a realistic punch list for this construction job.\n'+ctx+'\nReturn ONLY JSON array: [{"title":"item","priority":"urgent|high|normal|low","description":"detail","assigned_to":"trade"}]\nInclude 8-12 items covering final inspections, touch-ups, cleaning, documentation, and client walkthrough items.','Return ONLY valid JSON array.',1000);
+    var items=safeJSON(r);
+    if(!Array.isArray(items)){toast('AI failed — try again','err');return;}
+    for(var i=0;i<items.length;i++){
+      await dbIns('punch_list',{title:items[i].title,description:items[i].description||'',priority:items[i].priority||'normal',assigned_to:items[i].assigned_to||'',job_id:AJOB.id,status:'open'});
+    }
+    toast('✅ '+items.length+' punch list items generated','ok');
+    pgPunchList();
+  }catch(e){toast('AI punch list error: '+e.message,'err');}
+}
+
+
 
 async function savePunchItem(existingId){
   var title=$('pf-title').value.trim();
@@ -5153,52 +5209,99 @@ async function aiGeneratePunchList(){
 async function pgRFIs(){
   var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=created_at.desc':'?order=created_at.desc';
   try{
-    var rfis=await dbGet('rfis',jf);
+    var rfis=await dbGet('rfis',jf)||[];
+    var jobs=await dbGet('jobs','?order=job_name.asc')||[];
     var open=rfis.filter(function(r){return r.status==='open';});
-    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    var answered=rfis.filter(function(r){return r.status==='answered';});
+    var closed=rfis.filter(function(r){return r.status==='closed';});
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
       +'<div><div style="font-size:18px;font-weight:800">❓ RFI Log</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+rfis.length+' RFIs · <span style="color:var(--red);font-weight:700">'+open.length+' open</span></div></div>'
-      +'<button class="btn btn-p" onclick="showRFIForm()">+ New RFI</button></div>'
-      +(!rfis.length
-        ?'<div class="empty"><div class="ei">❓</div><div class="et">No RFIs yet</div><div style="font-size:12px;color:var(--dim);margin:8px 0">Use RFIs when a field question needs an official answer from the client or architect</div></div>'
-        :'<table style="width:100%;border-collapse:collapse;font-size:13px">'
-          +'<thead><tr style="background:#f6f8fa"><th style="padding:9px 10px;text-align:left">RFI #</th><th style="padding:9px 10px;text-align:left">Subject</th><th style="padding:9px 10px;text-align:left">From</th><th style="padding:9px 10px;text-align:left">Due</th><th style="padding:9px 10px;text-align:left">Status</th><th style="padding:9px 10px">Actions</th></tr></thead>'
-          +'<tbody>'+rfis.map(function(r){
-            var overdue=r.due_date&&new Date(r.due_date)<new Date()&&r.status==='open';
-            return '<tr style="border-bottom:1px solid var(--border);background:'+(overdue?'#fff5f5':'#fff')+'">'
-              +'<td style="padding:9px 10px;font-weight:800;color:var(--teal)">RFI-'+String(r.rfi_number||'000').padStart(3,'0')+'</td>'
-              +'<td style="padding:9px 10px"><div style="font-weight:600">'+r.subject+'</div><div style="font-size:11px;color:var(--muted)">'+( r.description||'').substring(0,60)+'</div></td>'
-              +'<td style="padding:9px 10px;font-size:11px;color:var(--muted)">'+( r.submitted_by||'Feishy')+'</td>'
-              +'<td style="padding:9px 10px;color:'+(overdue?'var(--red)':'var(--text)')+'">'+fmtD(r.due_date)+(overdue?'<div style="font-size:10px;color:var(--red);font-weight:700">OVERDUE</div>':'')+'</td>'
-              +'<td style="padding:9px 10px">'+statusBadge(r.status||'open')+'</td>'
-              +'<td style="padding:9px 10px;text-align:center"><div style="display:flex;gap:4px;justify-content:center">'
-              +(r.status==='open'?'<button class="btn btn-green btn-sm" onclick="closeRFI(\''+r.id+'\')">✅ Close</button>':'')
-              +'<button class="btn btn-g btn-sm" onclick="viewRFI(\''+r.id+'\')">👁️</button>'
-              +'<button class="btn btn-red btn-sm" onclick="confirmDel(\'RFI\',function(){delRecord(\'rfis\',\''+r.id+'\',pgRFIs)})">🗑️</button>'
-              +'</div></td></tr>';
-          }).join('')+'</tbody></table>'
-      );
+      +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+open.length+' open · '+answered.length+' answered · '+closed.length+' closed</div></div>'
+      +'<button onclick="showRFIForm()" class="btn btn-p">+ New RFI</button></div>'
+      +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--red)">'+open.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Open</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">'+answered.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Answered</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+closed.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Closed</div></div>'
+      +'</div>';
+    if(!rfis.length){
+      html+='<div class="empty"><div class="ei">❓</div><div class="et">No RFIs yet</div>'
+        +'<div style="color:var(--dim);font-size:12px;margin-top:8px">Log questions, clarifications, and design queries</div></div>';
+    } else {
+      rfis.forEach(function(rfi){
+        var sc={open:'var(--red)',answered:'var(--amber)',closed:'var(--green)'}[rfi.status]||'var(--muted)';
+        var job=jobs.find(function(j){return j.id===rfi.job_id;})||{};
+        html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:3px solid '+sc+'">'
+          +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
+          +'<div><div style="font-size:11px;font-weight:800;color:var(--muted)">'+(job.job_name||'General')+'</div>'
+          +'<div style="font-size:14px;font-weight:800;margin-top:2px">'+rfi.title+'</div>'
+          +(rfi.directed_to?'<div style="font-size:11px;color:var(--muted);margin-top:3px">To: '+rfi.directed_to+'</div>':'')
+          +'</div>'
+          +'<div style="display:flex;align-items:center;gap:6px">'
+          +'<span style="font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px;background:'+sc+';color:#fff">'+rfi.status+'</span>'
+          +(rfi.status==='open'?'<button class="cs-rfi-ai btn btn-p btn-sm" data-id="'+rfi.id+'">🤖 AI</button>':'')
+          +'<button class="cs-rfi-close btn btn-g btn-sm" data-id="'+rfi.id+'">✓ Close</button>'
+          +'<button class="cs-del btn-sm" data-table="rfis" data-id="'+rfi.id+'" style="padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px">✕</button>'
+          +'</div></div>'
+          +'<div style="font-size:13px;color:var(--text);line-height:1.7">'+rfi.question+'</div>'
+          +(rfi.answer?'<div style="background:var(--teal-light);border:1px solid var(--teal);border-radius:6px;padding:10px;font-size:12px;margin-top:8px"><b style="color:var(--teal)">Answer: </b>'+rfi.answer+'</div>':'')
+          +'<div style="font-size:10px;color:var(--dim);margin-top:6px">'+fmtD(rfi.created_at)+'</div>'
+          +'</div>';
+      });
+    }
+    $('content').innerHTML=html;
+    // Event delegation - safe onclick without ID escaping
+    $('content').addEventListener('click',function(e){
+      var aiBtn=e.target.closest('.cs-rfi-ai');
+      var closeBtn=e.target.closest('.cs-rfi-close');
+      var delBtn=e.target.closest('.cs-del');
+      if(aiBtn){aiAnswerRFI(aiBtn.dataset.id);}
+      else if(closeBtn){closeRFI(closeBtn.dataset.id);}
+      else if(delBtn){delRecord(delBtn.dataset.id,delBtn.dataset.table,pgRFIs);}
+    },{once:true});
   }catch(e){$('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';}
 }
 
-function showRFIForm(){
-  var rfis=lsAll('rfis');
-  var nextNum=rfis.length+1;
-  var el=document.createElement('div');el.className='ov';el.id='rfi-form';
-  el.innerHTML='<div class="modal modal-lg"><div class="mh"><div><div class="mt">❓ New RFI</div><div class="ms">Request for Information — formal question requiring an official answer</div></div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
-    +'<div class="f2"><div class="fr"><label>RFI Number</label><input id="rfi-num" value="'+nextNum+'" type="number"></div>'
-    +'<div class="fr"><label>Date</label><input type="date" id="rfi-date" value="'+new Date().toISOString().split('T')[0]+'"></div></div>'
-    +'<div class="fr"><label>Subject *</label><input id="rfi-sub" placeholder="e.g. Clarification on beam size at grid line B-4"></div>'
-    +'<div class="fr"><label>Question / Description *</label><textarea id="rfi-desc" style="min-height:100px" placeholder="Describe the question in detail. What is unclear? What decision is needed?"></textarea></div>'
-    +'<div class="f2"><div class="fr"><label>Submitted By</label><input id="rfi-by" value="Feishy Felberbaum — Corestone Developers"></div>'
-    +'<div class="fr"><label>Answer Required From</label><input id="rfi-to" placeholder="e.g. Howard Klein (Architect)"></div></div>'
-    +'<div class="f2"><div class="fr"><label>Date Answer Needed</label><input type="date" id="rfi-due" value="'+new Date(Date.now()+7*86400000).toISOString().split('T')[0]+'"></div>'
-    +'<div class="fr"><label>Priority</label><select id="rfi-pri"><option>urgent</option><option selected>normal</option><option>low</option></select></div></div>'
-    +'<div class="fr"><label>🤖 AI Draft the Question</label><button class="btn btn-g btn-sm" onclick="aiDraftRFI()" style="margin-top:4px">Generate professional RFI text</button></div>'
-    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-    +'<button class="btn btn-p" onclick="saveRFI()">Submit RFI</button></div></div>';
-  document.body.appendChild(el);
+
+async function saveRFI(){
+  var title=($('rfi-title')||{}).value||'';
+  var q=($('rfi-q')||{}).value||'';
+  if(!title.trim()||!q.trim()){toast('Title and question required','err');return;}
+  var jobId=AJOB?AJOB.id:(($('rfi-job')||{}).value||null);
+  var rfiNum='RFI-'+String((lsAll('rfis').length+1)).padStart(3,'0');
+  await dbIns('rfis',{
+    title:title.trim(),question:q.trim(),status:'open',
+    directed_to:($('rfi-to')||{}).value||'',
+    date_required:($('rfi-due')||{}).value||null,
+    job_id:jobId,rfi_number:rfiNum
+  });
+  await addToGatekeeper('rfi_open','New RFI: '+title,'RFI submitted: '+q.substring(0,100)+'...','high','Review and route to appropriate party for answer.','rfi_open',null);
+  await auditLog('rfis',null,'rfi_created',null,'open',false,'RFI created: '+title);
+  toast('RFI submitted ✅','ok');
+  var ov=document.getElementById('rfi-ov');if(ov)ov.remove();
+  pgRFIs();
 }
+
+async function aiAnswerRFI(id){
+  var rfis=await dbGet('rfis','?id=eq.'+id);
+  var rfi=rfis[0];if(!rfi)return;
+  toast('🤖 AI drafting answer...','ok',8000);
+  try{
+    var r=await ai('Draft a professional answer to this construction RFI.\nProject: '+(AJOB?AJOB.job_name:'Unknown')+'RFI: '+rfi.title+'\nQuestion: '+rfi.question+'\nProvide a clear, technically accurate answer that a licensed GC would give. 2-4 sentences. Be specific.','Construction RFI response expert. Be technically precise.');
+    await dbUpd('rfis',id,{answer:r,status:'answered',answered_at:new Date().toISOString(),answered_by:'AI — Review before sending'});
+    await auditLog('rfis',id,'rfi_answered','open','answered',true,'AI drafted answer for RFI');
+    toast('AI answer drafted — review before sending ✅','ok');
+    pgRFIs();
+  }catch(e){toast('AI answer failed: '+e.message,'err');}
+}
+
+async function closeRFI(id){
+  await dbUpd('rfis',id,{status:'closed',closed_at:new Date().toISOString()});
+  await auditLog('rfis',id,'rfi_closed',null,'closed',false,'RFI closed');
+  toast('RFI closed','ok');
+  pgRFIs();
+}
+
+
 
 async function aiDraftRFI(){
   var sub=$('rfi-sub').value.trim()||'construction detail';
@@ -5292,48 +5395,85 @@ async function uploadPhoto(input){
 async function pgPhotoLog(){
   var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=created_at.desc':'?order=created_at.desc&limit=50';
   try{
-    var photos=await dbGet('photos',jf);
-    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    var photos=await dbGet('photos',jf)||[];
+    var phaseGroups={};
+    photos.forEach(function(p){var ph=p.phase||'General';if(!phaseGroups[ph])phaseGroups[ph]=[];phaseGroups[ph].push(p);});
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
       +'<div><div style="font-size:18px;font-weight:800">📸 Photo Log</div>'
       +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+photos.length+' photos</div></div>'
-      +'<div style="display:flex;gap:8px">'
-      +'<button class="btn btn-g btn-sm" onclick="show360Capture()">🌐 360° Photo</button>'
-      +'<button class="btn btn-p" onclick="showPhotoUpload()">📷 Add Photos</button></div></div>'
-      +(!photos.length
-        ?'<div class="empty"><div class="ei">📸</div><div class="et">No photos yet</div><div style="font-size:12px;color:var(--dim);margin:8px 0">Daily photos keep clients happy and protect you in disputes</div></div>'
-        :'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">'
-          +photos.map(function(p){
-            return '<div style="position:relative;cursor:pointer;border-radius:var(--radius);overflow:hidden;aspect-ratio:4/3;background:#f1f5f9;border:1px solid var(--border)" onclick="viewPhoto(\''+p.id+'\')">'
-              +(p.url?'<img src="'+p.url+'" style="width:100%;height:100%;object-fit:cover" onerror="this.src=\'\'">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:32px">📷</div>')
-              +'<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);padding:5px 7px">'
-              +'<div style="font-size:10px;color:#fff;font-weight:600">'+( p.phase||'')+'</div>'
-              +'<div style="font-size:9px;color:rgba(255,255,255,0.7)">'+fmtD(p.created_at)+'</div></div>'
-              +(p.is_360?'<div style="position:absolute;top:6px;right:6px;background:var(--teal);color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:8px">360°</div>':'')
-              +'<div style="position:absolute;top:6px;left:6px;display:flex;gap:3px">'
-              +'<button onclick="event.stopPropagation();confirmDel(\'photo\',function(){delRecord(\'photos\',\''+p.id+'\',pgPhotoLog)})" style="background:rgba(220,38,38,0.8);border:none;color:#fff;width:20px;height:20px;border-radius:50%;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center">×</button>'
-              +'</div></div>';
-          }).join('')+'</div>'
-      );
+      +'<button onclick="showPhotoForm()" class="btn btn-p">+ Add Photo</button></div>';
+    if(!photos.length){
+      html+='<div class="empty"><div class="ei">📸</div><div class="et">No photos yet</div>'
+        +'<button onclick="showPhotoForm()" class="btn btn-p" style="margin-top:12px">+ Add First Photo</button></div>';
+    } else {
+      Object.keys(phaseGroups).forEach(function(phase){
+        var grp=phaseGroups[phase];
+        html+='<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--teal);margin:14px 0 8px">'+phase+' ('+grp.length+')</div>';
+        html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px">';
+        grp.forEach(function(photo){
+          var issue=photo.ai_flag==='issue';
+          html+='<div style="background:var(--card);border:1px solid '+(issue?'var(--red)':'var(--border)')+';border-radius:var(--radius);overflow:hidden">'
+            +(photo.url&&photo.url!=='#'?'<img src="'+photo.url+'" style="width:100%;height:140px;object-fit:cover" onerror="this.style.display=\'none\'">':'<div style="height:140px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:32px">📸</div>')
+            +'<div style="padding:10px">'
+            +'<div style="font-size:12px;font-weight:700">'+(photo.caption||'Photo')+'</div>'
+            +'<div style="font-size:10px;color:var(--muted)">'+fmtD(photo.created_at)+'</div>'
+            +(photo.ai_notes?'<div style="font-size:10px;color:var(--teal);margin-top:4px">🤖 '+photo.ai_notes.substring(0,50)+'</div>':'')
+            +'<div style="display:flex;gap:4px;margin-top:8px">'
+            +'<button class="cs-photo-ai btn-sm" data-id="'+photo.id+'" style="flex:1;font-size:10px;padding:4px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:3px;cursor:pointer;font-family:inherit">🤖 Analyze</button>'
+            +'<button class="cs-del btn-sm" data-table="photos" data-id="'+photo.id+'" style="font-size:10px;padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:3px;cursor:pointer;font-family:inherit">✕</button>'
+            +'</div></div></div>';
+        });
+        html+='</div>';
+      });
+    }
+    $('content').innerHTML=html;
+    $('content').addEventListener('click',function(e){
+      var ai=e.target.closest('.cs-photo-ai');
+      var del=e.target.closest('.cs-del');
+      if(ai){aiAnalyzePhoto(ai.dataset.id);}
+      else if(del){delRecord(del.dataset.id,del.dataset.table,pgPhotoLog);}
+    },{once:true});
   }catch(e){$('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';}
 }
 
-function showPhotoUpload(){
-  var el=document.createElement('div');el.className='ov';el.id='photo-up';
-  el.innerHTML='<div class="modal"><div class="mh"><div><div class="mt">📷 Add Photos</div><div class="ms">Select multiple photos at once</div></div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
-    +'<div class="fr"><label>Phase / Area *</label><select id="ph-phase"><option>Pre-Construction</option><option>Demo</option><option>Foundation</option><option>Framing</option><option>Roofing</option><option>Rough Electrical</option><option>Rough Plumbing</option><option>HVAC</option><option>Insulation</option><option>Drywall</option><option>Finish Carpentry</option><option>Tile & Flooring</option><option>Paint</option><option>Kitchen & Baths</option><option>Punch List</option><option>Complete</option></select></div>'
-    +'<div class="fr"><label>Caption (optional)</label><input id="ph-cap" placeholder="e.g. Second floor framing progress"></div>'
-    +'<div class="fr"><label>Upload Photos *</label><input type="file" id="ph-files" accept="image/*" multiple style="padding:8px"></div>'
-    +'<div id="ph-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>'
-    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="savePhotos()">💾 Save Photos</button></div></div>';
-  document.body.appendChild(el);
-  document.getElementById('ph-files').addEventListener('change',function(e){
-    var prev=$('ph-preview');prev.innerHTML='';
-    Array.from(e.target.files).forEach(function(f){
-      var url=URL.createObjectURL(f);
-      prev.innerHTML+='<img src="'+url+'" style="width:80px;height:60px;object-fit:cover;border-radius:5px;border:1px solid var(--border)">';
-    });
+
+async function savePhoto(){
+  var url=($('ph-url')||{}).value||'';
+  if(!url.trim()){toast('URL required','err');return;}
+  var jobId=AJOB?AJOB.id:(($('ph-job')||{}).value||null);
+  await dbIns('photos',{
+    url:url.trim(),caption:($('ph-cap')||{}).value||'',
+    phase:($('ph-phase')||{}).value||'General',
+    notes:($('ph-notes')||{}).value||'',
+    job_id:jobId,ai_flag:'none'
   });
+  await auditLog('photos',null,'photo_added',null,'added',false,'Photo added: '+($('ph-cap')||{}).value);
+  toast('Photo saved ✅','ok');
+  var ov=document.getElementById('photo-ov');if(ov)ov.remove();
+  pgPhotoLog();
 }
+
+async function aiAnalyzePhoto(id){
+  var photos=await dbGet('photos','?id=eq.'+id);
+  var photo=photos[0];if(!photo)return;
+  toast('🤖 Analyzing photo...','ok',8000);
+  try{
+    var r=await ai('Analyze this construction photo description and provide quality assessment.\nCaption: '+(photo.caption||'Unknown')+'\nPhase: '+(photo.phase||'Unknown')+'\nNotes: '+(photo.notes||'None')+'\nJob: '+(AJOB?AJOB.job_name:'Unknown')+'\nReturn JSON: {"quality":"good|acceptable|issue","flag":"none|review|issue","notes":"brief quality observation","action_needed":"what to do if issue"}','Construction photo analyst. Return ONLY JSON.',400);
+    var d=safeJSON(r);
+    if(d){
+      await dbUpd('photos',id,{ai_quality:d.quality,ai_flag:d.flag||'none',ai_notes:d.notes,ai_action:d.action_needed});
+      if(d.flag==='issue'){
+        await addToGatekeeper('photo_issue','Photo issue flagged: '+(photo.caption||'Photo'),'AI flagged a quality issue in photo. Phase: '+photo.phase+'. '+d.notes+'. Action: '+d.action_needed,'high','Review photo and determine corrective action.','photo_issue',id);
+        toast('⚠️ Issue flagged — queued in Gatekeeper','err');
+      } else {
+        toast('Photo analyzed: '+d.quality,'ok');
+      }
+      pgPhotoLog();
+    }
+  }catch(e){toast('Analysis failed: '+e.message,'err');}
+}
+
+
 
 async function savePhotos(){
   var files=$('ph-files').files;
@@ -5519,46 +5659,72 @@ async function generateLienWaiver(subId, jobId, amount){
 async function pgLienWaivers(){
   var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=created_at.desc':'?order=created_at.desc';
   try{
-    var waivers=await dbGet('lien_waivers',jf);
-    var unsigned=waivers.filter(function(w){return w.status!=='signed';});
-    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
-      +'<div><div style="font-size:18px;font-weight:800">📜 Lien Waivers</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+waivers.length+' total · <span style="color:'+(unsigned.length?'var(--red)':'var(--green)')+';font-weight:700">'+unsigned.length+' unsigned</span></div></div>'
-      +'<button class="btn btn-p" onclick="generateLienWaiver()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;margin-right:8px">AI Waiver</button><button class="btn btn-p" onclick="showLienForm()">+ Manual</button></div>'
-      +(unsigned.length?'<div style="background:var(--red-bg);border:1.5px solid var(--red);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px"><strong style="color:var(--red)">⚠️ '+unsigned.length+' lien waivers not yet signed</strong> — never release final payment without a signed lien waiver from every sub.</div>':'')
-      +(!waivers.length
-        ?'<div class="empty"><div class="ei">📜</div><div class="et">No lien waivers yet</div><div style="font-size:12px;color:var(--dim);margin:8px 0">Create a lien waiver before releasing payment to any sub. It protects the owner from future claims.</div></div>'
-        :'<table style="width:100%;border-collapse:collapse;font-size:13px">'
-          +'<thead><tr style="background:#f6f8fa"><th style="padding:9px 10px;text-align:left">Sub / Company</th><th style="padding:9px 10px;text-align:left">Type</th><th style="padding:9px 10px;text-align:right">Amount</th><th style="padding:9px 10px;text-align:left">Status</th><th style="padding:9px 10px;text-align:left">Date Signed</th><th style="padding:9px 10px">Actions</th></tr></thead>'
-          +'<tbody>'+waivers.map(function(w){
-            return '<tr style="border-bottom:1px solid var(--border)">'
-              +'<td style="padding:9px 10px;font-weight:700">'+w.sub_name+'</td>'
-              +'<td style="padding:9px 10px"><span style="font-size:11px;color:var(--muted)">'+( w.waiver_type||'Conditional')+'</span></td>'
-              +'<td style="padding:9px 10px;text-align:right;font-weight:700;color:var(--teal)">'+fmt$(w.amount)+'</td>'
-              +'<td style="padding:9px 10px">'+statusBadge(w.status||'pending')+'</td>'
-              +'<td style="padding:9px 10px;font-size:11px;color:var(--muted)">'+( w.signed_date?fmtD(w.signed_date):'—')+'</td>'
-              +'<td style="padding:9px 10px;text-align:center"><div style="display:flex;gap:4px;justify-content:center">'
-              +(w.status!=='signed'?'<button class="btn btn-green btn-sm" onclick="signLienWaiver(\''+w.id+'\')">✍️ Sign</button>':'')
-              +'<button class="btn btn-red btn-sm" onclick="confirmDel(\'lien waiver\',function(){delRecord(\'lien_waivers\',\''+w.id+'\',pgLienWaivers)})">🗑️</button>'
-              +'</div></td></tr>';
-          }).join('')+'</tbody></table>'
-      );
+    var waivers=await dbGet('lien_waivers',jf)||[];
+    var jobs=await dbGet('jobs','?order=job_name.asc')||[];
+    var unsigned=waivers.filter(function(w){return w.status!=='signed'&&w.status!=='received';});
+    var signed=waivers.filter(function(w){return w.status==='signed'||w.status==='received';});
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+      +'<div><div style="font-size:18px;font-weight:800">📋 Lien Waivers</div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+unsigned.length+' pending · '+signed.length+' received</div></div>'
+      +'<button onclick="showLienForm()" class="btn btn-p">+ New Waiver</button></div>'
+      +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">'+unsigned.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pending</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+signed.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Received</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">'+waivers.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total</div></div>'
+      +'</div>';
+    if(!waivers.length){
+      html+='<div class="empty"><div class="ei">📋</div><div class="et">No lien waivers yet</div></div>';
+    } else {
+      waivers.forEach(function(w){
+        var job=jobs.find(function(j){return j.id===w.job_id;})||{};
+        var sc={sent:'var(--blue)',pending:'var(--amber)',signed:'var(--green)',received:'var(--green)',overdue:'var(--red)'}[w.status]||'var(--muted)';
+        html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">'
+          +'<div><div style="font-weight:700;font-size:13px">'+(w.company_name||'Sub/Supplier')+'</div>'
+          +'<div style="font-size:11px;color:var(--muted)">'+(job.job_name||'General')+' · '+(w.waiver_type||'Waiver')+'</div>'
+          +(w.amount?'<div style="font-size:12px;font-weight:700;color:var(--teal)">'+fmt$(w.amount)+'</div>':'')+'</div>'
+          +'<div style="display:flex;align-items:center;gap:6px">'
+          +'<span style="font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px;background:'+sc+';color:#fff">'+(w.status||'pending')+'</span>'
+          +(w.status!=='signed'&&w.status!=='received'?'<button class="cs-lien-rcv btn btn-g btn-sm" data-id="'+w.id+'">✓ Received</button>':'')
+          +'<button class="cs-del" data-table="lien_waivers" data-id="'+w.id+'" style="font-size:11px;padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
+          +'</div></div>';
+      });
+    }
+    $('content').innerHTML=html;
+    $('content').addEventListener('click',function(e){
+      var rcv=e.target.closest('.cs-lien-rcv');
+      var del=e.target.closest('.cs-del');
+      if(rcv){markWaiverReceived(rcv.dataset.id);}
+      else if(del){delRecord(del.dataset.id,del.dataset.table,pgLienWaivers);}
+    },{once:true});
   }catch(e){$('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';}
 }
 
-function showLienForm(){
-  var subs=lsAll('subcontractors');
-  var el=document.createElement('div');el.className='ov';el.id='lien-form';
-  el.innerHTML='<div class="modal"><div class="mh"><div><div class="mt">📜 Create Lien Waiver</div></div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
-    +'<div class="fr"><label>Subcontractor *</label><select id="lf-sub"><option value="">Select sub...</option>'+subs.map(function(s){return '<option>'+s.company_name+'</option>';}).join('')+'</select></div>'
-    +'<div class="f2"><div class="fr"><label>Waiver Type</label><select id="lf-type"><option>Conditional Partial</option><option>Unconditional Partial</option><option>Conditional Final</option><option>Unconditional Final</option></select></div>'
-    +'<div class="fr"><label>Payment Amount *</label><input type="number" id="lf-amt" placeholder="0.00"></div></div>'
-    +'<div class="f2"><div class="fr"><label>Payment Date</label><input type="date" id="lf-date" value="'+new Date().toISOString().split('T')[0]+'"></div>'
-    +'<div class="fr"><label>Through Date</label><input type="date" id="lf-thru" value="'+new Date().toISOString().split('T')[0]+'"></div></div>'
-    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-    +'<button class="btn btn-p" onclick="saveLienWaiver()">Create Waiver</button></div></div>';
-  document.body.appendChild(el);
+
+async function saveLienWaiver(){
+  var co=($('lw-co')||{}).value||'';
+  if(!co.trim()){toast('Company required','err');return;}
+  var jobId=AJOB?AJOB.id:(($('lw-job')||{}).value||null);
+  await dbIns('lien_waivers',{
+    company_name:co.trim(),
+    waiver_type:($('lw-type')||{}).value||'Conditional Waiver',
+    amount:parseFloat(($('lw-amt')||{}).value)||0,
+    due_date:($('lw-due')||{}).value||null,
+    job_id:jobId,status:'pending'
+  });
+  await auditLog('lien_waivers',null,'waiver_created',null,'pending',false,'Lien waiver created: '+co);
+  toast('Lien waiver added ✅','ok');
+  var ov=document.getElementById('lien-ov');if(ov)ov.remove();
+  pgLienWaivers();
 }
+
+async function markWaiverReceived(id){
+  await dbUpd('lien_waivers',id,{status:'received',received_at:new Date().toISOString()});
+  await auditLog('lien_waivers',id,'waiver_received','pending','received',false,'Lien waiver marked received');
+  toast('Waiver marked received ✅','ok');
+  pgLienWaivers();
+}
+
+
 
 async function saveLienWaiver(){
   var sub=$('lf-sub').value;var amt=$('lf-amt').value;
@@ -6489,59 +6655,81 @@ async function aiSuggestTasks(){
 }
 
 async function pgSelections(){
-  var jobs=await dbGet('jobs','?order=job_name.asc');
-  var sels=await dbGet('selections','?order=created_at.desc');
-  if(!sels) sels=[];
-  var cats=['Tile & Flooring','Cabinets','Countertops','Fixtures & Plumbing','Lighting','Hardware','Paint Colors','Appliances','Windows & Doors','Exterior'];
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Client Selections</div>'
-    +'<div style="font-size:12px;color:var(--muted)">Track every finish, fixture, and material choice per job</div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="voiceSelection()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Selection</button>'
-    +'<button onclick="showSelForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Add Selection</button></div></div>'
-    +'<div id="sel-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Selection<button onclick="$(\'sel-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
-    +'<select id="nsel-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">Select job...</option>'
-    +jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Category</div>'
-    +'<select id="nsel-cat" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
-    +cats.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Status</div>'
-    +'<select id="nsel-status" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
-    +'<option>Pending Client</option><option>Client Selected</option><option>Ordered</option><option>Delivered</option><option>Installed</option></select></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Item Description</div>'
-    +'<div style="display:flex;gap:6px"><input id="nsel-item" placeholder="e.g. 12x24 Carrara marble tile, polished" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
-    +'<button onclick="micFillField(\'nsel-item\',\'Describe the selection item, brand, model, color\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Supplier</div><input id="nsel-supplier" placeholder="Tile America, Home Depot..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Unit Cost $</div><input id="nsel-cost" type="number" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Lead Time</div><input id="nsel-lead" placeholder="e.g. 2 weeks" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="saveSelection()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Selection</button>'
-    +'<button onclick="aiSuggestSelections()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Suggest Options</button>'
-    +'</div></div>'
-    // Group by category
-    +cats.map(function(cat){
-      var catSels=sels.filter(function(s){return s.category===cat;});
-      if(!catSels.length) return '';
-      var sColors={'Pending Client':'var(--amber)','Client Selected':'var(--blue)','Ordered':'var(--teal)','Delivered':'var(--green)','Installed':'var(--green)'};
-      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden">'
-        +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase">'+cat+' <span style="color:var(--muted);font-weight:400">('+catSels.length+')</span></div>'
-        +catSels.map(function(s){
-          return '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">'
-            +'<div style="flex:1"><div style="font-weight:700;font-size:13px">'+s.item_description+'</div>'
-            +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(s.supplier||'')+(s.lead_time?' · '+s.lead_time:'')+' · $'+(s.unit_cost||0)+'/unit</div></div>'
-            +'<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:'+(sColors[s.status]||'var(--muted)')+';color:#fff">'+s.status+'</span>'
-            +'<button onclick="cycleSelStatus(\''+s.id+'\',\''+s.status+'\')" style="font-size:11px;padding:4px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-family:inherit">Next →</button>'
-            +'</div>';
-        }).join('')+'</div>';
-    }).join('')
-    +(sels.length===0?'<div style="padding:40px;text-align:center;color:var(--dim)">No selections yet — add your first one above.</div>':'');
-  try{$('content').innerHTML=html;}catch(e){logErr('pgSelections',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgSelections()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
+  var jobs=await dbGet('jobs','?order=job_name.asc')||[];
+  var sels=await dbGet('selections','?order=created_at.desc')||[];
+  var jSels=AJOB?sels.filter(function(s){return s.job_id===AJOB.id;}):sels;
+  var cats=['Tile & Flooring','Cabinets','Countertops','Fixtures & Plumbing','Lighting','Hardware','Paint Colors','Appliances','Windows & Doors','Roofing','Siding','HVAC Equipment'];
+  var pending=jSels.filter(function(s){return !s.client_approved;});
+  var approved=jSels.filter(function(s){return s.client_approved;});
+  var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    +'<div><div style="font-size:18px;font-weight:800">🎨 Client Selections</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+pending.length+' pending · '+approved.length+' approved</div></div>'
+    +'<button onclick="showSelForm()" class="btn btn-p">+ Add Selection</button></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+    +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">'+pending.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pending</div></div>'
+    +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+approved.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Approved</div></div>'
+    +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">'+jSels.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total</div></div>'
+    +'</div>';
+  if(!jSels.length){
+    html+='<div class="empty"><div class="ei">🎨</div><div class="et">No selections yet</div>'
+      +'<button onclick="showSelForm()" class="btn btn-p" style="margin-top:12px">+ Add First Selection</button></div>';
+  } else {
+    cats.forEach(function(cat){
+      var catSels=jSels.filter(function(s){return s.category===cat;});
+      if(!catSels.length) return;
+      html+='<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--teal);margin:12px 0 6px">'+cat+'</div>';
+      catSels.forEach(function(sel){
+        html+='<div style="background:var(--card);border:1px solid '+(sel.client_approved?'var(--green)':'var(--border)')+';border-radius:var(--radius);padding:12px 14px;margin-bottom:8px">'
+          +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+          +'<div><div style="font-weight:700;font-size:13px">'+sel.item_name+'</div>'
+          +(sel.brand_model?'<div style="font-size:11px;color:var(--blue)">'+sel.brand_model+'</div>':'')
+          +(sel.notes?'<div style="font-size:12px;color:var(--muted);margin-top:3px">'+sel.notes+'</div>':'')
+          +(sel.price?'<div style="font-size:12px;font-weight:700;color:var(--teal)">'+fmt$(sel.price)+'/unit</div>':'')
+          +(sel.lead_time?'<div style="font-size:11px;color:var(--amber)">Lead: '+sel.lead_time+'</div>':'')+'</div>'
+          +'<div style="display:flex;gap:6px;align-items:center;margin-left:10px">'
+          +(sel.client_approved?'<span style="font-size:11px;font-weight:800;color:var(--green)">✓ Approved</span>'
+            :'<button class="cs-sel-approve btn btn-g btn-sm" data-id="'+sel.id+'">✓ Approve</button>')
+          +'<button class="cs-del" data-table="selections" data-id="'+sel.id+'" style="font-size:11px;padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
+          +'</div></div></div>';
+      });
+    });
+  }
+  $('content').innerHTML=html;
+  $('content').addEventListener('click',function(e){
+    var app=e.target.closest('.cs-sel-approve');
+    var del=e.target.closest('.cs-del');
+    if(app){approveSelection(app.dataset.id);}
+    else if(del){delRecord(del.dataset.id,del.dataset.table,pgSelections);}
+  },{once:true});
 }
-function showSelForm(){var f=$('sel-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+
+
+async function saveSelection(){
+  var name=($('sel-name')||{}).value||'';
+  if(!name.trim()){toast('Item name required','err');return;}
+  await dbIns('selections',{
+    item_name:name.trim(),category:($('sel-cat')||{}).value||'General',
+    brand_model:($('sel-brand')||{}).value||'',
+    price:parseFloat(($('sel-price')||{}).value)||0,
+    lead_time:($('sel-lead')||{}).value||'',
+    notes:($('sel-notes')||{}).value||'',
+    job_id:AJOB?AJOB.id:null,client_approved:false
+  });
+  await auditLog('selections',null,'selection_created',null,'pending',false,'Selection added: '+name);
+  toast('Selection saved ✅','ok');
+  var ov=document.getElementById('sel-ov');if(ov)ov.remove();
+  pgSelections();
+}
+
+async function approveSelection(id){
+  await dbUpd('selections',id,{client_approved:true,approved_at:new Date().toISOString(),approved_by:'Feishy Felberbaum'});
+  await auditLog('selections',id,'selection_approved',null,'approved',false,'Client selection approved');
+  toast('Selection approved ✅','ok');
+  pgSelections();
+}
+
+
+
 async function saveSelection(){
   var item=($('nsel-item')||{}).value||'';
   if(!item.trim()){toast('Item description required','err');return;}
@@ -6575,39 +6763,78 @@ async function voiceSelection(){
   if($('sel-form'))$('sel-form').style.display='block';
 }
 async function pgSpecs(){
-  var jobs=await dbGet('jobs','?order=job_name.asc');
-  var specs=await dbGet('specifications','?order=created_at.desc');
-  if(!specs) specs=[];
-  var sections=['General Conditions','Site Work','Concrete','Masonry','Metals','Wood & Plastics','Thermal & Moisture','Doors & Windows','Finishes','Specialties','Equipment','Furnishings','Mechanical','Electrical'];
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Specifications</div>'
-    +'<div style="font-size:12px;color:var(--muted)">Technical requirements and standards per job</div></div>'
+  var jobs=await dbGet('jobs','?order=job_name.asc')||[];
+  var specs=await dbGet('specifications','?order=created_at.desc')||[];
+  var jSpecs=AJOB?specs.filter(function(s){return s.job_id===AJOB.id;}):specs;
+  var sections=['General Conditions','Site Work','Concrete','Masonry','Metals','Wood & Plastics','Thermal & Moisture','Doors & Windows','Finishes','Specialties','Mechanical','Electrical','Plumbing'];
+  var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    +'<div><div style="font-size:18px;font-weight:800">📐 Specifications</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+jSpecs.length+' specs</div></div>'
     +'<div style="display:flex;gap:8px">'
-    +'<button onclick="micFillField(\'nspec-content\',\'Describe this specification requirement in detail\');if($(\'spec-form\'))$(\'spec-form\').style.display=\'block\'" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Spec</button>'
-    +'<button onclick="showSpecForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Add Spec</button>'
-    +'<button onclick="aiGenerateSpecs()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Generate Specs</button></div></div>'
-    +'<div id="spec-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Specification<button onclick="$(\'spec-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div><select id="nspec-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">All Jobs</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Section</div><select id="nspec-section" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'+sections.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Title</div><input id="nspec-title" placeholder="Spec title..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Content / Requirements</div>'
-    +'<div style="display:flex;gap:6px"><textarea id="nspec-content" rows="4" placeholder="Detailed specification requirements..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
-    +'<button onclick="micFillField(\'nspec-content\',\'Describe the specification requirement in detail\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
-    +'<button onclick="saveSpec()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Spec</button></div>'
-    +(specs.length===0?'<div style="padding:40px;text-align:center;color:var(--dim)"><div style="font-size:40px;margin-bottom:12px">📋</div>No specifications yet. Add manually or use AI Generate.</div>'
-    :'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
-    +specs.map(function(s,i){return '<div style="padding:14px 16px;border-bottom:1px solid var(--border);background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
-      +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-      +'<div><span style="font-size:10px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:0.05em">'+s.section+'</span>'
-      +'<div style="font-weight:700;font-size:13px;margin-top:3px">'+s.title+'</div>'
-      +'<div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.6">'+s.content+'</div></div>'
-      +'<button onclick="delRecord(\''+s.id+'\',\'specifications\',pgSpecs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;margin-left:10px;font-family:inherit">✕</button>'
-      +'</div></div>';}).join('')+'</div>');
-  try{$('content').innerHTML=html;}catch(e){logErr('pgSpecs',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgSpecs()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
+    +(AJOB?'<button onclick="aiGenerateSpecs()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Generate</button>':'')
+    +'<button onclick="showSpecForm()" class="btn btn-p">+ Add Spec</button></div></div>';
+  if(!jSpecs.length){
+    html+='<div class="empty"><div class="ei">📐</div><div class="et">No specifications yet</div>'
+      +(AJOB?'<button onclick="aiGenerateSpecs()" class="btn btn-p" style="margin-top:12px">🤖 AI Generate Specs</button>':'')+'</div>';
+  } else {
+    sections.forEach(function(sec){
+      var secSpecs=jSpecs.filter(function(s){return s.section===sec;});
+      if(!secSpecs.length) return;
+      html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px">'
+        +'<div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase">'+sec+' ('+secSpecs.length+')</div>';
+      secSpecs.forEach(function(spec){
+        html+='<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'
+          +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+          +'<div><div style="font-weight:700;font-size:13px">'+spec.title+'</div>'
+          +(spec.description?'<div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.6">'+spec.description+'</div>':'')
+          +(spec.material_standard?'<div style="font-size:11px;color:var(--blue);margin-top:3px">Standard: '+spec.material_standard+'</div>':'')
+          +'</div>'
+          +'<button class="cs-del" data-table="specifications" data-id="'+spec.id+'" style="font-size:10px;padding:3px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit;margin-left:12px">✕</button>'
+          +'</div></div>';
+      });
+      html+='</div>';
+    });
+  }
+  $('content').innerHTML=html;
+  $('content').addEventListener('click',function(e){
+    var del=e.target.closest('.cs-del');
+    if(del){delRecord(del.dataset.id,del.dataset.table,pgSpecs);}
+  },{once:true});
 }
-function showSpecForm(){var f=$('spec-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+
+
+async function saveSpec(){
+  var title=($('spec-title')||{}).value||'';
+  if(!title.trim()){toast('Title required','err');return;}
+  await dbIns('specifications',{
+    title:title.trim(),section:($('spec-sec')||{}).value||'General',
+    description:($('spec-desc')||{}).value||'',
+    material_standard:($('spec-std')||{}).value||'',
+    job_id:AJOB?AJOB.id:null
+  });
+  await auditLog('specifications',null,'spec_created',null,'added',false,'Spec added: '+title);
+  toast('Specification saved ✅','ok');
+  var ov=document.getElementById('spec-ov');if(ov)ov.remove();
+  pgSpecs();
+}
+
+async function aiGenerateSpecs(){
+  if(!AJOB){toast('Select a job first','err');return;}
+  toast('🤖 AI generating specifications...','ok',10000);
+  try{
+    var r=await ai('Generate construction specifications for this project.\nJob: '+AJOB.job_name+'Type: '+(AJOB.job_type||'General Renovation')+'\nBudget: '+fmt$(AJOB.contract_price||AJOB.budget||0)+'\nReturn ONLY JSON array of specs covering key trades:\n[{"title":"spec title","section":"Section Name","description":"detailed requirement","material_standard":"standard if applicable"}]\nInclude 10-15 specs covering the most critical elements for this job type.','Construction specifications expert. Return ONLY valid JSON array.',1500);
+    var items=safeJSON(r);
+    if(!Array.isArray(items)){toast('AI failed — try again','err');return;}
+    for(var i=0;i<items.length;i++){
+      await dbIns('specifications',{title:items[i].title,section:items[i].section||'General',description:items[i].description||'',material_standard:items[i].material_standard||'',job_id:AJOB.id});
+    }
+    toast('✅ '+items.length+' specifications generated','ok');
+    pgSpecs();
+  }catch(e){toast('Error: '+e.message,'err');}
+}
+
+
+
 async function saveSpec(){
   var title=($('nspec-title')||{}).value||'';var content=($('nspec-content')||{}).value||'';
   if(!title||!content){toast('Title and content required','err');return;}
@@ -6631,53 +6858,102 @@ async function aiGenerateSpecs(){
   toast('🤖 AI generated '+d.length+' specifications','ok');pgSpecs();
 }
 async function pgWarranty(){
-  var jobs=await dbGet('jobs','?status=eq.Completed&order=job_name.asc');
-  var allJobs=await dbGet('jobs','?order=job_name.asc');
-  var claims=await dbGet('warranty_claims','?order=created_at.desc');
-  if(!claims) claims=[];
-  var open=claims.filter(function(c){return c.status!=='Resolved';});
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Warranty Tracking</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+open.length+' open claims &nbsp;·&nbsp; '+claims.length+' total</div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="micFillField(\'nwc-desc\',\'Describe the warranty issue\');if($(\'wc-form\'))$(\'wc-form\').style.display=\'block\'" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Claim</button>'
-    +'<button onclick="showWCForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New Claim</button></div></div>'
-    // Warranty coverage cards
-    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:13px;font-weight:700;margin-bottom:8px">🔨 Workmanship</div><div style="font-size:12px;color:var(--muted)">1 Year — All labor defects</div></div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:13px;font-weight:700;margin-bottom:8px">💧 Waterproofing</div><div style="font-size:12px;color:var(--muted)">2 Years — Leaks and moisture</div></div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:13px;font-weight:700;margin-bottom:8px">🏭 Manufacturer</div><div style="font-size:12px;color:var(--muted)">Per manufacturer warranty</div></div></div>'
-    +'<div id="wc-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Warranty Claim<button onclick="$(\'wc-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div><select id="nwc-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">Select job...</option>'+allJobs.map(function(j){return '<option value="'+j.id+'">'+j.job_name+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Warranty Type</div><select id="nwc-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option>Workmanship</option><option>Waterproofing</option><option>Manufacturer</option><option>Structural</option></select></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Issue Description</div>'
-    +'<div style="display:flex;gap:6px"><textarea id="nwc-desc" rows="3" placeholder="Client reported..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
-    +'<button onclick="micFillField(\'nwc-desc\',\'Describe the warranty issue or complaint\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="saveWarrantyClaim()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Log Claim</button>'
-    +'<button onclick="aiWarrantyAnalysis()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Analyze Claim</button></div></div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
-    +(claims.length===0?'<div style="padding:40px;text-align:center;color:var(--dim)">No warranty claims — great work!</div>'
-    :'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 120px 120px 80px">CLAIM / JOB<span>TYPE</span><span>REPORTED</span><span>STATUS</span></div>'
-    +claims.map(function(c,i){
-      var job=allJobs.find(function(j){return j.id===c.job_id;})||{job_name:'?'};
-      var sColors={'Open':'var(--red)','In Progress':'var(--amber)','Resolved':'var(--green)'};
-      return '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 120px 120px 80px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
-        +'<div><div style="font-weight:700;font-size:13px">'+job.job_name+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+c.description.substring(0,60)+'...</div></div>'
-        +'<div style="font-size:12px;color:var(--muted)">'+c.warranty_type+'</div>'
-        +'<div style="font-size:12px;color:var(--muted)">'+(c.created_at?new Date(c.created_at).toLocaleDateString():'?')+'</div>'
-        +'<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;background:'+(sColors[c.status]||'var(--amber)')+';color:#fff">'+(c.status||'Open')+'</span>'
-        +'</div>';
-    }).join(''))+'<div style="margin-top:16px;display:flex;gap:10px">'
-    +'<button onclick="aiCashFlow()" style="padding:10px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Cash Flow Forecast</button>'
-    +'<button onclick="aiWeeklySummary()" style="padding:10px 18px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">📊 Weekly AI Summary</button>'
-    +'</div>'
+  var jobs=await dbGet('jobs','?order=job_name.asc')||[];
+  var claims=await dbGet('warranty_claims','?order=created_at.desc')||[];
+  var open=claims.filter(function(c){return c.status!=='Resolved'&&c.status!=='Closed';});
+  var resolved=claims.filter(function(c){return c.status==='Resolved'||c.status==='Closed';});
+  var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    +'<div><div style="font-size:18px;font-weight:800">🛡️ Warranty</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+open.length+' open · '+resolved.length+' resolved</div></div>'
+    +'<button onclick="showWarrantyForm()" class="btn btn-p">+ New Claim</button></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+    +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--red)">'+open.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Open</div></div>'
+    +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+resolved.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Resolved</div></div>'
+    +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">'+jobs.filter(function(j){return j.status==='complete'||j.status==='Completed';}).length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Warranted Jobs</div></div>'
     +'</div>';
-  try{$('content').innerHTML=html;}catch(e){logErr('pgWarranty',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgWarranty()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
+  if(!claims.length){
+    html+='<div class="empty"><div class="ei">🛡️</div><div class="et">No warranty claims</div></div>';
+  } else {
+    open.forEach(function(claim){
+      var job=jobs.find(function(j){return j.id===claim.job_id;})||{};
+      var pc={urgent:'var(--red)',high:'var(--amber)',normal:'var(--teal)'}[claim.priority||'normal']||'var(--teal)';
+      html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:3px solid '+pc+'">'
+        +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+        +'<div><div style="font-size:11px;color:var(--muted)">'+(job.job_name||'Job')+' · '+(claim.client_name||'')+'</div>'
+        +'<div style="font-weight:700;font-size:14px;margin-top:2px">'+claim.issue+'</div>'
+        +(claim.description?'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+claim.description+'</div>':'')
+        +(claim.reported_date?'<div style="font-size:11px;color:var(--dim);margin-top:4px">Reported: '+claim.reported_date+'</div>':'')
+        +(claim.ai_response?'<div style="background:var(--teal-light);border:1px solid var(--teal);border-radius:6px;padding:8px;font-size:12px;margin-top:8px"><b style="color:var(--teal)">🤖 Draft: </b>'+claim.ai_response+'</div>':'')
+        +'</div>'
+        +'<div style="display:flex;gap:6px;align-items:flex-start;margin-left:10px">'
+        +'<button class="cs-war-ai btn btn-p btn-sm" data-id="'+claim.id+'">🤖 Draft</button>'
+        +'<button class="cs-war-res btn btn-g btn-sm" data-id="'+claim.id+'">✓ Resolve</button>'
+        +'<button class="cs-del" data-table="warranty_claims" data-id="'+claim.id+'" style="font-size:11px;padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
+        +'</div></div></div>';
+    });
+    if(resolved.length){
+      html+='<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--green);margin:14px 0 8px">RESOLVED ('+resolved.length+')</div>';
+      resolved.slice(0,5).forEach(function(claim){
+        html+='<div style="background:#f9fafb;border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;margin-bottom:6px;opacity:0.75">'
+          +'<div style="font-weight:700;font-size:12px;color:var(--muted)">'+claim.issue+'</div>'
+          +'<div style="font-size:10px;color:var(--green)">✓ Resolved</div></div>';
+      });
+    }
+  }
+  $('content').innerHTML=html;
+  $('content').addEventListener('click',function(e){
+    var ai=e.target.closest('.cs-war-ai');
+    var res=e.target.closest('.cs-war-res');
+    var del=e.target.closest('.cs-del');
+    if(ai){aiRespond_warranty(ai.dataset.id);}
+    else if(res){resolveWarranty(res.dataset.id);}
+    else if(del){delRecord(del.dataset.id,del.dataset.table,pgWarranty);}
+  },{once:true});
 }
-function showWCForm(){var f=$('wc-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+
+
+async function saveWarrantyClaim(){
+  var issue=($('war-issue')||{}).value||'';
+  if(!issue.trim()){toast('Issue required','err');return;}
+  var jobId=($('war-job')||{}).value||null;
+  await dbIns('warranty_claims',{
+    issue:issue.trim(),
+    description:($('war-desc')||{}).value||'',
+    client_name:($('war-client')||{}).value||'',
+    priority:($('war-pri')||{}).value||'normal',
+    reported_date:($('war-date')||{}).value||new Date().toISOString().split('T')[0],
+    job_id:jobId,status:'Open'
+  });
+  await addToGatekeeper('warranty_claim','Warranty Claim: '+issue,'New warranty claim received. Priority: '+($('war-pri')||{}).value+'. Description: '+(($('war-desc')||{}).value||'').substring(0,100),'high','Review, assess responsibility, and schedule inspection/repair.','warranty_claim',null);
+  await auditLog('warranty_claims',null,'claim_created',null,'Open',false,'Warranty claim: '+issue);
+  toast('Warranty claim saved — Gatekeeper notified ✅','ok');
+  var ov=document.getElementById('war-ov');if(ov)ov.remove();
+  pgWarranty();
+}
+
+async function aiRespond_warranty(id){
+  var claims=await dbGet('warranty_claims','?id=eq.'+id);
+  var claim=claims[0];if(!claim)return;
+  var jobs=await dbGet('jobs','?id=eq.'+(claim.job_id||''));
+  var job=jobs[0]||{};
+  toast('🤖 Drafting warranty response...','ok',8000);
+  try{
+    var r=await ai('Draft a professional warranty response for this construction claim.\nCompany: Corestone Developers (Feishy Felberbaum)\nJob: '+(job.job_name||'Project')+'Client: '+(claim.client_name||'Client')+'\nIssue: '+claim.issue+'\nDescription: '+(claim.description||'')+'\nWrite a professional, empathetic response that: acknowledges the issue, confirms we take it seriously, states we will investigate within 48 hours, and commits to a resolution timeline. Sign as Feishy Felberbaum, Corestone Developers. 3-4 sentences.','Professional construction warranty response writer. Empathetic and professional.');
+    await dbUpd('warranty_claims',id,{ai_response:r,response_drafted_at:new Date().toISOString()});
+    toast('Response drafted ✅ — review before sending','ok');
+    pgWarranty();
+  }catch(e){toast('Error: '+e.message,'err');}
+}
+
+async function resolveWarranty(id){
+  await dbUpd('warranty_claims',id,{status:'Resolved',resolved_at:new Date().toISOString()});
+  await auditLog('warranty_claims',id,'claim_resolved',null,'Resolved',false,'Warranty claim resolved');
+  toast('Claim resolved ✅','ok');
+  pgWarranty();
+}
+
+
+
 async function saveWarrantyClaim(){
   var desc=($('nwc-desc')||{}).value||'';
   if(!desc){toast('Description required','err');return;}
