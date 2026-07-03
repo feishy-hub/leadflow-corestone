@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Corestone OS v3 - OS #7 Architecture Consolidation - Enterprise Build -->
+<!-- Corestone OS v2.5 - OS #9 Complete OS Build - Enterprise Platform -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -379,7 +379,7 @@ tr:hover td{background:#fafbfc}
 
 <script>
 // ── AUTO VERSION CHECK — clears old data when code updates ──
-var CS_VERSION = '2.1';
+var CS_VERSION = '2.5';
 var stored_version = localStorage.getItem('cs_version');
 if(stored_version !== CS_VERSION) {
   // New version — clear old seed data that may have broken formats
@@ -2100,7 +2100,35 @@ function showFileForm(){document.body.insertAdjacentHTML('beforeend',`<div class
 async function saveFile(){const name=$('ff-name').value.trim();if(!name){toast('Name required','err');return;}try{await dbIns('documents',{name,category:$('ff-cat').value,file_url:$('ff-url').value||'#',visible_to_client:$('ff-vis').checked,job_id:AJOB?.id||null});toast('File saved!');closeModal('fff');pgFiles();}catch(e){toast(e.message,'err');}}
 
 // MESSAGING
-async function sendMsg(){const body=$('msg-body').value.trim();if(!body){toast('Message empty','err');return;}try{await dbIns('messages',{body,job_id:AJOB?.id||null});toast('Sent!');$('msg-body').value='';pgMsgs();}catch(e){toast(e.message,'err');}}
+async function sendMsg(){
+  var body=($('msg-body')||{}).value;
+  if(body) body=body.trim();
+  if(!body){toast('Message empty','err');return;}
+  var recipient=($('msg-recipient')||{}).value||'internal';
+  var msgType=($('msg-type')||{}).value||'update';
+  var recipientLabel={'client':'Client','internal':'Corestone Team','sub':'Subcontractor','gatekeeper':'Gatekeeper Note'}[recipient]||recipient;
+  var typeLabel={'update':'Job Update','question':'Question','instruction':'Instruction','approval_needed':'Approval Needed','issue':'Issue'}[msgType]||msgType;
+  try{
+    await dbIns('messages',{
+      body: body,
+      job_id: AJOB?AJOB.id:null,
+      recipient: recipient,
+      recipient_label: recipientLabel,
+      msg_type: msgType,
+      type_label: typeLabel,
+      sender: 'Feishy Felberbaum',
+      sent_at: new Date().toISOString()
+    });
+    // If approval needed, also queue to Gatekeeper
+    if(msgType==='approval_needed' && AJOB){
+      await addToGatekeeper('message_approval','Approval needed: '+(AJOB?AJOB.job_name:''),body,'high','Review and respond to this message.','message_approval',null);
+    }
+    toast('Message sent to '+recipientLabel+' ✅','ok');
+    if($('msg-body'))$('msg-body').value='';
+    await auditLog('messages',null,'message_sent',null,'sent',false,'Message sent to '+recipientLabel+' ('+typeLabel+')');
+    pgMsgs();
+  }catch(e){toast(e.message,'err');}
+}
 
 // SUBCONTRACTORS
 async function pgInvoices(){
@@ -2681,6 +2709,57 @@ async function gkExecuteAction(item) {
 
     case 'job_created':
       toast('Job creation acknowledged','ok');
+      break;
+
+    case 'po_authorization':
+      // Stage 2: Feishy authorized the PO — activate it (status → Authorized)
+      if(item.reference_id){
+        await dbUpd('purchase_orders', item.reference_id, {
+          status: 'Authorized',
+          authorized_at: new Date().toISOString(),
+          authorized_by: 'Feishy Felberbaum'
+        });
+        await auditLog('purchase_orders', item.reference_id, 'po_authorized', 'Pending Authorization', 'Authorized', false, 'PO authorized by Feishy via Gatekeeper — Stage 2 of 3 complete');
+        // Stage 3: Queue delivery confirmation reminder
+        var poData = await dbGet('purchase_orders','?id=eq.'+item.reference_id);
+        var thePO = poData[0];
+        if(thePO){
+          await addToGatekeeper('po_delivery_confirm','Confirm PO Delivery: '+thePO.supplier_name,'PO to '+thePO.supplier_name+' ('+fmt$(thePO.total||0)+') has been authorized. Confirm when materials are received and inspected.','normal','Mark as Delivered once materials arrive and are verified.','po_delivery_confirm',item.reference_id);
+        }
+        toast('PO Authorized ✅ — delivery confirmation queued in Gatekeeper','ok');
+      }
+      break;
+
+    case 'po_delivery_confirm':
+      // Stage 3: Delivery confirmed — mark PO as Delivered/Closed
+      if(item.reference_id){
+        await dbUpd('purchase_orders', item.reference_id, {
+          status: 'Delivered',
+          delivered_at: new Date().toISOString()
+        });
+        await auditLog('purchase_orders', item.reference_id, 'po_delivered', 'Authorized', 'Delivered', false, 'PO delivery confirmed by Feishy — Stage 3 complete, PO closed');
+        toast('PO delivery confirmed — PO is now closed ✅','ok');
+      }
+      break;
+
+    case 'phase_complete':
+      toast('Phase completion acknowledged','ok');
+      break;
+
+    case 'job_complete_review':
+      // All phases done — queue punch list review
+      if(item.reference_id){
+        await addToGatekeeper('punch_list_review','Punch List Review: Job Complete','All schedule phases are done. Initiate final punch list, client walkthrough, and closeout documents.','urgent','Open Jobs → Punch List to create items.','punch_list_review',item.reference_id);
+      }
+      toast('Job closeout workflow initiated — Punch List queued','ok');
+      break;
+
+    case 'message_approval':
+      toast('Message approval acknowledged','ok');
+      break;
+
+    case 'punch_list_review':
+      toast('Punch list review acknowledged — open Jobs → Punch List','ok');
       break;
 
     case 'deposit_invoice_review':
@@ -4002,7 +4081,7 @@ async function pgSchedV2(){
             +'<div style="background:var(--teal);height:100%;border-radius:4px;width:'+pct+'%;transition:width 0.3s"></div></div>'
             +(p.notes?'<div style="font-size:12px;color:var(--muted)">'+p.notes+'</div>':'')
             +'<div style="display:flex;gap:6px;margin-top:8px">'
-            +'<button class="btn btn-g btn-sm" onclick="showUpdatePhase(\''+p.id+'\','+pct+')">Update %</button>'
+            +'<button class="btn btn-g btn-sm" onclick="showUpdatePhase(\''+p.id+'\','+pct+',\'Phase\')">✏️ Update %</button>'+'<button onclick="deletePhase(\''+p.id+'\',\'Phase\')" style="padding:5px 10px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:var(--radius-sm);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✕ Delete</button>'
             +'</div></div>';
         }).join('')
       );
@@ -4044,15 +4123,66 @@ async function aiGenerateSchedule(){
   }catch(e){toast('Schedule error: '+e.message,'err');}
 }
 
-function showUpdatePhase(phaseId,currentPct){
-  var pct=prompt('Update completion percentage (0-100):',currentPct);
-  if(pct===null)return;
-  pct=Math.min(100,Math.max(0,parseInt(pct)||0));
-  dbUpd('schedule',phaseId,{percent_complete:pct}).then(function(){
-    toast('Phase updated','ok');
+function showUpdatePhase(phaseId,currentPct,phaseName){
+  var el=document.createElement('div');el.className='ov';el.id='upd-phase-ov';
+  el.innerHTML='<div class="modal" style="max-width:420px"><div class="mh"><div><div class="mt">Update Phase Progress</div>'
+    +'<div class="ms">'+(phaseName||'Phase')+'</div></div>'
+    +'<button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Completion %</label>'
+    +'<div style="display:flex;align-items:center;gap:12px">'
+    +'<input id="upd-pct" type="range" min="0" max="100" value="'+currentPct+'" style="flex:1" oninput="document.getElementById(\'upd-pct-val\').textContent=this.value+\'%\'">'
+    +'<span id="upd-pct-val" style="font-size:20px;font-weight:800;color:var(--teal);min-width:48px">'+currentPct+'%</span>'
+    +'</div></div>'
+    +'<div class="fr"><label>Status Note (optional)</label>'
+    +'<input id="upd-note" placeholder="e.g. Framing complete, waiting inspection..."></div>'
+    +'<div class="fr"><label>Actual Completion Date</label>'
+    +'<input id="upd-end" type="date" value="'+new Date().toISOString().split('T')[0]+'"></div>'
+    +'</div><div class="mf">'
+    +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
+    +'<button class="btn btn-p" onclick="savePhaseUpdate(\''+phaseId+'\')">' + 'Save Update</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+
+async function savePhaseUpdate(phaseId){
+  var pct=Math.min(100,Math.max(0,parseInt(document.getElementById('upd-pct').value)||0));
+  var note=document.getElementById('upd-note').value.trim();
+  var endDate=document.getElementById('upd-end').value;
+  var updObj={percent_complete:pct};
+  if(note) updObj.notes=note;
+  if(pct===100) updObj.completed_at=new Date().toISOString();
+  if(endDate) updObj.actual_end_date=endDate;
+  try{
+    await dbUpd('schedule',phaseId,updObj);
+    await auditLog('schedule',phaseId,'phase_updated',null,pct+'%',false,'Phase progress updated to '+pct+'%'+(note?' — '+note:''));
+    if(pct===100 && AJOB){
+      // Cascade: phase complete → check if all phases done → update job progress
+      var allPhases=await dbGet('schedule','?job_id=eq.'+AJOB.id);
+      var donePct=allPhases.length>0?Math.round(allPhases.reduce(function(s,p){return s+(p.percent_complete||0);},0)/allPhases.length):0;
+      await dbUpd('jobs',AJOB.id,{progress_pct:donePct,last_updated:new Date().toISOString()});
+      if(allPhases.every(function(p){return (p.id===phaseId)?true:(p.percent_complete||0)===100;})){
+        // All phases done
+        await addToGatekeeper('job_complete_review','All phases complete: '+AJOB.job_name,'All schedule phases are marked 100% complete. Review job for punch list, final inspection, and closeout workflow.','high','Review and initiate closeout.','job_complete_review',AJOB.id);
+        toast('🎉 All phases complete — Gatekeeper notified for closeout review','ok',6000);
+      } else {
+        toast('✅ Phase marked complete — job progress updated to '+donePct+'%','ok',4000);
+        await addToGatekeeper('phase_complete','Phase complete: '+(note||phaseId),'Schedule phase marked 100% complete on job: '+AJOB.job_name+'. Overall job progress: '+donePct+'%.','normal','Review next phase readiness.','phase_complete',AJOB.id);
+      }
+    } else {
+      toast('Phase updated — '+pct+'%','ok');
+    }
+    var ov=document.getElementById('upd-phase-ov');if(ov)ov.remove();
     pgSchedV2();
-    if(pct===100)toast('🎉 Phase complete! AI will suggest next phase tasks.','ok',5000);
-  }).catch(function(e){toast(e.message,'err');});
+  }catch(e){toast('Update failed: '+e.message,'err');}
+}
+
+async function deletePhase(phaseId,phaseName){
+  if(!confirm('Delete phase "'+phaseName+'"? This cannot be undone.'))return;
+  try{
+    await dbDel('schedule',phaseId);
+    toast('Phase deleted','ok');
+    pgSchedV2();
+  }catch(e){toast('Delete failed: '+e.message,'err');}
 }
 
 // ── VOICE DAILY LOG ────────────────────────────────────────────
@@ -4069,13 +4199,16 @@ async function pgDailyV2(){
         :logs.map(function(l){
           return '<div class="card" style="margin-bottom:8px">'
             +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
-            +'<div style="font-size:13px;font-weight:800">'+fmtD(l.log_date)+'</div>'
-            +'<div style="display:flex;gap:6px">'
+            +'<div><div style="font-size:13px;font-weight:800">'+fmtD(l.log_date)+'</div>'
+            +(l.phase?'<div style="font-size:11px;color:var(--teal);font-weight:700;margin-top:1px">'+l.phase+'</div>':'')
+            +'</div>'
+            +'<div style="display:flex;gap:6px;align-items:center">'
             +(l.weather?'<span class="badge" style="background:#f0f9ff;color:#0369a1">'+l.weather+'</span>':'')
-            +(l.crew_count?'<span class="badge badge-draft">👷 '+l.crew_count+' crew</span>':'')
+            +(l.crew_count?'<span class="badge badge-draft">👷 '+l.crew_count+'</span>':'')
+            +'<button onclick="delRecord(\''+l.id+'\',\'daily_logs\',pgDailyV2)" style="font-size:10px;padding:2px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
             +'</div></div>'
-            +(l.notes?'<div style="font-size:13px;line-height:1.7;color:var(--text)">'+l.notes+'</div>':'')
-            +(l.ai_summary?'<div class="ai-box" style="margin-top:10px"><div class="ai-lbl">AI Summary</div>'+l.ai_summary+'</div>':'')
+            +(l.notes?'<div style="font-size:13px;line-height:1.7;color:var(--text);margin-bottom:8px">'+l.notes+'</div>':'')
+            +(l.ai_summary?'<div class="ai-box" style="margin-top:8px"><div class="ai-lbl">🤖 AI Summary</div><div style="font-size:12px;line-height:1.7;color:var(--muted)">'+l.ai_summary+'</div></div>':'')
             +'</div>';
         }).join('')
       );
@@ -4129,6 +4262,22 @@ async function saveQuickLog(){
     toast('✅ Log saved','ok');
     closeOv(document.querySelector('#qlog .mc'));
     pgDailyV2();
+    // CASCADE: AI scope change detection on every daily log
+    if(AJOB && notes.length > 20){
+      try{
+        await aiDetectScope(notes, AJOB.id);
+      }catch(scopeErr){console.warn('Scope detection failed silently',scopeErr);}
+    }
+    // CASCADE: Update job's last_log_date
+    if(AJOB){
+      try{
+        await dbUpd('jobs',AJOB.id,{last_log_date:date,last_updated:new Date().toISOString()});
+      }catch(e2){console.warn('Job last_log_date update failed',e2);}
+    }
+    // AUDIT
+    try{
+      await auditLog('daily_logs',null,'daily_log_created',null,'saved',false,'Daily log saved for '+date+(AJOB?' on job '+AJOB.job_name:''));
+    }catch(e3){}
   }catch(e){
     $('ql-result').innerHTML='<div style="color:var(--red);font-size:12px">Error: '+e.message+'</div>';
   }
@@ -4137,12 +4286,15 @@ async function saveQuickLog(){
 // ── REPORTS WITH REAL NUMBERS ─────────────────────────────────
 async function pgReportsV2(){
   try{
-    var [leads,jobs,invs,cos,logs]=await Promise.all([
+    var [leads,jobs,invs,cos,logs,bills,pos,subs]=await Promise.all([
       dbGet('leads','?order=created_at.desc'),
       dbGet('jobs','?order=created_at.desc'),
       dbGet('invoices','?order=created_at.desc'),
       dbGet('change_orders','?order=created_at.desc'),
-      dbGet('daily_logs','?order=log_date.desc&limit=30')
+      dbGet('daily_logs','?order=log_date.desc&limit=30'),
+      dbGet('bills','?order=created_at.desc'),
+      dbGet('purchase_orders','?order=created_at.desc'),
+      dbGet('subcontractors','?order=company_name.asc')
     ]);
     
     var revenue=invs.filter(function(i){return i.status==='paid';}).reduce(function(s,i){return s+(i.amount||0);},0);
@@ -4152,6 +4304,12 @@ async function pgReportsV2(){
     var activeJobs=jobs.filter(function(j){return j.status==='active';});
     var avgProgress=activeJobs.length?Math.round(activeJobs.reduce(function(s,j){return s+(j.percent_complete||0);},0)/activeJobs.length):0;
     var coValue=cos.reduce(function(s,c){return s+(c.cost_impact||0);},0);
+    var billsTotal=bills.reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var billsPaid=bills.filter(function(b){return b.status==='paid';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var billsPending=bills.filter(function(b){return b.status==='pending'||b.status==='Pending';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var poTotal=pos.reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var poAuthorized=pos.filter(function(p){return p.status==='Authorized'||p.status==='Delivered';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var poPending=pos.filter(function(p){return p.status==='Pending Authorization';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
     
     $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+'<div style="font-size:18px;font-weight:800">Reports & Analytics</div>'+'<div style="display:flex;gap:8px">'+'<button onclick="aiWeeklySummary()" style="padding:7px 12px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">AI Summary</button>'+'<button onclick="aiCashFlow()" style="padding:7px 12px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">Cash Flow</button>'+'</div></div>'
     +'<div style="font-size:18px;font-weight:800;margin-bottom:16px">📊 Reports</div>'
@@ -4179,6 +4337,21 @@ async function pgReportsV2(){
       ['Avg Progress','📐',avgProgress+'%','Across active jobs','var(--teal)'],
       ['Change Orders','📋',fmt$(coValue),'Total CO value','var(--purple)'],
       ['Total Logs','📝',logs.length,'Last 30 days','var(--muted)'],
+    ].map(function(s){
+      return '<div class="card" style="text-align:center">'
+        +'<div style="font-size:22px;margin-bottom:6px">'+s[1]+'</div>'
+        +'<div style="font-size:20px;font-weight:800;color:'+s[4]+'">'+s[2]+'</div>'
+        +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+s[0]+'</div>'
+        +'<div style="font-size:10px;color:var(--dim)">'+s[3]+'</div></div>';
+    }).join('')
+    +'</div>'
+    // Financial position row
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">'
+    +[
+      ['Bills Pending','🧾',fmt$(billsPending),'Awaiting payment','var(--amber)'],
+      ['Bills Paid','✅',fmt$(billsPaid),'Paid to date','var(--green)'],
+      ['POs Authorized','📦',fmt$(poAuthorized),'Committed materials','var(--blue)'],
+      ['POs Awaiting Auth','⏳',fmt$(poPending),'Pending Gatekeeper','var(--amber)'],
     ].map(function(s){
       return '<div class="card" style="text-align:center">'
         +'<div style="font-size:22px;margin-bottom:6px">'+s[1]+'</div>'
@@ -4680,6 +4853,7 @@ function showSubsNeedingDocs(){
 }
 
 // ── MESSAGING — threaded, with AI auto-reply draft ──
+async function pgMsgs(){ return pgMsgsV2(); }
 async function pgMsgsV2(){
   var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=created_at.desc&limit=50':'?order=created_at.desc&limit=50';
   try{
@@ -4691,7 +4865,24 @@ async function pgMsgsV2(){
       
       // Message input
       +'<div class="card" style="margin-bottom:16px">'
-      +'<div class="fr"><label>New Message'+(AJOB?' — '+AJOB.job_name:'')+'</label>'
+      +'<div style="font-size:13px;font-weight:700;margin-bottom:12px">New Message'+(AJOB?' — '+AJOB.job_name:'')+'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+      +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">To / Recipient</div>'
+      +'<select id="msg-recipient" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+      +'<option value="client">🏠 Client</option>'
+      +'<option value="internal">🏢 Internal (Corestone Team)</option>'
+      +'<option value="sub">👷 Subcontractor</option>'
+      +'<option value="gatekeeper">🔑 Gatekeeper Note</option>'
+      +'</select></div>'
+      +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Type</div>'
+      +'<select id="msg-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
+      +'<option value="update">📋 Job Update</option>'
+      +'<option value="question">❓ Question</option>'
+      +'<option value="instruction">📌 Instruction</option>'
+      +'<option value="approval_needed">✅ Approval Needed</option>'
+      +'<option value="issue">⚠️ Issue / Problem</option>'
+      +'</select></div></div>'
+      +'<div class="fr"><label>Message</label>'
       +'<textarea id="msg-body" style="min-height:80px" placeholder="Type your message or use AI Draft..."></textarea></div>'
       +'<div style="display:flex;gap:8px;justify-content:flex-end">'
       +'<button class="btn btn-g btn-sm" onclick="aiDraftMessage()">🤖 AI Draft</button>'
@@ -4703,11 +4894,22 @@ async function pgMsgsV2(){
         :msgs.map(function(m){
           var isAI=m.body&&m.body.startsWith('AI:');
           var isSystem=m.body&&(m.body.startsWith('[') || m.body.startsWith('FOLLOW-UP') || m.body.startsWith('DOCUMENT'));
-          return '<div style="margin-bottom:8px;padding:12px 14px;background:'+(isAI?'var(--blue-bg)':isSystem?'#f6f8fa':'#fff')+';border:1px solid var(--border);border-radius:var(--radius);border-left:3px solid '+(isAI?'var(--blue)':isSystem?'var(--muted)':'var(--teal)')+';">'
-            +'<div style="display:flex;justify-content:space-between;margin-bottom:6px">'
-            +'<span style="font-size:10px;font-weight:800;color:'+(isAI?'var(--blue)':isSystem?'var(--muted)':'var(--teal)')+'">'+( isAI?'🤖 AI':'📝 Note')+'</span>'
-            +'<span style="font-size:10px;color:var(--dim)">'+fmtD(m.created_at)+' '+new Date(m.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</span>'
+          var isClient=m.recipient==='client';
+          var isIssue=m.msg_type==='issue';
+          var borderColor=isAI?'var(--blue)':isClient?'var(--teal)':isIssue?'var(--red)':isSystem?'var(--muted)':'var(--border2)';
+          var bgColor=isAI?'var(--blue-bg)':isClient?'var(--teal-light)':isIssue?'var(--red-bg)':isSystem?'#f6f8fa':'#fff';
+          var recipBadge=m.recipient_label?('<span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:10px;background:'+(isClient?'var(--teal)':isIssue?'var(--red)':'var(--muted)')+';color:#fff;margin-left:6px">'+m.recipient_label+'</span>'):(isAI?'':'');
+          var typeBadge=m.type_label?('<span style="font-size:10px;color:var(--muted);margin-left:6px">'+m.type_label+'</span>'):(isAI?'':'');
+          return '<div style="margin-bottom:8px;padding:12px 14px;background:'+bgColor+';border:1px solid var(--border);border-radius:var(--radius);border-left:3px solid '+borderColor+';">'
+            +'<div style="display:flex;justify-content:space-between;margin-bottom:6px;align-items:center">'
+            +'<div style="display:flex;align-items:center">'
+            +'<span style="font-size:10px;font-weight:800;color:'+borderColor+'">'+( isAI?'🤖 AI':'📝 '+(m.sender||'Feishy'))+'</span>'
+            +recipBadge+typeBadge
             +'</div>'
+            +'<div style="display:flex;align-items:center;gap:8px">'
+            +'<span style="font-size:10px;color:var(--dim)">'+fmtD(m.created_at)+' '+new Date(m.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</span>'
+            +'<button onclick="delRecord(\''+m.id+'\',\'messages\',pgMsgs)" style="font-size:10px;padding:1px 6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:3px;cursor:pointer;font-family:inherit">✕</button>'
+            +'</div></div>'
             +'<div style="font-size:13px;line-height:1.7;color:var(--text)">'+m.body+'</div>'
             +'</div>';
         }).join('')
@@ -7576,8 +7778,8 @@ async function pgBudget(){
       // Progress bar
       +'<div style="background:var(--bg);border-radius:20px;height:10px;margin-bottom:12px;overflow:hidden">'
       +'<div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:20px;transition:width 0.5s"></div></div>'
-      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">'
-      +[{l:'Original Budget',v:budget,c:'var(--text)'},{l:'CO Additions',v:coTotal,c:coTotal>0?'var(--amber)':'var(--muted)'},{l:'Committed (POs)',v:committed,c:'var(--blue)'},{l:'Remaining',v:remaining,c:remaining<0?'var(--red)':'var(--green)'}]
+      +'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">'
+      +[{l:'Original Budget',v:budget,c:'var(--text)'},{l:'CO Additions',v:coTotal,c:coTotal>0?'var(--amber)':'var(--muted)'},{l:'Committed (POs)',v:committed,c:'var(--blue)'},{l:'Invoiced to Client',v:invoiced,c:'var(--teal)'},{l:'Remaining Budget',v:remaining,c:remaining<0?'var(--red)':'var(--green)'}]
       .map(function(item){return '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px;text-align:center"><div style="font-size:16px;font-weight:800;color:'+item.c+'">'+fmt$(item.v)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+item.l+'</div></div>';}).join('')
       +'</div>'
       +(jobPOs.length?'<div style="margin-top:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Purchase Orders</div>'
@@ -7591,15 +7793,16 @@ async function pgPOs(){
   var jobs=await dbGet('jobs','?order=job_name.asc');
   var subs=await dbGet('subcontractors','?order=company_name.asc');
   var totalOpen=pos.filter(function(p){return p.status!=='Closed'&&p.status!=='Cancelled';}).reduce(function(s,p){return s+parseFloat(p.total||0);},0);
-  var sColors={'Draft':'var(--muted)','Sent':'var(--blue)','Acknowledged':'var(--teal)','Delivered':'var(--green)','Invoiced':'var(--amber)','Closed':'var(--dim)','Cancelled':'var(--red)'};
+  var sColors={'Draft':'var(--muted)','Pending Authorization':'var(--amber)','Authorized':'var(--blue)','Sent':'var(--blue)','Acknowledged':'var(--teal)','Delivered':'var(--green)','Invoiced':'var(--purple)','Closed':'var(--dim)','Cancelled':'var(--red)'};
   var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
     +'<div><div style="font-size:20px;font-weight:800">Purchase Orders</div>'
     +'<div style="font-size:12px;color:var(--muted)">'+pos.length+' total &nbsp;·&nbsp; '+fmt$(totalOpen)+' open value</div></div>'
     +'<div style="display:flex;gap:8px">'
     +'<button onclick="voicePO()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice PO</button>'
-    +'<button onclick="showNewPOForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New PO</button></div></div>'
+    +'<button onclick="showNewPOForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Request PO</button></div></div>'
     +'<div id="po-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Purchase Order<button onclick="$(\'po-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">Request Purchase Order<button onclick="$(\'po-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    +'\'<div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--amber);font-weight:700;">⚠️ PO Policy: Purchase Orders require 3-stage approval. This request will route to Gatekeeper for authorization. POs are never created directly. (DEC-022)</div>\''
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
     +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
     +'<select id="npo-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
@@ -7615,7 +7818,7 @@ async function pgPOs(){
     +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Notes</div>'
     +'<input id="npo-notes" placeholder="Special instructions, delivery notes..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
     +'<div style="display:flex;gap:8px">'
-    +'<button onclick="saveNewPO()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save PO</button>'
+    +'<button onclick="requestNewPO()" style="padding:9px 18px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">📋 Submit PO Request → Gatekeeper</button>'
     +'<button onclick="aiDraftPO()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Fill Items</button>'
     +'</div></div>'
     +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
@@ -7639,24 +7842,66 @@ async function pgPOs(){
 }
 function showNewPOForm(){var w=$('po-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
 async function saveNewPO(){
+  // LEGACY ALIAS — all calls now route through requestNewPO per DEC-022
+  await requestNewPO();
+}
+
+// DEC-022: POs NEVER created directly. 3-stage Gatekeeper approval required.
+// Stage 1: Internal approval (this function — routes to Gatekeeper)
+// Stage 2: Gatekeeper authorization (Feishy approves)
+// Stage 3: PO status becomes 'Authorized' — system creates the PO record
+async function requestNewPO(){
   try{
-  var supplier=($('npo-supplier')||{}).value||'';
-  if(!supplier.trim()){toast('Supplier required','err');return;}
-  var itemsRaw=($('npo-items')||{}).value||'';
-  var lines=itemsRaw.split('\n').filter(function(l){return l.trim();});
-  var items=lines.map(function(l){var p=l.split(',');return {description:(p[0]||'').trim(),qty:parseFloat(p[1])||1,unit:(p[2]||'ea').trim(),unit_price:parseFloat(p[3])||0,total:parseFloat(p[1]||1)*parseFloat(p[3]||0)};});
-  var total=items.reduce(function(s,it){return s+it.total;},0);
-  await dbIns('purchase_orders',{job_id:($('npo-job')||{}).value||null,supplier_name:supplier,items:JSON.stringify(items),total:total,delivery_date:($('npo-delivery')||{}).value||null,notes:($('npo-notes')||{}).value||'',status:'Draft'});
-  var jobId=($('npo-job')||{}).value||null;
-  await aiLogTransaction('Purchase Order','New PO to '+($('npo-supplier')||{}).value+' — '+fmt$(total),'normal');
-  if(jobId) await aiBudgetGuard(jobId);
-  pgPOs();
-  nextStep('Purchase Order Saved! 📦', 'PO is logged. What next?', [
-    {icon:'💰', label:'Check job budget', sub:'See updated committed costs', fn:'goTab("budget")'},
-    {icon:'📦', label:'View all POs', sub:'Track delivery status', fn:'goTab("pos")'},
-    {icon:'➕', label:'Add another PO', sub:'Order more materials', fn:'showNewPOForm()'}
-  ]);
-  }catch(e){toast('Purchase order error: '+e.message,'err');console.error('saveNewPO',e);}
+    var supplier=($('npo-supplier')||{}).value||'';
+    if(!supplier.trim()){toast('Supplier required','err');return;}
+    var jobId=($('npo-job')||{}).value||null;
+    if(!jobId){toast('Select a job for this PO','err');return;}
+    var itemsRaw=($('npo-items')||{}).value||'';
+    var rawLines=itemsRaw.split('\n').filter(function(l){return l.trim();});
+    var items=rawLines.map(function(ln){var p=ln.split(',');return {description:(p[0]||'').trim(),qty:parseFloat(p[1])||1,unit:(p[2]||'ea').trim(),unit_price:parseFloat((p[3]||'0').replace('$',''))||0,total:parseFloat(p[1]||1)*parseFloat((p[3]||'0').replace('$',''))||0};});
+    var total=items.reduce(function(s,it){return s+(it.total||0);},0);
+    var delivery=($('npo-delivery')||{}).value||null;
+    var notes=($('npo-notes')||{}).value||'';
+    var jobs=await dbGet('jobs','?id=eq.'+jobId);
+    var jobName=jobs[0]?jobs[0].job_name:'Job #'+jobId;
+
+    // Save as pending_authorization — not active until Gatekeeper approves
+    var pendingRec = await dbIns('purchase_orders',{
+      job_id: jobId,
+      supplier_name: supplier,
+      items: JSON.stringify(items),
+      total: total,
+      delivery_date: delivery,
+      notes: notes,
+      status: 'Pending Authorization',
+      requested_at: new Date().toISOString(),
+      requested_by: 'Feishy Felberbaum'
+    });
+    var pendingId = pendingRec[0]?pendingRec[0].id:null;
+
+    // Route to Gatekeeper for Stage 2 authorization
+    await addToGatekeeper(
+      'po_authorization',
+      'PO Authorization Required: ' + supplier,
+      'Purchase Order requested for ' + jobName + '.\nSupplier: ' + supplier + '\nTotal: ' + fmt$(total) + '\nDelivery: ' + (delivery||'TBD') + '\nItems: ' + items.length + ' line items.\nNotes: ' + (notes||'None') + '\n\nPO is pending authorization. Approve to activate this purchase order.',
+      'high',
+      'Review line items, verify against estimate, authorize or reject.',
+      'po_authorization',
+      pendingId
+    );
+
+    // Audit log
+    await auditLog('purchase_orders', pendingId, 'po_requested', null, 'Pending Authorization', false, 'PO requested by Feishy — pending 3-stage Gatekeeper authorization per DEC-022');
+
+    toast('PO request submitted to Gatekeeper for authorization ✅', 'ok');
+    if($('po-form-wrap')) $('po-form-wrap').style.display='none';
+    pgPOs();
+    nextStep('PO Request Submitted 📋', 'Awaiting Gatekeeper authorization. What next?', [
+      {icon:'🔑', label:'Review in Gatekeeper', sub:'Authorize this PO request', fn:'goTab("gatekeeper")'},
+      {icon:'💰', label:'Check job budget', sub:'See cost impact if authorized', fn:'goTab("budget")'},
+      {icon:'📦', label:'View all POs', sub:'See pending + active POs', fn:'goTab("pos")'}
+    ]);
+  }catch(e){toast('PO request error: '+e.message,'err');console.error('requestNewPO',e);}
 }
 async function updatePOStatus(id,status){await dbUpd('purchase_orders',id,{status:status});toast('PO updated: '+status,'ok');pgPOs();}
 async function aiDraftPO(){
@@ -8150,7 +8395,7 @@ async function showClientIntelligence(leadId){
 // PREDICTIVE JOB PROFITABILITY
 // ═══════════════════════════════════════════════════════════════
 // Duplicate dead showJobProfitability removed — later (better) version with toast error handling is used
-async function addToGatekeeper(type, title, description, priority, recommendation, actionType){
+async function addToGatekeeper(type, title, description, priority, recommendation, actionType, referenceId){
   priority=priority||'normal';
   try{ addNotification('gatekeeper', title, (description||'').slice(0,100), "goTab('gatekeeper')"); } catch(nc_e) {}
   try{
@@ -8159,6 +8404,7 @@ async function addToGatekeeper(type, title, description, priority, recommendatio
       action_type: actionType || type, // action_type drives gkExecuteAction dispatcher
       title:title, description:description,
       status:'pending', priority:priority, ai_recommendation:recommendation||'',
+      reference_id: referenceId || null,
       created_at:new Date().toISOString()
     });
     // Update both GK badges
