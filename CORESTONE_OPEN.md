@@ -106,3 +106,83 @@ This document is reviewed at the start of every session.
 | OQ-023 | Risk | n8n on Render cold start | Render free tier spins down after 15 min inactivity. Gmail intake can miss emails if n8n is cold. | Inbound leads from Gmail delayed or lost | Claude | Open — upgrade to paid tier or move before going live |
 
 *Added OS #8 — July 1, 2026*
+
+---
+
+## OQ-020 — Enterprise UX Gap: System-Wide Search + Filter Missing
+- **Date Opened:** OS #9 — July 3, 2026
+- **Type:** Implementation Gap
+- **Title:** No search or filter on any list page
+- **Detail:** Every list page (Jobs, Leads, Bills, Invoices, Subs, POs, COs, etc.) lacks a live 
+  search bar and filter controls. This violates the Enterprise UX Standard established OS #9.
+- **Impact:** President cannot quickly find records. Every list requires manual scrolling.
+- **Owner:** Engineering
+- **Status:** In Progress — being addressed in OS #9 build
+- **Priority:** Critical
+
+---
+
+## OQ-021 — Enterprise UX Gap: Row-Click Opens Detail (Missing System-Wide)
+- **Date Opened:** OS #9 — July 3, 2026
+- **Type:** Implementation Gap
+- **Title:** Most list rows do not open detail view on click
+- **Detail:** Enterprise standard: clicking any row opens the full record. 
+  Currently most pages require hunting for Edit buttons.
+- **Impact:** UX feels unfinished. Extra clicks on every action.
+- **Owner:** Engineering
+- **Status:** In Progress — being addressed in OS #9 build
+- **Priority:** High
+
+---
+
+## OQ-022 — Enterprise UX Gap: No Export/Print on Any Page
+- **Date Opened:** OS #9 — July 3, 2026
+- **Type:** Implementation Gap
+- **Title:** Cannot export any list to CSV or print
+- **Detail:** Construction companies need paper records. Bills, invoices, POs, sub lists, 
+  schedules all need export capability.
+- **Impact:** Cannot produce reports for accounting, lender, or client.
+- **Owner:** Engineering
+- **Status:** Open
+- **Priority:** High
+
+---
+
+## OQ-023 — Enterprise UX Gap: Inline Status Change Missing
+- **Date Opened:** OS #9 — July 3, 2026
+- **Type:** Implementation Gap
+- **Title:** Status changes require opening a full form
+- **Detail:** Clicking a status badge (Draft, Sent, Paid, etc.) should allow changing it in place.
+  Currently requires opening the full record form.
+- **Impact:** Too many clicks for routine status updates.
+- **Owner:** Engineering
+- **Status:** Open
+- **Priority:** Normal
+
+---
+
+## OQ-024 — Enterprise UX Gap: Related Records Not Shown on Detail Forms
+- **Date Opened:** OS #9 — July 3, 2026
+- **Type:** Implementation Gap
+- **Title:** Job detail does not show related Invoices, Bills, POs, COs, Logs, Schedule
+- **Detail:** Opening a Job should show everything related to it in one place. 
+  Currently requires navigating to separate tabs.
+- **Impact:** President must navigate 5+ tabs to get a complete picture of one job.
+- **Owner:** Engineering
+- **Status:** Open
+- **Priority:** High
+
+---
+
+## OQ-025 — Business Intelligence: Business Brain Not Yet Built
+- **Date Opened:** OS #9 — July 3, 2026
+- **Type:** Major Missing Subsystem
+- **Title:** Business Brain — unified intelligence layer — not yet implemented
+- **Detail:** The system should know everything: every plan, call, photo, estimate, bid, PO, bill,
+  invoice, payment, CO, conversation. Once built, every AI feature becomes dramatically smarter
+  because it reasons over the entire job history, not just the current page.
+- **Impact:** All AI features are page-scoped only. Cannot answer cross-job questions.
+- **Owner:** Engineering
+- **Status:** Open — Phase 2
+- **Priority:** Critical (highest architectural impact)
+
