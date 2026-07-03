@@ -2786,6 +2786,19 @@ async function gkExecuteAction(item) {
       toast('Warranty claim reviewed — schedule inspection','ok');
       break;
 
+    case 'engineering_fix_report':
+      // Engineering receives the fix report — acknowledge and begin investigation
+      toast('Fix report received — investigating all issue classes before next Executive Testing','ok',5000);
+      break;
+
+    case 'efs_ai_review':
+      toast('AI review acknowledged — page will be investigated','ok');
+      break;
+
+    case 'feedback':
+      toast('Feedback acknowledged — queued for next development session','ok');
+      break;
+
     case 'cert_expiry':
       // Cert expired — sub cannot work until renewed
       if(item.reference_id){
@@ -11361,627 +11374,497 @@ function renderNotificationList() {
 }
 // END NOTIFICATION CENTER
 
+
 // ═══════════════════════════════════════════════════════════════════════════
-// EXECUTIVE FEEDBACK SYSTEM — OS #8
-// A permanent floating button for Feishy to report issues, suggest improvements,
-// or ask AI to review — without needing to describe technical problems.
-// The system auto-collects all technical context.
+// EXECUTIVE FEEDBACK SYSTEM v2 — OS #9
+// President-first issue reporting. No technical knowledge required.
+// One button. One sentence. Corestone does the rest.
 // ═══════════════════════════════════════════════════════════════════════════
 
-function initExecFeedback() {
-  if(document.getElementById('exec-feedback-btn')) return;
-  var btn = document.createElement('button');
-  btn.id = 'exec-feedback-btn';
-  btn.innerHTML = '💬';
-  btn.title = 'Report Issue / Suggest Improvement / Ask AI to Review';
-  btn.style.cssText = 'position:fixed;bottom:20px;left:20px;width:44px;height:44px;border-radius:50%;background:#1e293b;color:#fff;border:2px solid #334155;font-size:18px;cursor:pointer;z-index:8000;box-shadow:0 4px 12px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-family:inherit';
-  btn.onclick = openExecFeedback;
-  document.body.appendChild(btn);
-}
+// ── ISSUE QUEUE (persists across testing session) ─────────────────────────
+var EFQ = {
+  issues: [],        // all issues captured this session
+  sessionStart: null,
+  clickHistory: [],  // last 20 user clicks
+  consoleErrors: [], // auto-captured JS errors
+  active: false
+};
 
-function openExecFeedback() {
-  var existing = document.getElementById('exec-feedback-ov');
-  if(existing) { existing.remove(); return; }
+// ── AUTO-CAPTURE: track clicks and JS errors silently ─────────────────────
+(function(){
+  // Track last 20 clicks
+  document.addEventListener('click', function(e){
+    var target = e.target;
+    var label = target.textContent ? target.textContent.trim().substring(0,40) : '';
+    var id = target.id || target.className || target.tagName;
+    EFQ.clickHistory.push({
+      t: new Date().toISOString(),
+      label: label,
+      el: String(id).substring(0,40),
+      page: window.CUR || 'unknown'
+    });
+    if(EFQ.clickHistory.length > 20) EFQ.clickHistory.shift();
+  }, true);
 
-  // Auto-collect context
+  // Auto-capture JS errors
+  window._efsOrigError = window.onerror;
+  window.onerror = function(msg, src, line, col, err){
+    EFQ.consoleErrors.push({
+      t: new Date().toISOString(),
+      msg: String(msg).substring(0,200),
+      src: String(src).split('/').pop(),
+      line: line,
+      page: window.CUR || 'unknown'
+    });
+    if(EFQ.consoleErrors.length > 10) EFQ.consoleErrors.shift();
+    // Update badge if panel open
+    var badge = document.getElementById('efq-auto-badge');
+    if(badge && EFQ.consoleErrors.length){
+      badge.textContent = EFQ.consoleErrors.length;
+      badge.style.display = 'inline';
+    }
+    if(window._efsOrigError) return window._efsOrigError.apply(this, arguments);
+    return false;
+  };
+})();
+
+// ── CAPTURE FULL PAGE CONTEXT ──────────────────────────────────────────────
+function efqCaptureContext(){
   var ctx = {
-    page: CUR || 'unknown',
-    job: AJOB ? (AJOB.job_name + ' (' + AJOB.id + ')') : 'none',
-    jobStatus: AJOB ? AJOB.status : 'N/A',
-    url: window.location.href,
     timestamp: new Date().toISOString(),
-    userAgent: navigator.userAgent.substring(0,100),
+    page: window.CUR || 'unknown',
+    job_name: AJOB ? AJOB.job_name : null,
+    job_id: AJOB ? AJOB.id : null,
+    job_status: AJOB ? AJOB.status : null,
+    job_phase: AJOB ? (AJOB.current_phase || AJOB.phase) : null,
+    active_record: null,
+    recent_clicks: EFQ.clickHistory.slice(-8),
+    console_errors: EFQ.consoleErrors.slice(-5),
+    visible_errors: [],
+    gk_pending: 0,
     viewport: window.innerWidth + 'x' + window.innerHeight,
-    storageKeys: Object.keys(localStorage).filter(function(k){return k.startsWith('cs_');}).join(', ')
+    storage_keys: Object.keys(localStorage).filter(function(k){return k.startsWith('cs_');}).length + ' keys'
   };
 
-  // Try to get any visible error messages
-  var errorEls = document.querySelectorAll('.error, .err, [class*="error"]');
-  if(errorEls.length) ctx.visibleErrors = Array.from(errorEls).map(function(e){return e.textContent.substring(0,100);}).join(' | ');
-
-  var el = document.createElement('div');
-  el.className = 'ov'; el.id = 'exec-feedback-ov'; el.style.cssText = 'z-index:9000;align-items:flex-end;justify-content:flex-start;padding:0 0 80px 20px';
-  el.innerHTML = '<div class="modal" style="max-width:460px;border-radius:14px;overflow:hidden">'
-    + '<div style="background:#1e293b;padding:16px 20px;display:flex;align-items:center;justify-content:space-between">'
-    + '<div style="color:#fff;font-size:15px;font-weight:800">Executive Feedback</div>'
-    + '<button onclick="closeOv(this)" style="background:rgba(255,255,255,0.1);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">×</button>'
-    + '</div>'
-    + '<div style="padding:16px 20px;background:#f8fafc">'
-    + '<div style="font-size:12px;color:#64748b;margin-bottom:14px">Tell Corestone what\'s wrong. No technical knowledge needed — just describe what you expected or noticed.</div>'
-    // Quick buttons
-    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">'
-    + '<button onclick="setFeedbackType(\'issue\',this)" style="padding:10px 6px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit">🐛 Something<br>is broken</button>'
-    + '<button onclick="setFeedbackType(\'incomplete\',this)" style="padding:10px 6px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit">📋 Page feels<br>incomplete</button>'
-    + '<button onclick="setFeedbackType(\'wrong\',this)" style="padding:10px 6px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit">❓ Something<br>feels wrong</button>'
-    + '</div>'
-    + '<input type="hidden" id="fb-type" value="issue">'
-    + '<textarea id="fb-text" style="width:100%;min-height:90px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:10px" placeholder="Describe what you expected to happen, or what doesn\'t feel right...\n\nExamples:\n• \'I clicked Send but nothing happened\'\n• \'This page is missing the invoice list\'\n• \'I expected a Gatekeeper item after approving this\'"></textarea>'
-    + '<div style="background:#f1f5f9;border-radius:8px;padding:10px;font-size:11px;color:#64748b;margin-bottom:12px">'
-    + '<strong style="color:#1e293b">Auto-collected context:</strong><br>'
-    + 'Page: <strong>' + ctx.page + '</strong> · Job: <strong>' + ctx.job + '</strong> · Time: ' + new Date().toLocaleTimeString()
-    + '</div>'
-    + '<div style="display:flex;gap:8px">'
-    + '<button onclick="submitFeedback(' + JSON.stringify(ctx).replace(/"/g,"'") + ',this)" style="flex:1;padding:10px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🤖 Submit + AI Analysis</button>'
-    + '</div>'
-    + '</div></div>';
-  document.body.appendChild(el);
-  setTimeout(function(){ var t=document.getElementById('fb-text');if(t)t.focus(); },200);
-}
-
-function setFeedbackType(type, btn) {
-  document.getElementById('fb-type').value = type;
-  document.querySelectorAll('#exec-feedback-ov button[onclick^="setFeedback"]').forEach(function(b){
-    b.style.borderColor='#e2e8f0';b.style.background='#fff';b.style.color='#1e293b';
+  // Capture any visible error messages on screen
+  document.querySelectorAll('[class*="err"],[class*="error"],.toast').forEach(function(el){
+    var txt = el.textContent.trim();
+    if(txt && txt.length > 3) ctx.visible_errors.push(txt.substring(0,100));
   });
-  btn.style.borderColor='#0d7a70';btn.style.background='#e8f5f3';btn.style.color='#0d7a70';
+
+  // Active record (try to find what's open)
+  var modalTitle = document.querySelector('.mt');
+  if(modalTitle) ctx.active_record = modalTitle.textContent.trim().substring(0,60);
+
+  // GK count
+  var gkBadge = document.getElementById('gk-count-top');
+  if(gkBadge) ctx.gk_pending = parseInt(gkBadge.textContent)||0;
+
+  return ctx;
 }
 
-async function submitFeedback(ctx, btnEl) {
-  var text = document.getElementById('fb-text').value.trim();
-  var type = document.getElementById('fb-type').value;
-  if(!text) { toast('Please describe what you noticed', 'err'); return; }
-  btnEl.textContent = '🤖 Analyzing...'; btnEl.disabled = true;
+// ── FEEDBACK BUTTON — always visible, every screen ────────────────────────
+function buildExecFeedbackBtn(){
+  if(document.getElementById('efq-fab')) return;
 
-  // AI generates structured development report
-  var prompt = 'You are the development team for Corestone OS, an AI-powered construction management system.\n\n'
-    + 'EXECUTIVE FEEDBACK:\nType: ' + type + '\nDescription: ' + text + '\n\n'
-    + 'CONTEXT:\nPage: ' + ctx.page + '\nActive Job: ' + ctx.job + '\nTime: ' + ctx.timestamp + '\n\n'
-    + 'Generate a structured development report:\n'
-    + '1. ROOT CAUSE (likely technical cause based on context)\n'
-    + '2. AFFECTED WORKFLOWS (which business workflows are impacted)\n'
-    + '3. BLUEPRINT ALIGNMENT (which Blueprint section covers this)\n'
-    + '4. PRIORITY (Critical/High/Medium/Low with reason)\n'
-    + '5. RECOMMENDED FIX (specific technical action)\n'
-    + '6. DOWNSTREAM IMPACT (what else might be affected)\n\n'
-    + 'Keep each section to 1-2 sentences. Be specific and technical.';
+  var fab = document.createElement('div');
+  fab.id = 'efq-fab';
+  fab.style.cssText = 'position:fixed;bottom:24px;left:20px;z-index:8000;display:flex;flex-direction:column;align-items:flex-start;gap:6px';
 
-  try {
-    var analysis = await ai(prompt, 'You are a senior software architect. Be precise and technical. No markdown headers.', 1500);
+  fab.innerHTML =
+    // Issue count badge + main button
+    '<div id="efq-fab-row" style="display:flex;align-items:center;gap:8px">'
+    + '<button id="efq-main-btn" onclick="efqOpen()" style="width:48px;height:48px;border-radius:50%;background:#1e293b;color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.25);position:relative;display:flex;align-items:center;justify-content:center" title="Report issue or feedback">💬'
+    + '<span id="efq-count-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#dc2626;color:#fff;font-size:9px;font-weight:800;border-radius:10px;padding:1px 5px;min-width:16px;text-align:center">0</span>'
+    + '</button>'
+    + '<div id="efq-hint" style="background:#1e293b;color:#fff;font-size:11px;font-weight:700;padding:5px 10px;border-radius:20px;white-space:nowrap;opacity:0;transition:opacity 0.2s;pointer-events:none">Report Issue</div>'
+    + '</div>';
 
-    // Save feedback to localStorage
-    var feedbacks = JSON.parse(localStorage.getItem('cs_feedback')||'[]');
-    var fb = {
-      id: 'fb_' + Date.now(),
-      type: type,
-      description: text,
-      context: ctx,
-      ai_analysis: analysis,
-      status: 'open',
-      created_at: new Date().toISOString()
-    };
-    feedbacks.push(fb);
-    localStorage.setItem('cs_feedback', JSON.stringify(feedbacks));
+  document.body.appendChild(fab);
 
-    // Add to Gatekeeper for tracking
-    await addToGatekeeper('feedback',
-      (type==='issue'?'🐛':'type'==='incomplete'?'📋':'❓') + ' Exec Feedback: ' + text.substring(0,60) + (text.length>60?'...':''),
-      'Page: ' + ctx.page + '\nDescription: ' + text + '\n\nAI Analysis:\n' + analysis,
-      type==='issue'?'high':'normal',
-      'Review AI analysis and fix before next Executive Testing.',
-      'feedback'
-    );
-
-    closeOv(document.getElementById('exec-feedback-ov'));
-    nextStep('Feedback Received — AI Report Generated',
-      'Your feedback has been logged and analyzed. The development team will address it before the next Executive Testing session.',
-      [
-        {icon:'⚙️', label:'View in Gatekeeper', sub:'See the development report', fn:"goTab('gatekeeper')", primary:true},
-        {icon:'💬', label:'Submit another', sub:'Report another issue', fn:"openExecFeedback()"}
-      ]
-    );
-  } catch(e) {
-    // Save even without AI
-    var feedbacks = JSON.parse(localStorage.getItem('cs_feedback')||'[]');
-    feedbacks.push({id:'fb_'+Date.now(),type:type,description:text,context:ctx,ai_analysis:'AI unavailable: '+e.message,status:'open',created_at:new Date().toISOString()});
-    localStorage.setItem('cs_feedback', JSON.stringify(feedbacks));
-    toast('Feedback saved (AI analysis unavailable)', 'ok');
-    closeOv(document.getElementById('exec-feedback-ov'));
-    btnEl.textContent='Submit + AI Analysis'; btnEl.disabled=false;
+  // Show hint on hover
+  var btn = document.getElementById('efq-main-btn');
+  var hint = document.getElementById('efq-hint');
+  if(btn && hint){
+    btn.onmouseenter = function(){ hint.style.opacity='1'; };
+    btn.onmouseleave = function(){ hint.style.opacity='0'; };
   }
+
+  EFQ.sessionStart = EFQ.sessionStart || new Date().toISOString();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTIFICATION CENTER — OS #8
-// Replaces toast-only with a real notification panel that persists
-// ═══════════════════════════════════════════════════════════════════════════
+// ── OPEN THE FEEDBACK PANEL ────────────────────────────────────────────────
+function efqOpen(){
+  var existing = document.getElementById('efq-panel');
+  if(existing){ existing.remove(); return; }
 
-var NOTIF_UNREAD = 0;
-
-function addNotification(type, title, body, action) {
-  var notifs = JSON.parse(localStorage.getItem('cs_notifications')||'[]');
-  var n = {
-    id: 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
-    type: type, // 'gk' | 'workflow' | 'ai' | 'system' | 'alert'
-    title: title,
-    body: body,
-    action: action || null,
-    read: false,
-    created_at: new Date().toISOString()
-  };
-  notifs.unshift(n); // newest first
-  if(notifs.length > 100) notifs = notifs.slice(0,100); // cap at 100
-  localStorage.setItem('cs_notifications', JSON.stringify(notifs));
-  NOTIF_UNREAD++;
-  updateNotifBadge();
-  // Still show toast for immediate feedback
-  return n;
-}
-
-function updateNotifBadge() {
-  var badge = document.getElementById('notif-badge');
-  if(!badge) return;
-  var notifs = JSON.parse(localStorage.getItem('cs_notifications')||'[]');
-  var unread = notifs.filter(function(n){return !n.read;}).length;
-  badge.textContent = unread > 99 ? '99+' : String(unread);
-  badge.style.display = unread > 0 ? 'flex' : 'none';
-}
-
-function openNotifCenter() {
-  var existing = document.getElementById('notif-panel');
-  if(existing) { existing.remove(); return; }
-
-  var notifs = JSON.parse(localStorage.getItem('cs_notifications')||'[]');
-
-  // Mark all as read
-  notifs.forEach(function(n){ n.read = true; });
-  localStorage.setItem('cs_notifications', JSON.stringify(notifs));
-  updateNotifBadge();
-
-  var typeIcon = {gk:'⚙️',workflow:'🔄',ai:'🤖',system:'ℹ️',alert:'⚠️',feedback:'💬'};
-  var typeColor = {gk:'var(--amber)',workflow:'var(--teal)',ai:'var(--blue)',system:'var(--ink3)',alert:'var(--red)',feedback:'var(--purple)'};
-
-  var panel = document.createElement('div');
-  panel.id = 'notif-panel';
-  panel.style.cssText = 'position:fixed;top:52px;right:0;width:360px;height:calc(100vh - 52px);background:#fff;border-left:1px solid #e2e8f0;z-index:4000;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.1);font-family:inherit;overflow:hidden';
-
-  var notifHtml = notifs.length === 0
-    ? '<div style="text-align:center;padding:48px 20px;color:#94a3b8"><div style="font-size:32px;margin-bottom:10px">🔔</div><div style="font-size:13px;font-weight:600">No notifications yet</div><div style="font-size:11px;margin-top:4px">Workflow events, AI alerts, and Gatekeeper items will appear here</div></div>'
-    : notifs.map(function(n) {
-        var icon = typeIcon[n.type] || 'ℹ️';
-        var color = typeColor[n.type] || 'var(--ink3)';
-        var age = Math.round((Date.now() - new Date(n.created_at).getTime()) / 60000);
-        var ageStr = age < 60 ? age + 'm ago' : age < 1440 ? Math.round(age/60) + 'h ago' : Math.round(age/1440) + 'd ago';
-        return '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;cursor:pointer;background:#fff" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'"'
-          + (n.action ? ' onclick="' + n.action.replace(/"/g,"'") + ';document.getElementById(\'notif-panel\').remove()"' : '') + '>'
-          + '<div style="display:flex;align-items:flex-start;gap:10px">'
-          + '<span style="font-size:16px;flex-shrink:0;margin-top:1px">' + icon + '</span>'
-          + '<div style="flex:1;min-width:0">'
-          + '<div style="font-size:12px;font-weight:700;margin-bottom:2px;color:#1e293b">' + n.title + '</div>'
-          + '<div style="font-size:11px;color:#64748b;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + n.body + '</div>'
-          + '</div>'
-          + '<div style="font-size:10px;color:#94a3b8;flex-shrink:0;margin-top:2px">' + ageStr + '</div>'
-          + '</div></div>';
-      }).join('');
-
-  panel.innerHTML = '<div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;background:#f8fafc">'
-    + '<div style="font-size:13px;font-weight:800">Notifications</div>'
-    + '<div style="display:flex;gap:8px;align-items:center">'
-    + '<button onclick="clearNotifications()" style="font-size:11px;color:#64748b;background:none;border:none;cursor:pointer;font-family:inherit">Clear all</button>'
-    + '<button onclick="document.getElementById(\'notif-panel\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">×</button>'
-    + '</div></div>'
-    + '<div style="flex:1;overflow-y:auto">' + notifHtml + '</div>';
-
-  document.body.appendChild(panel);
-}
-
-function clearNotifications() {
-  localStorage.setItem('cs_notifications', '[]');
-  var panel = document.getElementById('notif-panel');
-  if(panel) panel.remove();
-  updateNotifBadge();
-  toast('Notifications cleared', 'ok');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GLOBAL SEARCH — OS #8
-// Cmd+K to open. Searches leads, jobs, proposals, estimates, invoices, COs.
-// ═══════════════════════════════════════════════════════════════════════════
-
-function openGlobalSearch() {
-  var existing = document.getElementById('global-search-ov');
-  if(existing) { existing.remove(); return; }
+  var ctx = efqCaptureContext();
 
   var el = document.createElement('div');
-  el.id = 'global-search-ov';
-  el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,0.6);z-index:7000;display:flex;align-items:flex-start;justify-content:center;padding-top:80px';
-  el.onclick = function(e){ if(e.target===el) el.remove(); };
+  el.id = 'efq-panel';
+  el.style.cssText = 'position:fixed;bottom:80px;left:20px;z-index:8500;width:380px;background:#fff;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,0.2);border:1px solid #e2e8f0;overflow:hidden;font-family:inherit';
 
-  el.innerHTML = '<div style="width:600px;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3)">'
-    + '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:10px">'
-    + '<span style="font-size:18px;color:#94a3b8">🔍</span>'
-    + '<input id="gs-input" style="flex:1;border:none;outline:none;font-size:15px;font-family:inherit;color:#1e293b" placeholder="Search leads, jobs, proposals, invoices..." autocomplete="off">'
-    + '<kbd style="font-size:11px;color:#94a3b8;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:2px 6px">ESC</kbd>'
+  var issueCount = EFQ.issues.length;
+  var errorCount = EFQ.consoleErrors.length;
+
+  el.innerHTML =
+    // Header
+    '<div style="background:#1e293b;padding:14px 16px;display:flex;align-items:center;justify-content:space-between">'
+    + '<div>'
+    + '<div style="color:#fff;font-size:14px;font-weight:800">Executive Feedback</div>'
+    + '<div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:2px">Page: <strong style="color:rgba(255,255,255,0.8)">'+(ctx.page||'unknown')+'</strong>'+(ctx.job_name?' · '+ctx.job_name:'')+'</div>'
     + '</div>'
-    + '<div id="gs-results" style="max-height:440px;overflow-y:auto">'
-    + '<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">Start typing to search...</div>'
+    + '<div style="display:flex;gap:8px;align-items:center">'
+    + (errorCount ? '<span style="background:#dc2626;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px" title="Auto-captured JS errors">'+errorCount+' error'+(errorCount>1?'s':'')+'</span>' : '')
+    + '<button onclick="document.getElementById(\'efq-panel\').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:13px">×</button>'
+    + '</div></div>'
+    // Issue type grid - 7 categories
+    + '<div style="padding:14px 16px 10px">'
+    + '<div style="font-size:11px;color:#64748b;margin-bottom:10px;font-weight:600">What are you reporting?</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">'
+    + efqTypeBtn('bug','🐛','Bug / Error','Something broke')
+    + efqTypeBtn('automation','⚡','Missing Automation','Should have happened automatically')
+    + efqTypeBtn('button','🔘','Button Not Working','Clicked but nothing happened')
+    + efqTypeBtn('workflow','🔄','Workflow Feels Wrong','Stopped or went wrong direction')
+    + efqTypeBtn('feature','💡','Missing Feature','Something I expected isn\'t there')
+    + efqTypeBtn('ui','🎨','UI Problem','Looks wrong or confusing')
+    + '</div>'
+    + '<div style="margin-bottom:10px">'
+    + efqTypeBtn('ai_review','🤖','AI Should Review This Page','Let AI analyze what\'s wrong here')
+    + '</div>'
+    // Free text
+    + '<textarea id="efq-text" placeholder="One sentence is enough. \'This button did nothing.\' \'This should have gone automatic.\' \'I expected something else.\'" style="width:100%;min-height:72px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>'
+    + '<input type="hidden" id="efq-type" value="">'
+    // Context preview (collapsed)
+    + '<details style="margin-top:8px">'
+    + '<summary style="font-size:11px;color:#94a3b8;cursor:pointer">Auto-captured context ('+Object.keys(ctx).length+' fields)</summary>'
+    + '<div style="margin-top:6px;background:#f8fafc;border-radius:6px;padding:8px;font-size:10px;color:#64748b;line-height:1.8">'
+    + '📍 Page: '+ctx.page+'<br>'
+    + (ctx.job_name ? '🏗️ Job: '+ctx.job_name+'<br>' : '')
+    + (ctx.active_record ? '📄 Active: '+ctx.active_record+'<br>' : '')
+    + '🖱️ Last clicks: '+(ctx.recent_clicks.slice(-3).map(function(c){return c.label||c.el;}).join(' → ')||'none')+'<br>'
+    + (ctx.console_errors.length ? '⚠️ JS errors: '+ctx.console_errors.length+'<br>' : '')
+    + '🔑 GK pending: '+ctx.gk_pending
+    + '</div></details>'
+    // Actions
+    + '<div style="display:flex;gap:8px;margin-top:12px">'
+    + '<button onclick="efqLogAndKeepTesting()" style="flex:1;padding:10px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Log &amp; Keep Testing</button>'
+    + '<button onclick="efqLogAndShowQueue()" style="padding:10px 14px;background:#f1f5f9;color:#1e293b;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">View Queue ('+issueCount+')</button>'
     + '</div>'
     + '</div>';
 
   document.body.appendChild(el);
-  var inp = document.getElementById('gs-input');
-  setTimeout(function(){ inp.focus(); }, 100);
-
-  inp.addEventListener('input', function(){
-    var q = this.value.trim();
-    if(q.length < 2) {
-      document.getElementById('gs-results').innerHTML = '<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">Start typing to search...</div>';
-      return;
-    }
-    runGlobalSearch(q);
-  });
-
-  document.addEventListener('keydown', function esc(e){
-    if(e.key==='Escape'){ var ov=document.getElementById('global-search-ov');if(ov)ov.remove(); document.removeEventListener('keydown',esc); }
-  });
+  setTimeout(function(){ var t=document.getElementById('efq-text');if(t)t.focus(); },100);
 }
 
-async function runGlobalSearch(q) {
-  var ql = q.toLowerCase();
-  var results = [];
+function efqTypeBtn(type, icon, label, sub){
+  var isAI = type === 'ai_review';
+  return '<button onclick="efqSelectType(\''+type+'\',this)" data-type="'+type+'" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:2px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;'+(isAI?'grid-column:span 2;':'')+'width:100%">'
+    + '<span style="font-size:16px">'+icon+'</span>'
+    + '<div><div style="font-size:12px;font-weight:700;color:#1e293b">'+label+'</div>'
+    + '<div style="font-size:10px;color:#94a3b8">'+sub+'</div></div>'
+    + '</button>';
+}
 
-  // Search leads
-  try {
-    var leads = await dbGet('leads','?order=created_at.desc');
-    leads.filter(function(l){
-      return (l.client_name||'').toLowerCase().includes(ql)
-        || (l.address||'').toLowerCase().includes(ql)
-        || (l.job_type||'').toLowerCase().includes(ql)
-        || (l.notes||'').toLowerCase().includes(ql);
-    }).slice(0,3).forEach(function(l){
-      results.push({icon:'👤',type:'Lead',title:l.client_name,sub:l.job_type+' · '+fmt$(l.estimated_value)+' · '+l.stage,fn:"closeOv(document.getElementById('global-search-ov'));leadDetail('"+l.id+"')"});
-    });
-  } catch(e){}
+function efqSelectType(type, btn){
+  document.querySelectorAll('#efq-panel button[data-type]').forEach(function(b){
+    b.style.borderColor='#e2e8f0'; b.style.background='#f8fafc';
+  });
+  btn.style.borderColor='#0d7a70'; btn.style.background='#e8f5f3';
+  document.getElementById('efq-type').value = type;
+  if(type === 'ai_review'){
+    var txt = document.getElementById('efq-text');
+    if(txt && !txt.value) txt.value = 'Please review this page for issues and missing automations.';
+  }
+}
 
-  // Search jobs
-  try {
-    var jobs = await dbGet('jobs','?order=created_at.desc');
-    jobs.filter(function(j){
-      return (j.job_name||'').toLowerCase().includes(ql)
-        || (j.client_name||'').toLowerCase().includes(ql)
-        || (j.address||'').toLowerCase().includes(ql);
-    }).slice(0,3).forEach(function(j){
-      results.push({icon:'🏗️',type:'Job',title:j.job_name,sub:j.client_name+' · '+j.status+' · '+fmt$(j.contract_price||j.budget||0),fn:"closeOv(document.getElementById('global-search-ov'));AJOB=ALLJOBS.find(function(x){return x.id==='"+j.id+"';});"+'if(AJOB){goTab("financial")}else{ALLJOBS.push('+JSON.stringify(j)+');AJOB=ALLJOBS[ALLJOBS.length-1];goTab("financial")}'});
-    });
-  } catch(e){}
+// ── LOG ISSUE AND KEEP TESTING ─────────────────────────────────────────────
+async function efqLogAndKeepTesting(){
+  var text = (document.getElementById('efq-text')||{}).value || '';
+  var type = (document.getElementById('efq-type')||{}).value || 'general';
+  if(!text.trim()){ toast('Describe the issue in one sentence','err'); return; }
 
-  // Search proposals
-  try {
-    var props = await dbGet('proposals','?order=created_at.desc');
-    props.filter(function(p){
-      return (p.client_name||'').toLowerCase().includes(ql)
-        || (p.address||'').toLowerCase().includes(ql);
-    }).slice(0,3).forEach(function(p){
-      results.push({icon:'📋',type:'Proposal',title:'Proposal — '+p.client_name,sub:fmt$(p.total_price||0)+' · '+p.status,fn:"closeOv(document.getElementById('global-search-ov'));openProposal('"+p.id+"')"});
-    });
-  } catch(e){}
+  var ctx = efqCaptureContext();
+  var issue = {
+    id: 'efq_' + Date.now(),
+    type: type || 'general',
+    description: text.trim(),
+    context: ctx,
+    severity: efqSeverity(type),
+    status: 'open',
+    created_at: new Date().toISOString()
+  };
 
-  // Search estimates
-  try {
-    var ests = await dbGet('estimates','?order=created_at.desc');
-    ests.filter(function(e){
-      return (e.title||'').toLowerCase().includes(ql)
-        || (e.client_name||'').toLowerCase().includes(ql);
-    }).slice(0,3).forEach(function(e){
-      results.push({icon:'💰',type:'Estimate',title:e.title||e.client_name,sub:e.client_name+' · '+e.status,fn:"closeOv(document.getElementById('global-search-ov'));openEstimate('"+e.id+"')"});
-    });
-  } catch(e){}
+  EFQ.issues.push(issue);
+  efqUpdateBadge();
 
-  // Search invoices
-  try {
-    var invs = await dbGet('invoices','?order=created_at.desc');
-    invs.filter(function(i){
-      return (i.client_name||'').toLowerCase().includes(ql)
-        || (i.invoice_number||'').toLowerCase().includes(ql);
-    }).slice(0,3).forEach(function(i){
-      results.push({icon:'🧾',type:'Invoice',title:(i.invoice_number||'Invoice')+' — '+i.client_name,sub:fmt$(i.amount)+' · '+i.status,fn:"closeOv(document.getElementById('global-search-ov'));goTab('financial')"});
-    });
-  } catch(e){}
-
-  var rEl = document.getElementById('gs-results');
-  if(!rEl) return;
-
-  if(results.length === 0) {
-    rEl.innerHTML = '<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">No results for "'+q+'"</div>';
+  // Special handling for AI review
+  if(type === 'ai_review'){
+    var panel = document.getElementById('efq-panel');
+    if(panel) panel.remove();
+    await efqRunAIReview(issue);
     return;
   }
 
-  // Group by type
-  var byType = {};
-  results.forEach(function(r){ if(!byType[r.type]) byType[r.type]=[];byType[r.type].push(r); });
-  var html = '';
-  Object.keys(byType).forEach(function(type){
-    html += '<div style="padding:8px 16px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8">' + type + '</div>';
-    byType[type].forEach(function(r){
-      html += '<div onclick="'+r.fn+'" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:12px" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'
-        + '<span style="font-size:18px">' + r.icon + '</span>'
-        + '<div><div style="font-size:13px;font-weight:700;color:#1e293b">' + r.title + '</div>'
-        + '<div style="font-size:11px;color:#64748b">' + r.sub + '</div></div>'
-        + '</div>';
-    });
-  });
-  rEl.innerHTML = html;
+  toast('Issue logged ✅ — '+ EFQ.issues.length +' total. Keep testing.','ok',3000);
+  var panel = document.getElementById('efq-panel');
+  if(panel) panel.remove();
 }
 
-// Keyboard shortcut: Cmd+K or Ctrl+K
-document.addEventListener('keydown', function(e){
-  if((e.metaKey || e.ctrlKey) && e.key === 'k'){
-    e.preventDefault();
-    openGlobalSearch();
+async function efqRunAIReview(issue){
+  var ctx = issue.context;
+  toast('🤖 AI reviewing '+ctx.page+'...','ok',10000);
+  try{
+    var prompt = 'You are the QA Director for Corestone OS, an AI-powered construction management system.\n'
+      + 'Review this page from the perspective of a construction company president.\n\n'
+      + 'PAGE: ' + ctx.page + '\n'
+      + 'ACTIVE JOB: ' + (ctx.job_name||'none') + ' (status: '+(ctx.job_status||'unknown')+')\n'
+      + 'ACTIVE RECORD: ' + (ctx.active_record||'none') + '\n'
+      + 'RECENT CLICKS: ' + ctx.recent_clicks.map(function(c){return c.label;}).join(' → ') + '\n'
+      + 'JS ERRORS: ' + (ctx.console_errors.length ? JSON.stringify(ctx.console_errors) : 'none') + '\n'
+      + 'GK PENDING: ' + ctx.gk_pending + '\n\n'
+      + 'Identify:\n'
+      + '1. What should be happening automatically on this page that might not be?\n'
+      + '2. What downstream workflows might be missing?\n'
+      + '3. What would a construction company president expect to see here?\n'
+      + '4. Any obvious gaps in business logic?\n'
+      + 'Be specific. Construction company context. 5-8 bullet points.';
+
+    var result = await ai(prompt,'Senior QA Director. Construction industry expert. No markdown.',1200);
+    issue.ai_analysis = result;
+    issue.type = 'ai_review';
+    efqUpdateBadge();
+
+    // Show result briefly then add to queue
+    var el = document.createElement('div');
+    el.className = 'ov'; el.id = 'efq-ai-result'; el.style.zIndex = '9000';
+    el.innerHTML = '<div class="modal" style="max-width:500px">'
+      + '<div class="mh"><div><div class="mt">🤖 AI Page Review — '+ctx.page+'</div>'
+      + '<div class="ms">'+ctx.job_name||''+'</div></div>'
+      + '<button class="mc" onclick="closeOv(this)">×</button></div>'
+      + '<div class="mb"><div style="font-size:13px;line-height:1.8;color:var(--text);white-space:pre-wrap">'+result+'</div></div>'
+      + '<div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Dismiss</button>'
+      + '<button class="btn btn-p" onclick="closeOv(this);efqSendToQueue()">Send to Fix Queue</button></div></div>';
+    document.body.appendChild(el);
+  }catch(e){
+    toast('AI review failed: '+e.message,'err');
   }
-});
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-// EXECUTIVE FEEDBACK SYSTEM — OS #8
-// Feishy clicks one button, says what feels wrong,
-// and Corestone auto-collects all technical context.
-// He should never have to diagnose software.
-// ═══════════════════════════════════════════════════════════════════════════
-
-var EFS = {
-  isOpen: false,
-  mode: null, // 'report'|'suggest'|'ai_review'
-  capturedContext: null
-};
-
-function capturePageContext() {
-  // Auto-collect everything needed for a dev report
-  var errors = [];
-  // Capture console errors if any stored
-  if(window._consoleErrors) errors = window._consoleErrors.slice(-5);
-
-  return {
-    timestamp: new Date().toISOString(),
-    current_tab: CUR || 'unknown',
-    active_job: AJOB ? { id: AJOB.id, name: AJOB.job_name, status: AJOB.status } : null,
-    active_lead: typeof ACTIVE_LEAD !== 'undefined' && ACTIVE_LEAD ? { id: ACTIVE_LEAD.id, name: ACTIVE_LEAD.client_name } : null,
-    page_title: document.title,
-    viewport: window.innerWidth + 'x' + window.innerHeight,
-    url: window.location.href,
-    recent_errors: errors,
-    etm_active: typeof ETM !== 'undefined' && ETM.active,
-    etm_scenario: typeof ETM !== 'undefined' && ETM.active ? ETM.currentScenario : null,
-    blueprint_section: getBlueprintSection(CUR),
-    visible_content_snippet: (document.getElementById('content') || {}).textContent
-      ? document.getElementById('content').textContent.slice(0,300).replace(/\s+/g,' ').trim()
-      : 'content not captured'
-  };
 }
 
-function getBlueprintSection(tab) {
-  var map = {
-    sales: 'Lead Capture & CRM (WF-01)',
-    proposals: 'Proposal Generation (WF-03)',
-    estimates: 'Estimating Module',
-    jobs: 'Job Management',
-    financial: 'Financial Architecture',
-    bills: 'Accounts Payable',
-    invoices: 'Accounts Receivable',
-    cos: 'Change Orders (WF-05)',
-    gatekeeper: 'Gatekeeper Queue',
-    rfis: 'RFI Management (WF-04)',
-    punchlist: 'Punch List',
-    schedule: 'Schedule Management',
-    budget: 'Job Costing Budget',
-    pos: 'Purchase Orders (3-stage Directive)',
-    daily: 'Daily Logs',
-    dashboard: 'Executive Dashboard',
-  };
-  return map[tab] || 'General Platform';
-}
-
-// Intercept console errors
-(function() {
-  window._consoleErrors = [];
-  var orig = console.error.bind(console);
-  console.error = function() {
-    window._consoleErrors.push({
-      msg: Array.from(arguments).join(' ').slice(0,200),
-      time: new Date().toISOString()
+// ── VIEW ISSUE QUEUE ───────────────────────────────────────────────────────
+function efqLogAndShowQueue(){
+  var text = (document.getElementById('efq-text')||{}).value || '';
+  var type = (document.getElementById('efq-type')||{}).value || 'general';
+  if(text.trim()){
+    var ctx = efqCaptureContext();
+    EFQ.issues.push({
+      id:'efq_'+Date.now(), type:type||'general', description:text.trim(),
+      context:ctx, severity:efqSeverity(type), status:'open', created_at:new Date().toISOString()
     });
-    if(window._consoleErrors.length > 20) window._consoleErrors.shift();
-    orig.apply(console, arguments);
-  };
-})();
+    efqUpdateBadge();
+  }
+  var panel = document.getElementById('efq-panel');
+  if(panel) panel.remove();
+  efqShowQueue();
+}
 
-function launchExecFeedback(mode) {
-  EFS.mode = mode || 'report';
-  EFS.capturedContext = capturePageContext();
-  var existing = document.getElementById('efs-panel');
-  if(existing) existing.remove();
+function efqShowQueue(){
+  var existing = document.getElementById('efq-queue-panel');
+  if(existing){ existing.remove(); return; }
 
-  var titles = {
-    report: '🐛 Report an Issue',
-    suggest: '💡 Suggest an Improvement',
-    ai_review: '🤖 Ask AI to Review This Page'
-  };
-  var placeholders = {
-    report: 'Describe what happened vs what you expected. Be as specific or as vague as you want — Corestone collects the technical details automatically.',
-    suggest: 'What would make this better? What feels missing or incomplete?',
-    ai_review: 'What should the AI focus on? (leave blank for a complete review)'
-  };
+  var autoIssues = EFQ.consoleErrors.map(function(e){
+    return {id:'auto_'+e.t, type:'bug', description:'JS Error: '+e.msg+' ('+e.src+':'+e.line+')',
+      context:{page:e.page,timestamp:e.t}, severity:'high', status:'open', created_at:e.t, auto:true};
+  });
+
+  var allIssues = EFQ.issues.concat(autoIssues);
 
   var panel = document.createElement('div');
-  panel.id = 'efs-panel';
-  panel.style.cssText = 'position:fixed;bottom:0;right:16px;width:400px;background:#fff;border:1px solid var(--border);border-top-left-radius:14px;border-top-right-radius:14px;box-shadow:0 -4px 24px rgba(0,0,0,0.12);z-index:8000;font-family:inherit;overflow:hidden';
+  panel.id = 'efq-queue-panel';
+  panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:420px;background:#fff;border-left:1px solid #e2e8f0;z-index:8500;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.1);font-family:inherit';
 
-  panel.innerHTML = '<div style="background:linear-gradient(135deg,#1e293b,#334155);padding:14px 18px;display:flex;align-items:center;justify-content:space-between">'
-    + '<div><div style="font-size:14px;font-weight:800;color:#fff">' + titles[EFS.mode] + '</div>'
-    + '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">Page: ' + (EFS.capturedContext.current_tab||'?') + (EFS.capturedContext.active_job?' · Job: '+EFS.capturedContext.active_job.name:'') + '</div></div>'
-    + '<button onclick="document.getElementById(\'efs-panel\').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:12px">✕ Close</button>'
+  var typeIcon = {bug:'🐛',automation:'⚡',button:'🔘',workflow:'🔄',feature:'💡',ui:'🎨',ai_review:'🤖',general:'📝'};
+  var sevColor = {high:'var(--red)',normal:'var(--amber)',low:'var(--muted)'};
+
+  var issueHtml = allIssues.length === 0
+    ? '<div style="text-align:center;padding:48px 20px;color:#94a3b8"><div style="font-size:32px;margin-bottom:10px">✅</div><div style="font-size:13px;font-weight:700">No issues logged yet</div><div style="font-size:11px;margin-top:4px">Keep testing. Log issues with the 💬 button.</div></div>'
+    : allIssues.map(function(issue, i){
+        var icon = typeIcon[issue.type]||'📝';
+        var sc = sevColor[issue.severity]||sevColor.normal;
+        var age = Math.round((Date.now()-new Date(issue.created_at).getTime())/60000);
+        var ageStr = age < 60 ? age+'m ago' : Math.round(age/60)+'h ago';
+        return '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;border-left:3px solid '+sc+'">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">'
+          + '<div style="display:flex;align-items:center;gap:6px">'
+          + '<span>'+icon+'</span>'
+          + '<span style="font-size:11px;font-weight:800;color:#1e293b;text-transform:uppercase">'+(issue.auto?'AUTO ':'')+(issue.type||'general')+'</span>'
+          + '<span style="font-size:10px;color:#94a3b8">'+issue.context.page+'</span>'
+          + '</div>'
+          + '<span style="font-size:10px;color:#94a3b8">'+ageStr+'</span>'
+          + '</div>'
+          + '<div style="font-size:13px;color:#1e293b;line-height:1.5">'+issue.description+'</div>'
+          + (issue.ai_analysis?'<div style="font-size:11px;color:#0d7a70;margin-top:4px;background:#e8f5f3;padding:6px;border-radius:4px">🤖 '+issue.ai_analysis.substring(0,120)+'...</div>':'')
+          + (issue.context.job_name?'<div style="font-size:10px;color:#94a3b8;margin-top:4px">🏗️ '+issue.context.job_name+'</div>':'')
+          + '</div>';
+      }).join('');
+
+  panel.innerHTML =
+    '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;background:#1e293b;display:flex;align-items:center;justify-content:space-between">'
+    + '<div><div style="color:#fff;font-size:14px;font-weight:800">Issue Queue</div>'
+    + '<div style="color:rgba(255,255,255,0.5);font-size:11px">'+allIssues.length+' issue'+(allIssues.length!==1?'s':'')+' captured this session</div>'
     + '</div>'
-    + '<div style="padding:16px">'
-    + '<textarea id="efs-text" placeholder="' + placeholders[EFS.mode] + '" style="width:100%;min-height:100px;border:1.5px solid var(--border);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:12px"></textarea>'
-    + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">'
-    + '<button onclick="efsMicInput()" style="background:var(--teal-bg);color:var(--teal);border:1px solid var(--teal);border-radius:6px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice</button>'
-    + '<span style="font-size:11px;color:var(--muted)">Or speak your feedback directly</span>'
+    + '<button onclick="document.getElementById(\'efq-queue-panel\').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">×</button>'
     + '</div>'
-    + '<div style="background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--muted)">'
-    + '🔍 <strong>Auto-captured:</strong> Tab: ' + (EFS.capturedContext.current_tab||'?')
-    + (EFS.capturedContext.active_job ? ' · Job: ' + EFS.capturedContext.active_job.name : '')
-    + ' · Blueprint: ' + EFS.capturedContext.blueprint_section
-    + (EFS.capturedContext.recent_errors.length ? ' · ⚠️ ' + EFS.capturedContext.recent_errors.length + ' console error(s) captured' : '')
-    + '</div>'
-    + '<div style="display:flex;gap:8px">'
-    + '<button onclick="document.getElementById(\'efs-panel\').remove()" style="flex:1;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13px">Cancel</button>'
-    + '<button onclick="efsSubmit()" style="flex:2;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-family:inherit;font-size:13px">Submit Feedback</button>'
-    + '</div></div>';
+    + '<div style="flex:1;overflow-y:auto">'+issueHtml+'</div>'
+    + (allIssues.length > 0 ?
+      '<div style="padding:14px 16px;border-top:1px solid #e2e8f0;background:#f8fafc;display:flex;gap:8px">'
+      + '<button onclick="efqClearQueue()" style="padding:10px 14px;background:#fff;color:#64748b;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Clear All</button>'
+      + '<button onclick="efqSendToQueue()" style="flex:1;padding:10px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">📤 Send All Issues to Engineering</button>'
+      + '</div>' : '')
+    + '</div>';
 
   document.body.appendChild(panel);
-  setTimeout(function(){ var t=document.getElementById('efs-text'); if(t) t.focus(); }, 200);
 }
 
-function efsMicInput() {
-  if(typeof micFillField === 'function') {
-    micFillField('efs-text', 'Describe the issue or suggestion', null);
-  } else {
-    toast('Voice input requires Chrome browser','ok',3000);
-  }
-}
+// ── SEND ALL ISSUES TO ENGINEERING ────────────────────────────────────────
+async function efqSendToQueue(){
+  var autoIssues = EFQ.consoleErrors.map(function(e){
+    return {type:'bug',description:'AUTO JS Error: '+e.msg+' at '+e.src+':'+e.line,
+      context:{page:e.page,timestamp:e.t},severity:'high',status:'open',created_at:e.t};
+  });
+  var allIssues = EFQ.issues.concat(autoIssues);
+  if(!allIssues.length){ toast('No issues to send','ok'); return; }
 
-async function efsSubmit() {
-  var text = (document.getElementById('efs-text') || {}).value || '';
-  if(!text.trim() && EFS.mode !== 'ai_review') {
-    toast('Please describe the issue or suggestion', 'err'); return;
-  }
+  toast('🤖 Generating Fix Report...','ok',15000);
 
-  var ctx = EFS.capturedContext || capturePageContext();
-  var modeLabels = { report: 'Issue Report', suggest: 'Improvement Suggestion', ai_review: 'AI Page Review' };
-
-  // If AI review, run the analysis
-  if(EFS.mode === 'ai_review') {
-    document.getElementById('efs-panel').remove();
-    toast('🤖 AI reviewing page...', 'ok', 8000);
-    await efsAIReview(ctx, text);
-    return;
-  }
-
-  // Build structured report
-  var report = {
-    type: EFS.mode,
-    user_description: text,
-    auto_context: ctx,
-    generated_at: new Date().toISOString()
-  };
-
-  // Save to Gatekeeper as development item
-  await addToGatekeeper(
-    'efs_' + EFS.mode,
-    '[' + modeLabels[EFS.mode] + '] ' + (text.slice(0,80) || 'No description'),
-    'Page: ' + ctx.current_tab
-      + (ctx.active_job ? ' | Job: ' + ctx.active_job.name : '')
-      + '\nBlueprint section: ' + ctx.blueprint_section
-      + '\nUser said: ' + text
-      + '\nErrors captured: ' + (ctx.recent_errors.length ? JSON.stringify(ctx.recent_errors) : 'none')
-      + '\nPage content: ' + ctx.visible_content_snippet,
-    'normal',
-    'Development team: investigate and fix.',
-    'efs_feedback'
-  );
-
-  // Also log to audit trail
-  await dbIns('audit_log', {
-    object_type: 'executive_feedback',
-    object_id: 'efs_' + Date.now(),
-    action: EFS.mode,
-    new_value: JSON.stringify(report),
-    changed_by_ai: false,
-    timestamp: new Date().toISOString()
+  // Group by module/page
+  var byPage = {};
+  allIssues.forEach(function(issue){
+    var pg = (issue.context&&issue.context.page)||'unknown';
+    if(!byPage[pg]) byPage[pg] = [];
+    byPage[pg].push(issue);
   });
 
-  document.getElementById('efs-panel').remove();
-  nextStep('Feedback Received', 'Your ' + modeLabels[EFS.mode].toLowerCase() + ' was captured with full context and added to the development queue.', [
-    {icon:'⚙️', label:'View in Gatekeeper', sub:'See the development item', fn:"goTab('gatekeeper')", primary:true}
-  ]);
-}
+  // AI generates the engineering report
+  var issueList = allIssues.map(function(issue,i){
+    return (i+1)+'. ['+issue.type.toUpperCase()+'] Page: '+(issue.context&&issue.context.page||'unknown')
+      +' | '+issue.description
+      +(issue.context&&issue.context.job_name?' | Job: '+issue.context.job_name:'')
+      +(issue.context&&issue.context.recent_clicks&&issue.context.recent_clicks.length
+        ?' | Recent clicks: '+issue.context.recent_clicks.slice(-3).map(function(c){return c.label||c.el;}).join(' → '):'')
+      +(issue.context&&issue.context.console_errors&&issue.context.console_errors.length?' | JS errors on page: yes':'');
+  }).join('\n');
 
-async function efsAIReview(ctx, focus) {
-  try {
-    var prompt = 'You are a senior construction software QA director reviewing a page in Corestone OS — an AI-powered construction operating system for Corestone Developers (Hudson Valley NY).\n\nCURRENT PAGE: ' + ctx.current_tab + '\nBLUEPRINT SECTION: ' + ctx.blueprint_section + '\nACTIVE JOB: ' + (ctx.active_job ? ctx.active_job.name : 'None') + '\nPAGE CONTENT SAMPLE: ' + ctx.visible_content_snippet + '\nCONSOLE ERRORS: ' + (ctx.recent_errors.length ? JSON.stringify(ctx.recent_errors) : 'None') + '\nFOCUS: ' + (focus || 'Complete review') + '\n\nReview this page/module and identify:\n1. Missing workflows (what should happen automatically but doesn\'t)\n2. Missing downstream actions (what should cascade but doesn\'t)\n3. Missing UI elements (what a construction company president would expect to see)\n4. Blueprint alignment issues (what was designed but not built)\n5. Business process gaps (what a real construction workflow requires)\n6. Top 3 improvements to make this feel like enterprise construction software\n\nBe specific and actionable. Reference real construction company workflows.';
+  var prompt = 'You are the engineering team for Corestone OS, a construction management platform.\n'
+    + 'The company president reported these issues during Executive Testing:\n\n'
+    + issueList + '\n\n'
+    + 'Generate a structured Fix Report:\n\n'
+    + 'GROUP 1 — By Module (which pages/modules are affected)\n'
+    + 'GROUP 2 — By Severity (Critical/High/Medium/Low) with business impact\n'
+    + 'GROUP 3 — Root Cause Analysis (what class of problem is this — missing cascade, broken onclick, missing GK executor, UI only, workflow gap)\n'
+    + 'GROUP 4 — Likely Duplicates (issues that probably share the same root cause)\n'
+    + 'GROUP 5 — Recommended Fix Categories (what needs to change in the codebase)\n\n'
+    + 'Engineering Standard: Do not patch individual buttons. Fix the entire class of problem.\n'
+    + 'Language: Clear technical language. No jargon. The dev team will execute this report.\n'
+    + 'Format: Plain text sections. No markdown headers. Be specific and complete.';
 
-    var result = await ai(prompt, 'Senior QA Director + Construction PM. Be specific and actionable.', 1200);
+  try{
+    var report = await ai(prompt, 'Engineering lead. Construction software expert. Systematic thinker.', 2000);
 
-    // Show results
-    var panel = document.createElement('div');
-    panel.className = 'ov';
-    panel.id = 'efs-ai-review';
-    panel.innerHTML = '<div class="modal modal-lg" style="max-width:700px">'
-      + '<div class="mh" style="background:linear-gradient(135deg,#1e293b,#334155)"><div><div class="mt" style="color:#fff">🤖 AI Page Review — ' + ctx.current_tab + '</div><div class="ms" style="color:rgba(255,255,255,0.6)">' + ctx.blueprint_section + '</div></div>'
-      + '<button class="mc" style="color:#fff" onclick="this.closest(\'.ov\').remove()">×</button></div>'
-      + '<div class="mb" style="padding:18px 20px"><div style="font-size:13px;line-height:1.8;white-space:pre-wrap;color:var(--text)">' + result + '</div></div>'
-      + '<div class="mf"><button class="btn btn-g" onclick="this.closest(\'.ov\').remove()">Close</button>'
-      + '<button class="btn btn-p" onclick="efsSubmitAIReview(\'' + ctx.current_tab + '\',this)">📋 Add to Dev Queue</button></div></div>';
-    document.body.appendChild(panel);
+    // Save to GK as urgent engineering task
+    var gkDesc = 'Executive Testing Fix Report — '+ allIssues.length +' issues reported\nSession: '+EFQ.sessionStart+'\n\n'
+      + '── ISSUES REPORTED ──\n' + issueList + '\n\n'
+      + '── AI FIX REPORT ──\n' + report;
 
-    // Log audit
-    await dbIns('audit_log', {
-      object_type: 'executive_feedback', object_id: 'efs_ai_' + Date.now(),
-      action: 'ai_review', new_value: JSON.stringify({page: ctx.current_tab, review: result.slice(0,500)}),
-      changed_by_ai: true, timestamp: new Date().toISOString()
-    });
-  } catch(e) {
-    toast('AI review error: ' + e.message, 'err');
+    await addToGatekeeper(
+      'engineering_fix_report',
+      'Fix Report: '+allIssues.length+' Executive Testing Issue'+(allIssues.length!==1?'s':''),
+      gkDesc,
+      'urgent',
+      'Investigate each issue class. Fix the complete workflow, not just the reported button. Internal QA before next Executive Testing.',
+      'engineering_fix_report',
+      null
+    );
+
+    await auditLog('gatekeeper_queue',null,'fix_report_submitted',null,allIssues.length+' issues','false','ETM fix report sent to engineering: '+allIssues.length+' issues');
+
+    // Clear and show summary
+    var panel = document.getElementById('efq-queue-panel');
+    if(panel) panel.remove();
+
+    efqShowReportModal(allIssues, byPage, report);
+
+    // Clear queue
+    EFQ.issues = [];
+    EFQ.consoleErrors = [];
+    efqUpdateBadge();
+
+  }catch(e){
+    // Save without AI analysis
+    await addToGatekeeper('engineering_fix_report','Fix Report: '+allIssues.length+' issues (no AI)',issueList,'urgent','Fix all reported issues before next Executive Testing.','engineering_fix_report',null);
+    toast('Report sent to Gatekeeper (AI analysis failed)','ok');
+    EFQ.issues = [];
+    efqUpdateBadge();
   }
 }
 
-async function efsSubmitAIReview(page, btnEl) {
-  var content = document.querySelector('#efs-ai-review .mb div');
-  var text = content ? content.textContent : 'AI review completed';
-  await addToGatekeeper('efs_ai_review', '[AI Review] ' + page, text.slice(0,500), 'normal', 'Development team: review AI findings.', 'efs_feedback');
-  btnEl.textContent = '✓ Added to queue';
-  btnEl.disabled = true;
-  toast('AI review added to development queue', 'ok');
-}
-
-// Build the floating Executive Feedback Button
-function buildExecFeedbackBtn() {
-  if(document.getElementById('efs-fab')) return;
-  var fab = document.createElement('div');
-  fab.id = 'efs-fab';
-  fab.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:7000;display:flex;flex-direction:column;gap:6px;align-items:flex-start';
-  fab.innerHTML = '<div id="efs-fab-menu" style="display:none;flex-direction:column;gap:4px;margin-bottom:6px">'
-    + '<button onclick="launchExecFeedback(\'report\')" style="background:#fff;border:1.5px solid var(--red);color:var(--red);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.1)">🐛 Report Issue</button>'
-    + '<button onclick="launchExecFeedback(\'suggest\')" style="background:#fff;border:1.5px solid var(--teal);color:var(--teal);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.1)">💡 Suggest Improvement</button>'
-    + '<button onclick="launchExecFeedback(\'ai_review\')" style="background:#fff;border:1.5px solid var(--blue);color:var(--blue);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.1)">🤖 Ask AI to Review</button>'
+function efqShowReportModal(allIssues, byPage, report){
+  var el = document.createElement('div');
+  el.className='ov'; el.id='efq-report-modal'; el.style.zIndex='9500';
+  el.innerHTML = '<div class="modal" style="max-width:560px">'
+    + '<div class="mh" style="background:#1e293b;border:none">'
+    + '<div><div class="mt" style="color:#fff">📤 Fix Report Sent to Engineering</div>'
+    + '<div class="ms" style="color:rgba(255,255,255,0.6)">'+allIssues.length+' issues · '+Object.keys(byPage).length+' pages affected</div></div>'
+    + '<button class="mc" style="color:#fff" onclick="closeOv(this)">×</button></div>'
+    + '<div class="mb">'
+    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+    + '<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--red)">'+allIssues.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Issues</div></div>'
+    + '<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">'+Object.keys(byPage).length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pages</div></div>'
+    + '<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">🔑</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">In Gatekeeper</div></div>'
     + '</div>'
-    + '<button onclick="toggleEFSMenu()" id="efs-main-btn" style="background:var(--teal);color:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:18px;cursor:pointer;box-shadow:0 3px 12px rgba(13,122,112,0.35);transition:transform .15s" title="Executive Feedback">💬</button>';
-  document.body.appendChild(fab);
+    + '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;font-size:12px;line-height:1.8;color:#374151;white-space:pre-wrap">'+report+'</div>'
+    + '</div>'
+    + '<div class="mf">'
+    + '<button class="btn btn-g" onclick="closeOv(this)">Continue Testing</button>'
+    + '<button class="btn btn-p" onclick="closeOv(this);goTab(\'gatekeeper\')">View in Gatekeeper</button>'
+    + '</div></div>';
+  document.body.appendChild(el);
 }
 
-function toggleEFSMenu() {
-  var menu = document.getElementById('efs-fab-menu');
-  var btn = document.getElementById('efs-main-btn');
-  if(!menu) return;
-  var isOpen = menu.style.display !== 'none';
-  menu.style.display = isOpen ? 'none' : 'flex';
-  btn.style.transform = isOpen ? '' : 'rotate(45deg)';
-  btn.textContent = isOpen ? '💬' : '✕';
+function efqClearQueue(){
+  if(!confirm('Clear all logged issues?')) return;
+  EFQ.issues = [];
+  EFQ.consoleErrors = [];
+  efqUpdateBadge();
+  var p = document.getElementById('efq-queue-panel');
+  if(p) p.remove();
+  toast('Issue queue cleared','ok');
 }
 
-// Initialize feedback button on page load
+function efqUpdateBadge(){
+  var badge = document.getElementById('efq-count-badge');
+  var total = EFQ.issues.length + EFQ.consoleErrors.length;
+  if(badge){
+    badge.textContent = total;
+    badge.style.display = total > 0 ? 'inline' : 'none';
+  }
+}
+
+function efqSeverity(type){
+  return {bug:'high',button:'high',workflow:'high',automation:'normal',feature:'low',ui:'low',ai_review:'normal',general:'normal'}[type]||'normal';
+}
+
+// ── LEGACY COMPATIBILITY (keep old functions working) ─────────────────────
+function openExecFeedback(){ efqOpen(); }
+function initExecFeedback(){ buildExecFeedbackBtn(); }
+function launchExecFeedback(mode){ efqOpen(); }
+
+// Initialize on load
 document.addEventListener('DOMContentLoaded', function(){ buildExecFeedbackBtn(); });
-setTimeout(buildExecFeedbackBtn, 1000); // Fallback if DOMContentLoaded already fired
-// END EXECUTIVE FEEDBACK SYSTEM
+setTimeout(buildExecFeedbackBtn, 1000);
+// END EXECUTIVE FEEDBACK SYSTEM v2
+
+
 
 // ============================================================
 // CORESTONE TESTING FRAMEWORK — SCENARIO LOADER
