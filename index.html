@@ -10318,6 +10318,10 @@ var ETM = {
   currentScenario: 0,
   verdicts: {},      // scenarioIndex → 'pass'|'fail'
   checks: {},        // 'scenario-item' → true/false
+  liveBugs: [],      // [{id, timestamp, page, action, description, severity, scenario, fixed}]
+  fixQueue: [],      // bugs queued for engineering fix
+  autoErrors: [],    // errors caught by global error handler
+  sessionStart: null, // when testing started
 
   scenarios: [
     {
@@ -10587,13 +10591,176 @@ function showTestingToolbar() {
   }
 }
 
+
+// ─── ETM LIVE BUG CAPTURE ────────────────────────────────────────────────────
+
+function etmCaptureBug() {
+  // Quick capture modal — shows current page context automatically
+  var curPage = window.CUR || 'unknown';
+  var scenario = ETM.scenarios[ETM.currentScenario];
+  var el = document.createElement('div');
+  el.className = 'ov';
+  el.id = 'bug-cap-ov';
+  el.style.zIndex = '9999';
+  el.innerHTML = '<div class="modal" style="max-width:440px;background:#1e293b;color:#fff;border:1px solid rgba(255,255,255,0.15)">'
+    + '<div class="mh" style="background:#dc2626;border:none">'
+    + '<div class="mt" style="color:#fff">🐛 Log Bug</div>'
+    + '<button class="mc" style="color:#fff" onclick="closeOv(this)">×</button></div>'
+    + '<div class="mb">'
+    + '<div style="background:rgba(255,255,255,0.06);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:rgba(255,255,255,0.6)">'
+    + '📍 Current page: <strong style="color:#fff">' + curPage + '</strong> &nbsp;·&nbsp; '
+    + 'Scenario: <strong style="color:#fff">' + (scenario ? scenario.title : 'Free test') + '</strong></div>'
+    + '<div class="fr"><label style="color:rgba(255,255,255,0.7)">What broke? Describe what you expected vs what happened *</label>'
+    + '<textarea id="bug-desc" style="min-height:80px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:6px;padding:8px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box" '
+    + 'placeholder="e.g. Clicked Send Invoice — nothing happened, no Gatekeeper item appeared, status stayed as Draft"></textarea></div>'
+    + '<div class="f2">'
+    + '<div class="fr"><label style="color:rgba(255,255,255,0.7)">Severity</label>'
+    + '<select id="bug-sev" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:6px;padding:8px;font-family:inherit;width:100%">'
+    + '<option value="high">🔴 High — blocks workflow</option>'
+    + '<option value="normal" selected>🟡 Normal — wrong behavior</option>'
+    + '<option value="low">⚪ Low — cosmetic</option></select></div>'
+    + '<div class="fr"><label style="color:rgba(255,255,255,0.7)">Page / Button</label>'
+    + '<input id="bug-loc" value="' + curPage + '" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:6px;padding:8px;font-family:inherit;width:100%;box-sizing:border-box"></div>'
+    + '</div></div>'
+    + '<div class="mf" style="background:#1e293b;border-top:1px solid rgba(255,255,255,0.1)">'
+    + '<button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
+    + '<button onclick="etmSaveBug()" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:9px 18px;font-weight:800;cursor:pointer;font-family:inherit">Log This Bug</button>'
+    + '</div></div>';
+  document.body.appendChild(el);
+  setTimeout(function(){ var t = document.getElementById('bug-desc'); if(t) t.focus(); }, 100);
+}
+
+function etmSaveBug() {
+  var desc = (document.getElementById('bug-desc')||{}).value || '';
+  if(!desc.trim()){ toast('Describe the bug first','err'); return; }
+  var bug = {
+    id: Date.now().toString(),
+    timestamp: new Date().toISOString(),
+    page: (document.getElementById('bug-loc')||{}).value || (window.CUR||'unknown'),
+    description: desc.trim(),
+    severity: (document.getElementById('bug-sev')||{}).value || 'normal',
+    scenario: ETM.currentScenario,
+    scenarioTitle: ETM.scenarios[ETM.currentScenario] ? ETM.scenarios[ETM.currentScenario].title : 'Free test',
+    fixed: false,
+    auto: false
+  };
+  ETM.liveBugs.push(bug);
+  // Update badge
+  var badge = document.getElementById('etm-error-badge');
+  var total = ETM.liveBugs.length + ETM.autoErrors.length;
+  if(badge){ badge.textContent = total; badge.style.display = 'inline'; }
+  // Close modal
+  var ov = document.getElementById('bug-cap-ov');
+  if(ov) ov.remove();
+  // Switch to live tab and refresh
+  ETM_ACTIVE_TAB = 'live';
+  renderETMContent();
+  toast('Bug logged ✅ — ' + ETM.liveBugs.length + ' total', 'ok');
+}
+
+function etmMarkFixed(idx) {
+  var allBugs = ETM.liveBugs.concat(ETM.autoErrors);
+  if(allBugs[idx]) allBugs[idx].fixed = true;
+  // Mark in source array
+  if(idx < ETM.liveBugs.length) ETM.liveBugs[idx].fixed = true;
+  else ETM.autoErrors[idx - ETM.liveBugs.length].fixed = true;
+  renderETMContent();
+}
+
+async function etmRequestFix() {
+  // Compile all unfixed bugs into a Gatekeeper item for the engineering team
+  var unfixed = ETM.liveBugs.filter(function(b){ return !b.fixed; })
+    .concat(ETM.autoErrors.filter(function(e){ return !e.fixed; }).map(function(e){
+      return {page:e.page, description:'AUTO: '+e.message+' at '+e.source+':'+e.line, severity:'error', scenarioTitle:'Auto-captured'};
+    }));
+  
+  if(!unfixed.length){ toast('No unfixed bugs to queue','ok'); return; }
+  
+  var report = unfixed.map(function(b, i){
+    return (i+1)+'. ['+b.severity.toUpperCase()+'] '+b.page+' — '+b.description;
+  }).join('\n');
+  
+  var gkDesc = 'Engineering fix needed for the following issues found during Executive Testing on ' + new Date().toLocaleDateString() + ':\n\n' + report + '\n\nSession started: ' + ETM.sessionStart;
+  await addToGatekeeper('engineering_fix_queue','Fix Queue: '+unfixed.length+' bug(s) from Executive Testing',gkDesc,'urgent','Review each bug, reproduce, fix the class of problem, regression test. Do not patch — solve the root cause.','engineering_fix_queue',null);
+  
+  // Mark all as queued
+  ETM.liveBugs.forEach(function(b){ b.fixed = true; });
+  ETM.autoErrors.forEach(function(e){ e.fixed = true; });
+  
+  await auditLog('gatekeeper_queue', null, 'fix_queue_submitted', null, unfixed.length+' bugs', false, 'ETM fix queue submitted: '+unfixed.length+' bugs');
+  
+  toast('✅ ' + unfixed.length + ' bug(s) sent to Gatekeeper fix queue', 'ok', 5000);
+  renderETMContent();
+  // Switch to gatekeeper to show it
+  setTimeout(function(){ goTab('gatekeeper'); }, 1500);
+}
+
+function etmShowSessionSummary() {
+  var totalBugs = ETM.liveBugs.length + ETM.autoErrors.length;
+  var passed = Object.values(ETM.verdicts).filter(function(v){ return v==='pass'; }).length;
+  var failed = Object.values(ETM.verdicts).filter(function(v){ return v==='fail'; }).length;
+  var duration = ETM.sessionStart ? Math.round((Date.now()-new Date(ETM.sessionStart))/60000) : '?';
+  var el = document.createElement('div');
+  el.className = 'ov';
+  el.id = 'etm-summary-ov';
+  el.style.zIndex = '9999';
+  var bugList = ETM.liveBugs.map(function(b){ return '<div style="font-size:11px;color:rgba(255,255,255,0.7);padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06)">🐛 '+b.page+' — '+b.description.substring(0,60)+'</div>'; }).join('')
+    + ETM.autoErrors.map(function(e){ return '<div style="font-size:11px;color:rgba(255,255,255,0.7);padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06)">🤖 '+e.message.substring(0,60)+'</div>'; }).join('');
+  el.innerHTML = '<div class="modal" style="max-width:480px;background:#0f172a;color:#fff;border:1px solid rgba(255,255,255,0.15)">'
+    + '<div class="mh" style="background:#0d7a70;border:none"><div class="mt" style="color:#fff">🧪 Testing Session Complete</div></div>'
+    + '<div class="mb">'
+    + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">'
+    + '<div style="background:rgba(255,255,255,0.06);border-radius:8px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800;color:#2dd4bf">'+passed+'</div><div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Passed</div></div>'
+    + '<div style="background:rgba(255,255,255,0.06);border-radius:8px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800;color:#dc2626">'+failed+'</div><div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Failed</div></div>'
+    + '<div style="background:rgba(255,255,255,0.06);border-radius:8px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800;color:#d97706">'+totalBugs+'</div><div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Bugs</div></div>'
+    + '<div style="background:rgba(255,255,255,0.06);border-radius:8px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800;color:rgba(255,255,255,0.7)">'+duration+'m</div><div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Duration</div></div>'
+    + '</div>'
+    + (totalBugs > 0
+      ? '<div style="background:rgba(220,38,38,0.15);border:1px solid rgba(220,38,38,0.3);border-radius:8px;padding:14px;margin-bottom:14px"><div style="font-size:12px;font-weight:800;color:#dc2626;margin-bottom:8px">'+totalBugs+' bug(s) found:</div>'+bugList+'</div>'
+      : '<div style="background:rgba(13,122,112,0.2);border:1px solid #0d7a70;border-radius:8px;padding:14px;text-align:center;margin-bottom:14px;font-weight:700;color:#2dd4bf">✅ No bugs — clean session</div>')
+    + '</div>'
+    + '<div class="mf" style="background:#1e293b;border-top:1px solid rgba(255,255,255,0.1)">'
+    + '<button class="etm-sum-close" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border:none;border-radius:6px;padding:9px 14px;cursor:pointer;font-family:inherit">Close</button>'
+    + (totalBugs > 0 ? '<button class="etm-sum-view" style="background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:6px;padding:9px 14px;cursor:pointer;font-family:inherit">View Bugs</button>' : '')
+    + (totalBugs > 0 ? '<button class="etm-sum-fix" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:9px 18px;font-weight:800;cursor:pointer;font-family:inherit">🔧 Send All to Fix Queue</button>' : '')
+    + '</div></div>';
+  document.body.appendChild(el);
+  // Event handlers via delegation
+  el.addEventListener('click', function(e) {
+    if(e.target.classList.contains('etm-sum-close')){ el.remove(); var p=document.getElementById('etm-panel');if(p)p.remove(); }
+    else if(e.target.classList.contains('etm-sum-view')){ el.remove(); ETM_ACTIVE_TAB='live'; renderETMContent(); showExecTestPanel(); }
+    else if(e.target.classList.contains('etm-sum-fix')){ el.remove(); etmRequestFix(); }
+  });
+}
+
+
 async function launchExecTest() {
   if(ETM.active) { showExecTestPanel(); return; }
-  // No confirm dialog — user already pressed the button intentionally
   ETM.active = true;
   ETM.currentScenario = 0;
   ETM.verdicts = {};
   ETM.checks = {};
+  ETM.liveBugs = [];
+  ETM.fixQueue = [];
+  ETM.autoErrors = [];
+  ETM.sessionStart = new Date().toISOString();
+  // Install global error interceptor — auto-captures JS errors during testing
+  window._etmErrorHandler = function(msg, src, line, col, err) {
+    if(!ETM.active) return false;
+    ETM.autoErrors.push({
+      timestamp: new Date().toISOString(),
+      message: String(msg),
+      source: String(src).split('/').pop(),
+      line: line,
+      page: window.CUR || 'unknown',
+      scenario: ETM.currentScenario
+    });
+    // Flash red badge on ETM panel
+    var badge = document.getElementById('etm-error-badge');
+    if(badge){ badge.textContent = ETM.autoErrors.length; badge.style.display='inline'; }
+    return false; // don't suppress errors
+  };
+  window.onerror = window._etmErrorHandler;
   // Load all test data silently
   await loadTestScenario('kitchen_remodel');
   // Build panel and navigate in one synchronous sequence
@@ -10621,7 +10788,11 @@ function buildExecTestPanel() {
     '<div id="etm-header" style="background:#0d7a70;padding:14px 16px;flex-shrink:0">',
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">',
         '<div style="font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.6)">🧪 EXECUTIVE TESTING MODE</div>',
-        '<button onclick="toggleExecTestPanel()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;font-family:inherit">Hide</button>',
+        '<div style="display:flex;gap:6px;align-items:center">',
+          '<span id="etm-error-badge" style="display:none;background:#dc2626;color:#fff;font-size:9px;font-weight:800;border-radius:10px;padding:1px 6px">0</span>',
+          '<button onclick="etmCaptureBug()" style="background:#dc2626;border:none;color:#fff;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px;font-weight:800;font-family:inherit">🐛 Log Bug</button>',
+          '<button onclick="toggleExecTestPanel()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;font-family:inherit">Hide</button>',
+        '</div>',
       '</div>',
       '<div id="etm-progress-bar" style="height:4px;background:rgba(255,255,255,0.15);border-radius:2px;overflow:hidden">',
         '<div id="etm-progress-fill" style="height:100%;background:#2dd4bf;border-radius:2px;width:0%;transition:width .4s ease"></div>',
@@ -10704,8 +10875,8 @@ function renderETMContent() {
     ? '<div style="background:#dc2626;padding:10px 16px;font-weight:800;font-size:13px;text-align:center">✗ SCENARIO FAILED — note the bug below</div>'
     : '';
 
-  var tabs = ['steps','watch','verify','bugs'].map(function(t) {
-    var labels = {steps:'Steps',watch:'Auto Actions',verify:'Verify',bugs:'Watch For Bugs'};
+  var tabs = ['steps','watch','verify','bugs','live'].map(function(t) {
+    var labels = {steps:'Steps',watch:'Auto',verify:'Verify',bugs:'Watch',live:'🐛 Live ('+(ETM.liveBugs.length+ETM.autoErrors.length)+')'};
     var active = ETM_ACTIVE_TAB === t;
     return '<button onclick="etmTab(\''+t+'\')" style="flex:1;padding:8px 4px;border:none;background:'+(active?'#0d7a70':'rgba(255,255,255,0.06)')+';color:'+(active?'#fff':'rgba(255,255,255,0.5)')+';font-size:11px;font-weight:'+(active?'800':'600')+';cursor:pointer;font-family:inherit;border-bottom:2px solid '+(active?'#2dd4bf':'transparent')+'">'+labels[t]+'</button>';
   }).join('');
@@ -10741,6 +10912,44 @@ function renderETMContent() {
       tabContent += '<div style="font-size:13px;color:rgba(255,255,255,0.85);line-height:1.5">'+v.check+'</div></div>';
     });
     tabContent += '</div>';
+  } else if(ETM_ACTIVE_TAB === 'live') {
+    var allBugs = ETM.liveBugs.concat(ETM.autoErrors.map(function(e){
+      return {id:e.timestamp,timestamp:e.timestamp,page:e.page,description:'JS Error: '+e.message+' ('+e.source+':'+e.line+')',severity:'error',auto:true,scenario:e.scenario};
+    }));
+    if(!allBugs.length){
+      tabContent = '<div style="padding:40px 16px;text-align:center;color:rgba(255,255,255,0.4)">'
+        +'<div style="font-size:28px;margin-bottom:8px">✅</div>'
+        +'<div style="font-size:13px;font-weight:700">No bugs captured yet</div>'
+        +'<div style="font-size:11px;margin-top:8px;line-height:1.6">Tap <strong style="color:#dc2626">🐛 Log Bug</strong> when something breaks.<br>JS errors auto-capture automatically.</div>'
+        +'</div>';
+    } else {
+      tabContent = '<div style="padding:14px 16px">';
+      // Fix Queue action
+      var unfixed = allBugs.filter(function(b){return !b.fixed;});
+      if(unfixed.length > 0){
+        tabContent += '<div style="background:#dc2626;border-radius:8px;padding:12px 14px;margin-bottom:14px;text-align:center">'
+          +'<div style="font-size:13px;font-weight:800;margin-bottom:6px">'+unfixed.length+' bug(s) need fixing</div>'
+          +'<button onclick="etmRequestFix()" style="background:#fff;color:#dc2626;border:none;border-radius:6px;padding:8px 18px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;width:100%">🔧 Send All to Fix Queue</button>'
+          +'</div>';
+      }
+      allBugs.forEach(function(bug, i){
+        var sev = bug.severity||'normal';
+        var sevColor = {error:'#dc2626',high:'#d97706',normal:'#0d7a70',low:'#6b7280'}[sev]||'#0d7a70';
+        tabContent += '<div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-left:3px solid '+sevColor+';border-radius:8px;padding:10px 12px;margin-bottom:8px'+(bug.fixed?';opacity:0.5':'')+'">',
+        tabContent += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">';
+        tabContent += '<div style="font-size:10px;font-weight:800;color:'+sevColor+';text-transform:uppercase">'+(bug.auto?'🤖 AUTO':'🐛 MANUAL')+' · '+(bug.page||'unknown page')+'</div>';
+        tabContent += '<div style="font-size:10px;color:rgba(255,255,255,0.4)">'+new Date(bug.timestamp).toLocaleTimeString([]  ,{hour:'2-digit',minute:'2-digit'})+'</div></div>';
+        tabContent += '<div style="font-size:12px;color:#fff;line-height:1.5">'+bug.description+'</div>';
+        if(!bug.fixed){
+          tabContent += '<button onclick="etmMarkFixed('+i+')" style="margin-top:6px;font-size:10px;padding:3px 8px;background:rgba(13,122,112,0.3);color:#2dd4bf;border:1px solid #0d7a70;border-radius:4px;cursor:pointer;font-family:inherit">✓ Mark Fixed</button>';
+        } else {
+          tabContent += '<div style="font-size:10px;color:#2dd4bf;margin-top:4px">✓ Fixed</div>';
+        }
+        tabContent += '</div>';
+      });
+      tabContent += '</div>';
+    }
+
   } else if(ETM_ACTIVE_TAB === 'bugs') {
     tabContent = '<div style="padding:14px 16px"><div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:600">These would indicate a bug. Mark any you observe:</div>';
     s.bugs.forEach(function(b, i) {
@@ -10850,6 +11059,14 @@ function etmVerdict(idx, verdict) {
 
 function closeExecTestMode() {
   ETM.active = false;
+  // Remove global error interceptor
+  if(window._etmErrorHandler) window.onerror = null;
+  // Show session summary if bugs were found
+  var totalBugs = ETM.liveBugs.length + ETM.autoErrors.length;
+  if(totalBugs > 0) {
+    etmShowSessionSummary();
+    return; // summary modal handles panel removal
+  }
   var panel = document.getElementById('etm-panel');
   if(panel) panel.remove();
   var tab = document.getElementById('etm-tab');
