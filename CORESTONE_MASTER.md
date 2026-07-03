@@ -1,6 +1,6 @@
 # CORESTONE MASTER — Session Front Door
 ## Read this first. Then follow the reading order below.
-## Last updated: OS #8 — July 2, 2026
+## Last updated: OS #9 — July 3, 2026
 
 ---
 
