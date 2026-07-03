@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Corestone OS v2.5 - OS #9 Complete OS Build - Enterprise Platform -->
+<!-- Corestone OS v2.5 - OS #9 Enterprise UX Engine + EIS Engineering Board + UX Directive Locked -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1563,6 +1563,406 @@ function startMicRecording(fieldId, hint, callback){
 
 // pgDash removed — using pgDashV2
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CORESTONE ENTERPRISE UX ENGINE — OS #9
+// Shared utility layer — every page inherits these capabilities automatically
+// Governs: Search, Sort, Filter, Export, Empty States, Loading, Bulk, Status
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── UNIVERSAL LIST RENDERER ────────────────────────────────────────────────
+// Usage: uxList({ title, items, columns, actions, onRowClick, emptyMsg, emptyAction })
+function uxList(cfg){
+  var items = cfg.items || [];
+  var cols = cfg.columns || [];
+  var q = cfg.q || '';
+  var sortKey = cfg.sortKey || null;
+  var sortDir = cfg.sortDir || 'asc';
+  var selected = cfg.selected || {};
+  var _lid = cfg.id || 'list';
+
+  // Apply search
+  if(q.trim()){
+    var ql = q.toLowerCase();
+    items = items.filter(function(item){
+      return cols.some(function(col){
+        var val = col.key ? String(item[col.key]||'') : '';
+        return val.toLowerCase().includes(ql);
+      });
+    });
+  }
+
+  // Apply sort
+  if(sortKey){
+    items = items.slice().sort(function(a,b){
+      var av = String(a[sortKey]||'').toLowerCase();
+      var bv = String(b[sortKey]||'').toLowerCase();
+      // Try numeric
+      var an = parseFloat(a[sortKey]);
+      var bn = parseFloat(b[sortKey]);
+      if(!isNaN(an)&&!isNaN(bn)){ return sortDir==='asc'?an-bn:bn-an; }
+      return sortDir==='asc'?av.localeCompare(bv):bv.localeCompare(av);
+    });
+  }
+
+  var selCount = Object.values(selected).filter(Boolean).length;
+  var hasItems = items.length > 0;
+
+  // Build header
+  var html = '<div class="ux-list-wrap" data-listid="'+_lid+'">';
+
+  // Toolbar
+  html += '<div class="ux-toolbar">';
+  // Search
+  html += '<div class="ux-search-wrap">'
+    + '<span class="ux-search-icon">🔍</span>'
+    + '<input class="ux-search-input" type="text" value="'+uxEsc(q)+'" '
+    + 'placeholder="Search '+(cfg.title||'records')+'..." '
+    + '<input class="ux-search-input" type="text" value="'+uxEsc(q)+'" data-listid="'+_lid+'" placeholder="Search '+(cfg.title||'records')+'..." oninput="uxListSearchDelegated(this)">'
+    + (q?'<button class="ux-clear-search" data-listid="'+_lid+'" onclick="uxListClearDelegated(this)">×</button>':'')
+    +'</div>';
+
+  // Filter slots (passed by caller)
+  if(cfg.filters && cfg.filters.length){
+    cfg.filters.forEach(function(f){
+      html += '<select class="ux-filter" data-listid="'+_lid+'" data-filterkey="'+f.key+'" onchange="uxListFilterDelegated(this)">';
+        + '<option value="">'+f.label+'</option>'
+        + (f.options||[]).map(function(o){
+            return '<option value="'+uxEsc(o.value)+'"'+(f.selected===o.value?' selected':'')+'>'
+              +uxEsc(o.label)+'</option>';
+          }).join('')
+        + '</select>';
+    });
+  }
+
+  html += '<div style="flex:1"></div>'; // spacer
+
+  // Bulk actions
+  if(selCount > 0 && cfg.bulkActions){
+    html += '<div class="ux-bulk-bar">'
+      +'<span class="ux-bulk-count">'+selCount+' selected</span>';
+    cfg.bulkActions.forEach(function(a){
+      html += '<button class="ux-bulk-btn" onclick="'+a.fn+'">'+a.label+'</button>';
+    });
+    html += '</div>';
+  }
+
+  // Export + New
+  if(cfg.onExport){
+    html += '<button class="ux-icon-btn" onclick="'+cfg.onExport+'" title="Export CSV">⬇️</button>';
+  }
+  if(cfg.onNew){
+    html += '<button class="ux-new-btn" onclick="'+cfg.onNew+'">+ '+( cfg.newLabel||'New')+'</button>';
+  }
+  html += '</div>'; // end toolbar
+
+  // Count row
+  html += '<div class="ux-count-row">'
+    +(q?'<span style="color:var(--teal)">'+items.length+' result'+(items.length!==1?'s':'')+'</span>':'<span>'+items.length+' '+(cfg.title||'record')+(items.length!==1?'s':'')+'</span>')
+    +(items.length!==cfg.items.length&&!q?' (filtered from '+cfg.items.length+')':'')
+    +'</div>';
+
+  // Empty state
+  if(!hasItems){
+    html += '<div class="ux-empty">'
+      +'<div class="ux-empty-icon">'+(cfg.emptyIcon||'📋')+'</div>'
+      +'<div class="ux-empty-title">'+(cfg.emptyMsg||(q?'No results for "'+uxEsc(q)+'"':'Nothing here yet'))+'</div>'
+      +(cfg.emptyAction&&!q?'<button class="btn btn-p" onclick="'+cfg.emptyAction.fn+'">'+cfg.emptyAction.label+'</button>':'')
+      +'</div>';
+  } else {
+    // Table headers with sort
+    if(cols.length){
+      html += '<div class="ux-table-head">';
+      if(cfg.bulkActions){ html += '<div class="ux-th ux-th-chk"><input type="checkbox" data-listid="'+_lid+'" onchange="uxSelectAllDelegated(this)" title="Select all"></div>'; }
+      cols.forEach(function(col){
+        var isSorted = sortKey===col.key;
+        var arrow = isSorted?(sortDir==='asc'?' ↑':' ↓'):'';
+        html += '<div class="ux-th'+(col.right?' ux-right':'')+(col.hide_mobile?' ux-hide-mobile':'')+'" style="'+(col.w?'width:'+col.w+';flex:none;':'flex:'+( col.flex||1))+'"'
+          +(col.key?(' data-key="'+col.key+'" data-dir="'+(isSorted&&sortDir==='asc'?'desc':'asc')+'" onclick="uxSortDelegated(this)" style="cursor:pointer"'):'')  
+          +'>'+col.label+arrow+'</div>';
+      });
+      html += '<div class="ux-th ux-th-actions">Actions</div>';
+      html += '</div>';
+    }
+
+    // Rows
+    html += '<div class="ux-rows">';
+    items.forEach(function(item){
+      var isSelected = !!selected[item.id];
+      var rowOnClick = cfg.onRowClick ? ' onclick="'+cfg.onRowClick.replace('__ID__',item.id)+'"' : '';
+      html += '<div class="ux-row'+(isSelected?' ux-selected':'')+'"'+rowOnClick+'>';
+      if(cfg.bulkActions){
+        html += '<div class="ux-td ux-td-chk" onclick="event.stopPropagation()">'
+          +'<input type="checkbox" class="ux-row-chk" data-id="'+item.id+'" '+(isSelected?'checked':'')
+          +' data-listid="'+_lid+'" onchange="uxToggleSelectDelegated(this)" onclick="event.stopPropagation()"></div>';
+      }
+      cols.forEach(function(col){
+        var val = col.render ? col.render(item) : uxEsc(String(item[col.key]||''));
+        html += '<div class="ux-td'+(col.right?' ux-right':'')+(col.hide_mobile?' ux-hide-mobile':'')+'" style="'+(col.w?'width:'+col.w+';flex:none;':'flex:'+(col.flex||1))+'">'+val+'</div>';
+      });
+      // Actions cell
+      var acts = cfg.rowActions ? cfg.rowActions(item) : [];
+      html += '<div class="ux-td ux-td-actions">';
+      acts.forEach(function(a){
+        html += '<button class="ux-row-btn" onclick="event.stopPropagation();'+a.fn+'" title="'+uxEsc(a.label)+'">'+a.icon+'</button>';
+      });
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function uxEsc(str){ return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// ── UX LIST STATE MANAGER ─────────────────────────────────────────────────
+var UX_LIST_STATE = {};
+
+function uxGetState(id){ return UX_LIST_STATE[id] || {q:'',sortKey:null,sortDir:'asc',selected:{},filters:{}}; }
+function uxSetState(id, patch){ UX_LIST_STATE[id] = Object.assign(uxGetState(id), patch); }
+
+function uxListSearch(input, listId){
+  uxSetState(listId, {q: input.value, selected: {}});
+  // Re-render the page that owns this list
+  uxRerender(listId);
+}
+
+function uxListClear(listId){
+  uxSetState(listId, {q:'', selected:{}});
+  uxRerender(listId);
+}
+
+function uxListFilter(select, listId, key){
+  var filters = uxGetState(listId).filters || {};
+  filters[key] = select.value;
+  uxSetState(listId, {filters: filters, selected:{}});
+  uxRerender(listId);
+}
+
+function uxSort(listId, key, dir){
+  uxSetState(listId, {sortKey: key, sortDir: dir, selected:{}});
+  uxRerender(listId);
+}
+
+function uxSelectAll(checkbox, listId){
+  var rows = document.querySelectorAll('.ux-row-chk');
+  var selected = {};
+  rows.forEach(function(chk){
+    chk.checked = checkbox.checked;
+    if(checkbox.checked && chk.dataset.id) selected[chk.dataset.id] = true;
+  });
+  uxSetState(listId, {selected: selected});
+}
+
+function uxToggleSelect(checkbox, listId){
+  var state = uxGetState(listId);
+  var selected = Object.assign({}, state.selected);
+  if(checkbox.checked) selected[checkbox.dataset.id] = true;
+  else delete selected[checkbox.dataset.id];
+  uxSetState(listId, {selected: selected});
+  // Update toolbar count
+  uxRerender(listId);
+}
+
+// Map listId → re-render function (registered by each page)
+var UX_RERENDER = {};
+function uxRegister(listId, fn){ UX_RERENDER[listId] = fn; }
+function uxRerender(listId){ if(UX_RERENDER[listId]) UX_RERENDER[listId](); }
+
+// ── STATUS BADGE (inline clickable) ──────────────────────────────────────
+// Usage in column render: uxStatusBadge(item.status, statusOptions, 'updateMyStatus', item.id)
+function uxStatusBadge(status, options, fnName, id){
+  var opt = options[status] || {label:status,color:'var(--muted)',bg:'#f8fafc'};
+  var optHtml = Object.entries(options).map(function(e){
+    var optHtml = Object.entries(options).map(function(e){ return '<div class="ux-status-opt" data-fn="'+fnName+'" data-id="'+id+'" data-val="'+e[0]+'" onclick="uxStatusOptClick(this)" style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;color:'+e[1].color+'">' +'<span style="background:'+e[1].bg+';padding:2px 8px;border-radius:10px">'+e[1].label+'</span>' +'</div>'; }).join('');
+      +'<span style="background:'+e[1].bg+';padding:2px 8px;border-radius:10px">'+e[1].label+'</span>'
+      +'</div>';
+  }).join('');
+
+  return '<div class="ux-status-wrap" style="position:relative;display:inline-block">'
+    +'<span class="ux-status-badge" onclick="event.stopPropagation();uxOpenStatusMenu(this)" '
+    +'style="cursor:pointer;font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px;background:'+opt.bg+';color:'+opt.color+';white-space:nowrap">'
+    +opt.label+' ▾</span>'
+    +'<div class="ux-status-menu-data" style="display:none">'+optHtml+'</div>'
+    +'</div>';
+}
+
+function uxOpenStatusMenu(badge){
+  // Close any open menus
+  document.querySelectorAll('.ux-status-menu').forEach(function(m){m.remove();});
+  var menuData = badge.nextElementSibling;
+  if(!menuData) return;
+  var menu = document.createElement('div');
+  menu.className = 'ux-status-menu';
+  menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:3000;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);min-width:140px;padding:4px 0;margin-top:2px';
+  menu.innerHTML = menuData.innerHTML;
+  badge.parentElement.appendChild(menu);
+  // Close on outside click
+  setTimeout(function(){
+    document.addEventListener('click', function close(){
+      menu.remove();
+      document.removeEventListener('click', close);
+    });
+  }, 0);
+}
+
+// ── EXPORT TO CSV ─────────────────────────────────────────────────────────
+function uxExportCSV(items, columns, filename){
+  filename = filename || 'corestone-export-'+new Date().toISOString().split('T')[0]+'.csv';
+  var header = columns.map(function(c){return '"'+(c.label||c.key)+'"';}).join(',');
+  var rows = items.map(function(item){
+    return columns.map(function(col){
+      var val = item[col.key]||'';
+      // Strip HTML if present
+      if(typeof val === 'string' && val.includes('<')) val = val.replace(/<[^>]+>/g,'');
+      return '"'+String(val).replace(/"/g,'""')+'"';
+    }).join(',');
+  });
+  var csv = [header].concat(rows).join('\n');
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Exported '+items.length+' records to '+filename,'ok');
+}
+
+// ── LOADING STATE ─────────────────────────────────────────────────────────
+function uxLoading(containerId, message){
+  var el = document.getElementById(containerId) || document.getElementById('content');
+  if(!el) return;
+  el.innerHTML = '<div class="ux-loading"><div class="ux-spinner"></div><div class="ux-loading-msg">'+(message||'Loading...')+'</div></div>';
+}
+
+// ── INLINE EDIT ────────────────────────────────────────────────────────────
+function uxMakeEditable(el, onSave){
+  el.contentEditable = 'true';
+  el.style.background = 'var(--blue-bg)';
+  el.style.borderRadius = '4px';
+  el.style.padding = '2px 4px';
+  el.style.outline = '2px solid var(--blue)';
+  el.focus();
+  el.onblur = function(){
+    el.contentEditable = 'false';
+    el.style.background = '';
+    el.style.outline = '';
+    if(onSave) onSave(el.textContent.trim());
+  };
+  el.onkeydown = function(e){
+    if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); el.blur(); }
+    if(e.key==='Escape'){ el.contentEditable='false'; el.style.background=''; el.style.outline=''; }
+  };
+}
+
+// ── KEYBOARD SHORTCUTS ─────────────────────────────────────────────────────
+document.addEventListener('keydown', function(e){
+  // Cmd/Ctrl+N = New record (if current page has a new action)
+  if((e.metaKey||e.ctrlKey) && e.key==='n'){
+    e.preventDefault();
+    var newBtn = document.querySelector('.ux-new-btn');
+    if(newBtn) newBtn.click();
+  }
+  // Cmd/Ctrl+F = Focus search
+  if((e.metaKey||e.ctrlKey) && e.key==='f'){
+    e.preventDefault();
+    var searchInput = document.querySelector('.ux-search-input');
+    if(searchInput){ searchInput.focus(); searchInput.select(); }
+  }
+  // Esc = Close any open modal/overlay
+  if(e.key==='Escape'){
+    var ov = document.querySelector('.ov');
+    if(ov){ var mc = ov.querySelector('.mc'); if(mc) mc.click(); }
+    var statusMenu = document.querySelector('.ux-status-menu');
+    if(statusMenu) statusMenu.remove();
+  }
+  // Cmd/Ctrl+S = Save current open form
+  if((e.metaKey||e.ctrlKey) && e.key==='s'){
+    e.preventDefault();
+    var saveBtn = document.querySelector('.modal .btn-p');
+    if(saveBtn) saveBtn.click();
+  }
+});
+
+// ── UX ENGINE CSS (injected once) ─────────────────────────────────────────
+(function(){
+  var style = document.createElement('style');
+  style.id = 'ux-engine-styles';
+  style.textContent = [
+    '.ux-list-wrap{display:flex;flex-direction:column;gap:0}',
+    '.ux-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}',
+    '.ux-search-wrap{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;min-width:200px;flex:1;max-width:320px}',
+    '.ux-search-input{border:none;outline:none;font-size:13px;background:transparent;font-family:inherit;color:var(--text);flex:1;min-width:0}',
+    '.ux-search-icon{font-size:13px;color:var(--muted);flex-shrink:0}',
+    '.ux-clear-search{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0;line-height:1}',
+    '.ux-filter{padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-family:inherit;background:var(--bg);color:var(--text);cursor:pointer}',
+    '.ux-new-btn{padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap}',
+    '.ux-new-btn:hover{background:var(--teal-dark)}',
+    '.ux-icon-btn{padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;cursor:pointer;font-family:inherit}',
+    '.ux-icon-btn:hover{background:var(--hover)}',
+    '.ux-bulk-bar{display:flex;align-items:center;gap:8px;background:var(--blue-bg);border:1px solid var(--blue);border-radius:var(--radius-sm);padding:5px 12px}',
+    '.ux-bulk-count{font-size:12px;font-weight:700;color:var(--blue)}',
+    '.ux-bulk-btn{padding:4px 10px;background:var(--blue);color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit}',
+    '.ux-count-row{font-size:11px;color:var(--muted);margin-bottom:8px}',
+    '.ux-table-head{display:flex;align-items:center;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm) var(--radius-sm) 0 0;font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;gap:8px}',
+    '.ux-th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}',
+    '.ux-th:hover{color:var(--teal)}',
+    '.ux-th-chk{width:28px;flex:none}',
+    '.ux-th-actions{width:80px;flex:none;text-align:right}',
+    '.ux-rows{border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:hidden}',
+    '.ux-row{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);gap:8px;cursor:pointer;transition:background 0.1s;background:#fff}',
+    '.ux-row:last-child{border-bottom:none}',
+    '.ux-row:hover{background:var(--hover)}',
+    '.ux-row.ux-selected{background:var(--blue-bg)}',
+    '.ux-td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--text)}',
+    '.ux-td-chk{width:28px;flex:none}',
+    '.ux-td-actions{width:80px;flex:none;display:flex;justify-content:flex-end;gap:4px}',
+    '.ux-row-btn{padding:3px 7px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:11px;cursor:pointer;font-family:inherit}',
+    '.ux-row-btn:hover{background:var(--hover);border-color:var(--muted)}',
+    '.ux-right{text-align:right;justify-content:flex-end}',
+    '.ux-hide-mobile{display:flex}',
+    '.ux-empty{text-align:center;padding:48px 20px;color:var(--muted)}',
+    '.ux-empty-icon{font-size:36px;margin-bottom:10px}',
+    '.ux-empty-title{font-size:14px;font-weight:700;margin-bottom:14px;color:var(--dim)}',
+    '.ux-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;gap:14px}',
+    '.ux-spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin 0.8s linear infinite}',
+    '@keyframes spin{to{transform:rotate(360deg)}}',
+    '.ux-loading-msg{font-size:13px;color:var(--muted)}',
+    '.ux-status-wrap{display:inline-block;position:relative}',
+    '.ux-status-badge:hover{opacity:0.85}',
+    '@media(max-width:600px){.ux-hide-mobile{display:none}.ux-search-wrap{min-width:120px}}'
+  ].join('');
+  if(!document.getElementById('ux-engine-styles')){
+    document.head ? document.head.appendChild(style) : document.addEventListener('DOMContentLoaded',function(){document.head.appendChild(style);});
+  }
+})();
+
+
+function uxListSearchDelegated(input){ 
+  var listId = input.dataset.listid || 'list';
+  uxSetState(listId, {q: input.value, selected: {}});
+  uxRerender(listId);
+}
+function uxListClearDelegated(btn){
+  var listId = btn.dataset.listid || 'list';
+  uxSetState(listId, {q:'', selected:{}});
+  uxRerender(listId);
+}
+function uxListFilterDelegated(select){
+  var listId = select.dataset.listid || 'list';
+  var key = select.dataset.filterkey || 'status';
+  var filters = uxGetState(listId).filters || {};
+  filters[key] = select.value;
+  uxSetState(listId, {filters: filters, selected:{}});
+  uxRerender(listId);
+}
+
+// END ENTERPRISE UX ENGINE
+
+
 async function pgSales(){
   try{
     const leads=await dbGet('leads','?order=created_at.desc');
@@ -2133,54 +2533,157 @@ async function sendMsg(){
 
 // SUBCONTRACTORS
 async function pgInvoices(){
-  var invs=await dbGet('invoices','?order=created_at.desc');
-  var jobs=await dbGet('jobs','?order=job_name.asc');
-  var totalOwed=invs.filter(function(v){return v.status!=='Paid';}).reduce(function(s,v){return s+parseFloat(v.amount||0);},0);
-  var totalPaid=invs.filter(function(v){return v.status==='Paid';}).reduce(function(s,v){return s+parseFloat(v.amount||0);},0);
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Invoices</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+invs.length+' invoices &nbsp;·&nbsp; '+fmt$(totalOwed)+' outstanding &nbsp;·&nbsp; '+fmt$(totalPaid)+' collected</div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="voiceInvoice()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Invoice</button>'
-    +'<button onclick="showInvoiceForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New Invoice</button></div></div>'
-    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">'
-    +[{l:'Outstanding',v:totalOwed,c:'var(--amber)'},{l:'Paid',v:totalPaid,c:'var(--green)'},{l:'Overdue',v:invs.filter(function(v){return v.status==='Overdue';}).reduce(function(s,v){return s+parseFloat(v.amount||0);},0),c:'var(--red)'},{l:'Total Invoiced',v:invs.reduce(function(s,v){return s+parseFloat(v.amount||0);},0),c:'var(--teal)'}]
-    .map(function(item){return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:18px;font-weight:800;color:'+item.c+'">'+fmt$(item.v)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+item.l+'</div></div>';}).join('')+'</div>'
-    +'<div id="inv-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Invoice<button onclick="$(\'inv-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
-    +'<select id="ninv-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
-    +'<option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Amount $</div><input id="ninv-amount" type="number" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Due Date</div><input id="ninv-due" type="date" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Description</div>'
-    +'<div style="display:flex;gap:6px"><input id="ninv-desc" placeholder="e.g. Progress billing — framing complete" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
-    +'<button onclick="micFillField(\'ninv-desc\',\'Describe what this invoice is for\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="saveNewInvoice()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Create Invoice</button>'
-    +'<button onclick="aiInvoiceSuggestion()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Suggest Amount</button>'
-    +'<button onclick="toggleVoiceRec()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Log</button>'+'<button onclick="aiStructureLog()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Structure</button>'+'</div></div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
-    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 150px 120px 120px 100px">JOB / DESCRIPTION<span>AMOUNT</span><span>DUE</span><span>STATUS</span><span>ACTIONS</span></div>';
-  if(!invs.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No invoices yet.</div>';}
-  else{invs.forEach(function(inv,i){
-    var job=jobs.find(function(j){return j.id===inv.job_id;})||{job_name:'—'};
-    var sColors={'Draft':'var(--muted)','Sent':'var(--blue)','Paid':'var(--green)','Overdue':'var(--red)','Partial':'var(--amber)'};
-    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
-      +'<div><div style="font-weight:700;font-size:13px">'+job.job_name+'</div><div style="font-size:11px;color:var(--muted)">'+(inv.description||'Invoice #'+String(i+1).padStart(4,'0'))+'</div></div>'
-      +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(inv.amount||0)+'</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+(inv.due_date||'—')+'</div>'
-      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[inv.status]||'var(--muted)')+';color:#fff">'+(inv.status||'Draft')+'</span></div>'
-      +'<div style="display:flex;gap:4px">'
-      +(inv.status!=='Paid'?'<button onclick="markPaid(\''+inv.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">✓ Paid</button>':'')
-      +'<button onclick="delRecord(\''+inv.id+'\',\'invoices\',pgInvoices)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
-      +'</div></div>';
-  });}
-  html+='</div>';
-  try{$('content').innerHTML=html;}catch(e){logErr('pgInvoices',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgInvoices()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
+  uxLoading('content','Loading invoices...');
+  try{
+    var invs = await dbGet('invoices','?order=created_at.desc') || [];
+    var state = uxGetState('invoices');
+    var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+
+    var filtered = invs;
+    if(state.q){
+      var ql = state.q.toLowerCase();
+      filtered = invs.filter(function(i){
+        var job = jobs.find(function(j){return j.id===i.job_id;})||{};
+        return (i.description||'').toLowerCase().includes(ql)
+          || (i.status||'').toLowerCase().includes(ql)
+          || (job.job_name||'').toLowerCase().includes(ql)
+          || String(i.amount||'').includes(ql);
+      });
+    }
+    if(state.filters&&state.filters.status){
+      filtered = filtered.filter(function(i){return (i.status||'').toLowerCase()===(state.filters.status||'').toLowerCase();});
+    }
+    if(state.sortKey){
+      filtered = filtered.slice().sort(function(a,b){
+        var ak = state.sortKey==='amount'?(parseFloat(a.amount)||0):String(a[state.sortKey]||'').toLowerCase();
+        var bk = state.sortKey==='amount'?(parseFloat(b.amount)||0):String(b[state.sortKey]||'').toLowerCase();
+        if(typeof ak==='number') return state.sortDir==='asc'?ak-bk:bk-ak;
+        return state.sortDir==='asc'?ak.localeCompare(bk):bk.localeCompare(ak);
+      });
+    }
+
+    var totalBilled = invs.reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var collected = invs.filter(function(i){return i.status==='paid'||i.status==='Paid';}).reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var outstanding = invs.filter(function(i){return i.status!=='paid'&&i.status!=='Paid'&&i.status!=='cancelled';}).reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+
+    var invStatusOpts = {
+      'Draft':  {label:'Draft',    color:'var(--muted)', bg:'#f8fafc'},
+      'draft':  {label:'Draft',    color:'var(--muted)', bg:'#f8fafc'},
+      'Sent':   {label:'Sent',     color:'var(--blue)',  bg:'var(--blue-bg)'},
+      'sent':   {label:'Sent',     color:'var(--blue)',  bg:'var(--blue-bg)'},
+      'Paid':   {label:'Paid',     color:'var(--green)', bg:'#f0fdf4'},
+      'paid':   {label:'Paid',     color:'var(--green)', bg:'#f0fdf4'},
+      'Overdue':{label:'Overdue',  color:'var(--red)',   bg:'var(--red-bg)'},
+      'overdue':{label:'Overdue',  color:'var(--red)',   bg:'var(--red-bg)'},
+      'Cancelled':{label:'Void',   color:'var(--dim)',   bg:'#f8fafc'},
+    };
+
+    var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--text)">'+fmt$(totalBilled)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total Billed</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--green)">'+fmt$(collected)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Collected</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--amber)">'+fmt$(outstanding)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Outstanding</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id:'invoices', title:'Invoices', items:filtered, q:state.q||'',
+      sortKey:state.sortKey, sortDir:state.sortDir||'asc', selected:state.selected||{},
+      newLabel:'New Invoice', onNew:'showInvoiceForm()',
+      onExport:'uxExportCSV(lsAll(\'invoices\'),[{key:\'description\',label:\'Description\'},{key:\'amount\',label:\'Amount\'},{key:\'status\',label:\'Status\'},{key:\'due_date\',label:\'Due\'}],\'invoices.csv\')',
+      filters:[{key:'status',label:'All Statuses',options:[
+        {value:'Draft',label:'Draft'},{value:'Sent',label:'Sent'},
+        {value:'Paid',label:'Paid'},{value:'Overdue',label:'Overdue'}],
+        selected:state.filters&&state.filters.status}],
+      emptyIcon:'🧾', emptyMsg:invs.length?'No invoices match':'No invoices yet',
+      emptyAction:{label:'+ New Invoice',fn:'showInvoiceForm()'},
+      bulkActions:[{label:'Mark Paid',fn:'invBulkPay(UX_LIST_STATE[\'invoices\']&&UX_LIST_STATE[\'invoices\'].selected||{})'}],
+      onRowClick:'openInvDetail(\'__ID__\')',
+      columns:[
+        {key:'description',label:'Invoice',flex:3,
+          render:function(i){
+            var job=jobs.find(function(j){return j.id===i.job_id;})||{};
+            return '<div style="font-weight:700">'+uxEsc(i.description||'Invoice')+'</div>'
+              +(job.job_name?'<div style="font-size:11px;color:var(--muted)">'+uxEsc(job.job_name)+'</div>':'');}},
+        {key:'amount',label:'Amount',flex:1,right:true,
+          render:function(i){return '<div style="font-weight:800">'+fmt$(i.amount||0)+'</div>';}},
+        {key:'status',label:'Status',flex:1,
+          render:function(i){return uxStatusBadge(i.status||'Draft',invStatusOpts,'updateInvStatus',i.id);}},
+        {key:'due_date',label:'Due',flex:1,hide_mobile:true,
+          render:function(i){
+            var ov=i.due_date&&new Date(i.due_date)<new Date()&&i.status!=='Paid'&&i.status!=='paid';
+            return '<span style="color:'+(ov?'var(--red)':'var(--muted)')+';">'+(i.due_date?fmtD(i.due_date):'—')+'</span>';}},
+      ],
+      rowActions:function(i){return[
+        {icon:'📤',label:'Send',fn:'sendInvoiceToClient(\''+i.id+'\')'},
+        {icon:'✓',label:'Mark Paid',fn:'updateInvStatus(\''+i.id+'\',\'Paid\')'},
+        {icon:'✕',label:'Delete',fn:'delRecord(\''+i.id+'\',\'invoices\',pgInvoices)'},
+      ];}
+    });
+
+    $('content').innerHTML = html;
+    uxRegister('invoices', pgInvoices);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
+  }
 }
-function showInvoiceForm(){var w=$('inv-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
+
+async function updateInvStatus(invId, newStatus){
+  await dbUpd('invoices',invId,{status:newStatus,updated_at:new Date().toISOString()});
+  if(newStatus==='Paid'||newStatus==='paid'){
+    await runBusinessCascade('invoice.paid','invoice',invId,{}).catch(function(){});
+  }
+  await auditLog('invoices',invId,'invoice_status_changed',null,newStatus,false,'Invoice status: '+newStatus);
+  toast('Invoice marked '+newStatus,'ok');
+  pgInvoices();
+}
+
+async function invBulkPay(selected){
+  var ids = Object.keys(selected||{});
+  if(!ids.length){toast('Select invoices first','err');return;}
+  for(var id of ids){ await updateInvStatus(id,'Paid'); }
+  toast(ids.length+' invoices marked paid','ok');
+}
+
+function openInvDetail(id){
+  var inv = (lsAll('invoices')||[]).find(function(i){return i.id===id;});
+  if(!inv) return;
+  var el = document.createElement('div');
+  el.className='ov'; el.id='inv-detail-ov';
+  el.innerHTML = '<div class="modal"><div class="mh"><div><div class="mt">Invoice — '+uxEsc(inv.description||'Invoice')+'</div>'
+    +'<div class="ms">'+fmt$(inv.amount||0)+' · '+(inv.status||'Draft')+'</div></div>'
+    +'<button class="mc" onclick="closeOv(this)">×</button></div>'
+    +'<div class="mb">'
+    +'<div class="f2"><div class="fr"><label>Description</label><input id="id-desc" value="'+uxEsc(inv.description||'')+'"></div>'
+    +'<div class="fr"><label>Amount</label><input id="id-amt" type="number" value="'+(inv.amount||0)+'"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Status</label><select id="id-status">'
+    +['Draft','Sent','Paid','Overdue','Cancelled'].map(function(s){return '<option'+(inv.status===s?' selected':'')+'>'+s+'</option>';}).join('')
+    +'</select></div>'
+    +'<div class="fr"><label>Due Date</label><input id="id-due" type="date" value="'+(inv.due_date||'')+'"></div></div>'
+    +'<div class="fr"><label>Notes</label><textarea id="id-notes" style="min-height:60px">'+uxEsc(inv.notes||'')+'</textarea></div>'
+    +'</div>'
+    +'<div class="mf">'
+    +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
+    +'<button class="btn btn-p" onclick="saveInvDetail(\''+id+'\')">Save Changes</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+
+async function saveInvDetail(id){
+  var upd={
+    description:($('id-desc')||{}).value||'',
+    amount:parseFloat(($('id-amt')||{}).value)||0,
+    status:($('id-status')||{}).value||'Draft',
+    due_date:($('id-due')||{}).value||null,
+    notes:($('id-notes')||{}).value||'',
+    updated_at:new Date().toISOString()
+  };
+  await dbUpd('invoices',id,upd);
+  await auditLog('invoices',id,'invoice_updated',null,upd.status,false,'Invoice updated');
+  toast('Invoice saved','ok');
+  var ov=document.getElementById('inv-detail-ov');if(ov)ov.remove();
+  pgInvoices();
+}
+
+
 async function saveNewInvoice(){
   try{
   var amount=parseFloat(($('ninv-amount')||{}).value||0);
@@ -2338,63 +2841,184 @@ async function aiCheckOverdue(){
 }
 
 async function pgBills(){
-  var bills=await dbGet('bills','?order=created_at.desc');
-  if(!bills) bills=[];
-  var jobs=await dbGet('jobs','?order=job_name.asc');
-  var subs=await dbGet('subcontractors','?order=company_name.asc');
-  var totalOwed=bills.filter(function(b){return b.status!=='Paid';}).reduce(function(s,b){return s+parseFloat(b.amount||0);},0);
-  var overdue=bills.filter(function(b){return b.status==='Overdue';});
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Bills &amp; Accounts Payable</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+bills.length+' bills &nbsp;·&nbsp; '+fmt$(totalOwed)+' owed &nbsp;·&nbsp; '+overdue.length+' overdue</div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="micFillField(\'nbill-desc\',\'Describe this bill: vendor, what for, amount\');if($(\'bill-form\'))$(\'bill-form\').style.display=\'block\'" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice Bill</button>'
-    +'<button onclick="showBillForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Add Bill</button></div></div>'
-    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">'
-    +[{l:'Total Owed',v:totalOwed,c:'var(--red)'},{l:'Overdue',v:overdue.reduce(function(s,b){return s+parseFloat(b.amount||0);},0),c:'var(--red)'},{l:'Due This Week',v:bills.filter(function(b){var d=new Date(b.due_date);var now=new Date();return d>now&&d<new Date(now.getTime()+7*86400000)&&b.status!=='Paid';}).reduce(function(s,b){return s+parseFloat(b.amount||0);},0),c:'var(--amber)'},{l:'Paid This Month',v:bills.filter(function(b){return b.status==='Paid'&&new Date(b.paid_at||b.created_at).getMonth()===new Date().getMonth();}).reduce(function(s,b){return s+parseFloat(b.amount||0);},0),c:'var(--green)'}]
-    .map(function(item){return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:18px;font-weight:800;color:'+item.c+'">'+fmt$(item.v)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+item.l+'</div></div>';}).join('')+'</div>'
-    +'<div id="bill-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">Add Bill<button onclick="$(\'bill-form\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div><select id="nbill-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"><option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Vendor / Sub</div>'
-    +'<div style="display:flex;gap:4px"><input id="nbill-vendor" placeholder="Vendor name..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
-    +'<button onclick="micFillField(\'nbill-vendor\',\'Vendor or subcontractor name\')" style="padding:8px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Amount $</div><input id="nbill-amount" type="number" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Description</div>'
-    +'<div style="display:flex;gap:4px"><input id="nbill-desc" placeholder="What is this bill for?" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
-    +'<button onclick="micFillField(\'nbill-desc\',\'What is this bill for?\')" style="padding:8px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Due Date</div><input id="nbill-due" type="date" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="saveNewBill()" style="padding:9px 18px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Bill</button>'
-    +'<button onclick="aiCheckBill()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Verify Bill</button>'
-    +'</div></div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
-    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 150px 120px 120px 100px">VENDOR / JOB<span>AMOUNT</span><span>DUE</span><span>STATUS</span><span>ACTIONS</span></div>';
-  if(!bills.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No bills yet.</div>';}
-  else{bills.forEach(function(b,i){
-    var job=jobs.find(function(j){return j.id===b.job_id;})||{job_name:'—'};
-    var sColors={'Unpaid':'var(--amber)','Paid':'var(--green)','Overdue':'var(--red)','Disputed':'var(--purple)'};
-    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
-      +'<div><div style="font-weight:700;font-size:13px">'+b.vendor_name+'</div><div style="font-size:11px;color:var(--muted)">'+(b.description||'').substring(0,40)+' · '+job.job_name+'</div></div>'
-      +'<div style="font-weight:800;font-size:14px;color:var(--text)">'+fmt$(b.amount||0)+'</div>'
-      +'<div style="font-size:12px;color:'+(b.status==='Overdue'?'var(--red)':'var(--muted)')+'">'+(b.due_date||'—')+'</div>'
-      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[b.status]||'var(--amber)')+';color:#fff">'+(b.status||'Unpaid')+'</span></div>'
-      +'<div style="display:flex;gap:4px">'
-      +(function(b){
-        if(b.status==='paid'||b.status==='Paid') return '<span style="font-size:10px;color:var(--green);font-weight:700">✅ Paid</span>';
-        if(b.status==='ready_to_pay') return '<button onclick="billApproveStage(\'' + b.id + '\',3)" style="font-size:10px;padding:3px 9px;background:var(--green);color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700">💳 Pay Now</button>';
-        if(b.status==='stage2_review') return '<button onclick="billApproveStage(\'' + b.id + '\',2)" style="font-size:10px;padding:3px 8px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber);border-radius:4px;cursor:pointer">✓ Stage 2</button>';
-        return '<button onclick="billApproveStage(\'' + b.id + '\',1)" style="font-size:10px;padding:3px 8px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer">✓ Stage 1</button>';
-      })(b)
-      +'<button onclick="disputeBill(\''+b.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:4px;cursor:pointer;font-family:inherit">?</button>'
-      +'</div></div>';
-  });}
-  html+='</div>';
-  try{$('content').innerHTML=html;}catch(e){logErr('pgBills',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgBills()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
+  uxLoading('content','Loading bills...');
+  try{
+    var bills = await dbGet('bills','?order=created_at.desc') || [];
+    var state = uxGetState('bills');
+
+    var filtered = bills;
+    if(state.q){
+      var ql = state.q.toLowerCase();
+      filtered = bills.filter(function(b){
+        return (b.vendor||'').toLowerCase().includes(ql)
+          || (b.description||'').toLowerCase().includes(ql)
+          || (b.status||'').toLowerCase().includes(ql);
+      });
+    }
+    if(state.filters && state.filters.status){
+      filtered = filtered.filter(function(b){ return b.status===state.filters.status; });
+    }
+
+    // Sort
+    if(state.sortKey){
+      filtered = filtered.slice().sort(function(a,b){
+        var ak = state.sortKey === 'amount' ? (parseFloat(a.amount)||0) : String(a[state.sortKey]||'').toLowerCase();
+        var bk = state.sortKey === 'amount' ? (parseFloat(b.amount)||0) : String(b[state.sortKey]||'').toLowerCase();
+        if(typeof ak === 'number') return state.sortDir==='asc'?ak-bk:bk-ak;
+        return state.sortDir==='asc'?ak.localeCompare(bk):bk.localeCompare(ak);
+      });
+    }
+
+    var totalAmt = bills.reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var pendingAmt = bills.filter(function(b){return b.status==='pending'||b.status==='Pending';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var paidAmt = bills.filter(function(b){return b.status==='paid'||b.status==='Paid';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+
+    var billStatusOpts = {
+      'pending': {label:'Pending',  color:'var(--amber)', bg:'var(--amber-bg)'},
+      'Pending': {label:'Pending',  color:'var(--amber)', bg:'var(--amber-bg)'},
+      'approved':{label:'Approved', color:'var(--blue)',  bg:'var(--blue-bg)'},
+      'paid':    {label:'Paid',     color:'var(--green)', bg:'#f0fdf4'},
+      'Paid':    {label:'Paid',     color:'var(--green)', bg:'#f0fdf4'},
+      'overdue': {label:'Overdue',  color:'var(--red)',   bg:'var(--red-bg)'},
+      'draft':   {label:'Draft',    color:'var(--muted)', bg:'#f8fafc'},
+    };
+
+    var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--text)">'+fmt$(totalAmt)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total Bills</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--amber)">'+fmt$(pendingAmt)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pending</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--green)">'+fmt$(paidAmt)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Paid</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id: 'bills',
+      title: 'Bills',
+      items: filtered,
+      q: state.q||'',
+      sortKey: state.sortKey,
+      sortDir: state.sortDir||'asc',
+      selected: state.selected||{},
+      newLabel: 'New Bill',
+      onNew: 'showNewBillForm()',
+      onExport: 'uxExportCSV(lsAll(\'bills\'),[{key:\'vendor\',label:\'Vendor\'},{key:\'description\',label:\'Description\'},{key:\'amount\',label:\'Amount\'},{key:\'status\',label:\'Status\'},{key:\'due_date\',label:\'Due Date\'}],\'bills.csv\')',
+      filters: [{
+        key:'status', label:'All Statuses',
+        options:[
+          {value:'pending',label:'Pending'},{value:'approved',label:'Approved'},
+          {value:'paid',label:'Paid'},{value:'overdue',label:'Overdue'}
+        ],
+        selected: state.filters&&state.filters.status
+      }],
+      emptyIcon: '🧾',
+      emptyMsg: bills.length ? 'No bills match your search' : 'No bills yet',
+      emptyAction: {label:'+ Add First Bill', fn:'showNewBillForm()'},
+      bulkActions: [
+        {label:'Mark Paid', fn:'billsBulkPay(UX_LIST_STATE[\'bills\']&&UX_LIST_STATE[\'bills\'].selected||{})'},
+        {label:'Export', fn:'uxExportCSV(lsAll(\'bills\'),[{key:\'vendor\',label:\'Vendor\'},{key:\'amount\',label:\'Amount\'},{key:\'status\',label:\'Status\'}],\'bills-selected.csv\')'}
+      ],
+      onRowClick: 'openBillDetail(\'__ID__\')',
+      columns: [
+        {key:'vendor', label:'Vendor / Supplier', flex:2,
+          render: function(b){ return '<div style="font-weight:700">'+uxEsc(b.vendor||'Unknown')+'</div>'
+            +(b.description?'<div style="font-size:11px;color:var(--muted)">'+uxEsc(b.description.substring(0,50))+'</div>':''); }},
+        {key:'amount', label:'Amount', flex:1, right:true,
+          render: function(b){ return '<div style="font-weight:800;color:var(--text)">'+fmt$(b.amount||0)+'</div>'; }},
+        {key:'status', label:'Status', flex:1,
+          render: function(b){ return uxStatusBadge(b.status||'pending', billStatusOpts, 'updateBillStatus', b.id); }},
+        {key:'due_date', label:'Due Date', flex:1, hide_mobile:true,
+          render: function(b){ 
+            var isOverdue = b.due_date && new Date(b.due_date)<new Date() && b.status!=='paid'&&b.status!=='Paid';
+            return '<span style="color:'+(isOverdue?'var(--red)':'var(--muted)')+';">'+(b.due_date?fmtD(b.due_date):'—')+'</span>'; }},
+        {key:'created_at', label:'Added', flex:1, hide_mobile:true,
+          render: function(b){ return fmtD(b.created_at); }},
+      ],
+      rowActions: function(b){
+        return [
+          {icon:'✓', label:'Mark Paid', fn:'updateBillStatus(\''+b.id+'\',\'paid\')'},
+          {icon:'✕', label:'Delete', fn:'delRecord(\''+b.id+'\',\'bills\',pgBills)'},
+        ];
+      }
+    });
+
+    $('content').innerHTML = html;
+    uxRegister('bills', pgBills);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
+  }
 }
-function showBillForm(){var f=$('bill-form');if(f)f.style.display=f.style.display==='none'?'block':'none';}
+
+async function updateBillStatus(billId, newStatus){
+  await dbUpd('bills', billId, {status:newStatus, updated_at:new Date().toISOString()});
+  if(newStatus==='paid'||newStatus==='Paid'){
+    await runBusinessCascade('bill.approved','bill',billId,{}).catch(function(){});
+  }
+  await auditLog('bills', billId, 'bill_status_changed', null, newStatus, false, 'Bill status changed to '+newStatus);
+  toast('Bill marked '+newStatus,'ok');
+  pgBills();
+}
+
+async function billsBulkPay(selected){
+  var ids = Object.keys(selected||{});
+  if(!ids.length){toast('Select bills first','err');return;}
+  for(var id of ids){ await updateBillStatus(id,'paid'); }
+  toast(ids.length+' bills marked paid','ok');
+}
+
+function openBillDetail(id){
+  var bills = lsAll('bills');
+  var bill = bills.find(function(b){return b.id===id;});
+  if(!bill) return;
+  var el = document.createElement('div');
+  el.className='ov'; el.id='bill-detail-ov';
+  el.innerHTML = '<div class="modal"><div class="mh"><div><div class="mt">Bill — '+uxEsc(bill.vendor||'Unknown')+'</div>'
+    +'<div class="ms">'+fmt$(bill.amount||0)+' · '+(bill.status||'pending')+'</div></div>'
+    +'<button class="mc" onclick="closeOv(this)">×</button></div>'
+    +'<div class="mb">'
+    +'<div class="f2"><div class="fr"><label>Vendor</label><input id="bd-vendor" value="'+uxEsc(bill.vendor||'')+'"></div>'
+    +'<div class="fr"><label>Amount</label><input id="bd-amount" type="number" value="'+(bill.amount||0)+'"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Status</label><select id="bd-status">'
+    +'<option value="pending"'+(bill.status==='pending'?' selected':'')+'>Pending</option>'
+    +'<option value="approved"'+(bill.status==='approved'?' selected':'')+'>Approved</option>'
+    +'<option value="paid"'+(bill.status==='paid'||bill.status==='Paid'?' selected':'')+'>Paid</option>'
+    +'<option value="overdue"'+(bill.status==='overdue'?' selected':'')+'>Overdue</option>'
+    +'</select></div>'
+    +'<div class="fr"><label>Due Date</label><input id="bd-due" type="date" value="'+(bill.due_date||'')+'"></div></div>'
+    +'<div class="fr"><label>Description</label><textarea id="bd-desc" style="min-height:60px">'+uxEsc(bill.description||'')+'</textarea></div>'
+    +'</div>'
+    +'<div class="mf">'
+    +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
+    +'<button onclick="deleteBillRecord(\''+id+'\')" style="padding:9px 14px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Delete</button>'
+    +'<button class="btn btn-p" onclick="saveBillDetail(\''+id+'\')">Save Changes</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+
+async function saveBillDetail(id){
+  var upd = {
+    vendor: ($('bd-vendor')||{}).value||'',
+    amount: parseFloat(($('bd-amount')||{}).value)||0,
+    status: ($('bd-status')||{}).value||'pending',
+    due_date: ($('bd-due')||{}).value||null,
+    description: ($('bd-desc')||{}).value||'',
+    updated_at: new Date().toISOString()
+  };
+  await dbUpd('bills', id, upd);
+  await auditLog('bills',id,'bill_updated',null,upd.status,false,'Bill updated');
+  toast('Bill saved','ok');
+  var ov = document.getElementById('bill-detail-ov');
+  if(ov) ov.remove();
+  pgBills();
+}
+
+async function deleteBillRecord(id){
+  if(!confirm('Delete this bill?')) return;
+  await dbDel('bills',id);
+  var ov = document.getElementById('bill-detail-ov');
+  if(ov) ov.remove();
+  toast('Bill deleted','ok');
+  pgBills();
+}
+
+
 async function saveNewBill(){
   try{
   var vendor=($('nbill-vendor')||{}).value||'';
@@ -4455,102 +5079,125 @@ async function pgReportsV2(){
 var JOBS_VIEW = 'grid'; // 'grid' or 'list'
 
 async function pgJobsV2(){
+  uxLoading('content','Loading jobs...');
   try{
-    var jobs = await dbGet('jobs','?order=created_at.desc');
-    ALLJOBS = jobs;
-    var active   = jobs.filter(function(j){return j.status==='active';});
-    var complete = jobs.filter(function(j){return j.status==='complete';});
-    var onHold   = jobs.filter(function(j){return j.status==='on_hold';});
-    var totalBudget = active.reduce(function(s,j){return s+(parseFloat(j.contract_price)||parseFloat(j.budget)||0);},0);
+    var jobs = await dbGet('jobs','?order=created_at.desc') || [];
+    var state = uxGetState('jobs');
 
-    $('content').innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
-      +'<div><div style="font-size:18px;font-weight:800">🏗️ Jobs</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+active.length+' active · '+complete.length+' complete · '+fmt$(totalBudget)+' total active contracts</div></div>'
-      +'<div style="display:flex;gap:8px;align-items:center">'
-      +'<input id="job-search" placeholder="Search jobs..." style="width:180px;padding:7px 11px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;font-family:inherit" oninput="filterJobsV2(this.value)">'
-      // View toggle
-      +'<div style="display:flex;border:1.5px solid var(--border2);border-radius:var(--radius-sm);overflow:hidden">'
-      +'<button id="view-grid-btn" onclick="setJobsView(\'grid\')" title="Grid view" style="padding:6px 10px;background:'+(JOBS_VIEW==='grid'?'var(--teal)':'var(--bg)')+';color:'+(JOBS_VIEW==='grid'?'#fff':'var(--muted)')+';border:none;cursor:pointer;font-size:14px">⊞</button>'
-      +'<button id="view-list-btn" onclick="setJobsView(\'list\')" title="List view" style="padding:6px 10px;background:'+(JOBS_VIEW==='list'?'var(--teal)':'var(--bg)')+';color:'+(JOBS_VIEW==='list'?'#fff':'var(--muted)')+';border:none;cursor:pointer;font-size:14px;border-left:1px solid var(--border2)">☰</button>'
-      +'</div>'
-      +'<button class="btn btn-p" onclick="showJobForm()">+ New Job</button>'
-      +'<button onclick="aiWeeklySummary()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">AI Summary</button>'
-      +'</div></div>'
-      // Status filters
-      +'<div style="display:flex;gap:8px;margin-bottom:16px">'
-      +['all','active','on_hold','complete','cancelled'].map(function(s){
-        var count=s==='all'?jobs.length:jobs.filter(function(j){return j.status===s;}).length;
-        return '<button onclick="filterJobsV2(null,\''+s+'\')" style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid var(--border2);background:var(--bg);font-family:inherit">'+s.replace('_',' ').replace(/\b\w/g,function(c){return c.toUpperCase();})+' ('+count+')</button>';
-      }).join('')
-      +'</div>'
-      // Jobs container
-      +'<div id="jobs-grid"></div>';
+    // Apply search
+    var filtered = jobs;
+    if(state.q){
+      var ql = state.q.toLowerCase();
+      filtered = jobs.filter(function(j){
+        return (j.job_name||'').toLowerCase().includes(ql)
+          || (j.client_name||'').toLowerCase().includes(ql)
+          || (j.address||'').toLowerCase().includes(ql)
+          || (j.status||'').toLowerCase().includes(ql);
+      });
+    }
+    if(state.filters && state.filters.status){
+      filtered = filtered.filter(function(j){ return j.status===state.filters.status; });
+    }
 
-    renderJobsContent(jobs);
-  }catch(e){
-    console.error('pgJobsV2',e);
-    $('content').innerHTML='<div class="empty"><div class="et">Error loading jobs: '+e.message+'</div><button class="btn btn-p" style="margin-top:12px" onclick="pgJobsV2()">Retry</button></div>';
-  }
-}
+    // Sort
+    if(state.sortKey){
+      filtered = filtered.slice().sort(function(a,b){
+        var av = String(a[state.sortKey]||'').toLowerCase();
+        var bv = String(b[state.sortKey]||'').toLowerCase();
+        return state.sortDir==='asc'?av.localeCompare(bv):bv.localeCompare(av);
+      });
+    }
 
-function setJobsView(view){
-  JOBS_VIEW = view;
-  var gBtn = document.getElementById('view-grid-btn');
-  var lBtn = document.getElementById('view-list-btn');
-  if(gBtn){gBtn.style.background=view==='grid'?'var(--teal)':'var(--bg)';gBtn.style.color=view==='grid'?'#fff':'var(--muted)';}
-  if(lBtn){lBtn.style.background=view==='list'?'var(--teal)':'var(--bg)';lBtn.style.color=view==='list'?'#fff':'var(--muted)';}
-  var jobs = ALLJOBS || [];
-  renderJobsContent(jobs);
-}
+    // Stats
+    var active = jobs.filter(function(j){return j.status==='active'||j.status==='in_progress';}).length;
+    var complete = jobs.filter(function(j){return j.status==='complete'||j.status==='completed';}).length;
+    var totalValue = jobs.reduce(function(s,j){return s+(parseFloat(j.contract_price)||0);},0);
 
-function renderJobsContent(jobs){
-  var grid = document.getElementById('jobs-grid');
-  if(!grid) return;
-  if(!jobs.length){
-    grid.innerHTML='<div class="empty"><div class="ei">🏗️</div><div class="et">No jobs yet</div><button class="btn btn-p" style="margin-top:12px" onclick="showJobForm()">Create First Job</button></div>';
-    return;
-  }
-  if(JOBS_VIEW === 'list'){
-    grid.style.display='block';
-    grid.innerHTML = renderJobsListView(jobs);
-  } else {
-    grid.style.display='grid';
-    grid.style.gridTemplateColumns='repeat(auto-fill,minmax(300px,1fr))';
-    grid.style.gap='14px';
-    grid.innerHTML = jobs.map(function(j){return renderJobCard(j);}).join('');
-  }
-}
+    var statusOpts = {
+      'active':     {label:'Active',     color:'var(--teal)',  bg:'#e8f5f3'},
+      'in_progress':{label:'In Progress',color:'var(--blue)',  bg:'var(--blue-bg)'},
+      'pre-construction':{label:'Pre-Con',color:'var(--amber)',bg:'var(--amber-bg)'},
+      'complete':   {label:'Complete',   color:'var(--green)', bg:'#f0fdf4'},
+      'completed':  {label:'Completed',  color:'var(--green)', bg:'#f0fdf4'},
+      'on_hold':    {label:'On Hold',    color:'var(--muted)', bg:'#f8fafc'},
+      'cancelled':  {label:'Cancelled',  color:'var(--red)',   bg:'var(--red-bg)'},
+    };
 
-function renderJobsListView(jobs){
-  var statusColors={active:'var(--green)',complete:'var(--blue)',on_hold:'var(--amber)',cancelled:'var(--red)'};
-  var rows = jobs.map(function(j){
-    var sc = statusColors[j.status]||'var(--muted)';
-    var pct = j.percent_complete||0;
-    return '<div style="display:grid;grid-template-columns:2fr 1fr 100px 100px 100px 130px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--card)" onclick="etmAwareJobOpen(\''+j.id+'\')" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\'var(--card)\'">'
-      +'<div><div style="font-weight:700;font-size:13px">'+j.job_name+'</div><div style="font-size:11px;color:var(--muted)">'+j.client_name+(j.address?' · '+j.address.split(',')[0]:'')+'</div></div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+( j.current_phase||'Pre-Construction')+'</div>'
-      +'<div style="font-size:13px;font-weight:700;color:var(--teal)">'+fmt$(j.contract_price||j.budget||0)+'</div>'
-      +'<div style="font-size:12px;font-weight:700;color:var(--teal)">'+pct+'%</div>'
-      +'<div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:'+sc+'20;color:'+sc+';border:1px solid '+sc+'40">'+( j.status||'active')+'</span></div>'
-      +'<div style="display:flex;gap:4px" onclick="event.stopPropagation()">'
-      +'<button onclick="etmAwareJobOpen(\''+j.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--teal);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit">Open</button>'
-      +'<button onclick="AJOB=ALLJOBS.find(function(x){return x.id===\''+j.id+'\';});AJOB&&goTab(\'financial\')" style="font-size:11px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-family:inherit">💰</button>'
-      +'</div>'
+    var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">'+active+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Active Jobs</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+complete+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Completed</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--blue)">'+fmt$(totalValue)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total Value</div></div>'
       +'</div>';
-  }).join('');
-  return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius)">'
-    +'<div style="display:grid;grid-template-columns:2fr 1fr 100px 100px 100px 130px;padding:8px 16px;border-bottom:2px solid var(--border);background:var(--bg)">'
-    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Job</div>'
-    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Phase</div>'
-    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Contract</div>'
-    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Progress</div>'
-    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Status</div>'
-    +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Actions</div>'
-    +'</div>'
-    + rows
-    +'</div>';
+
+    html += uxList({
+      id: 'jobs',
+      title: 'Jobs',
+      items: filtered,
+      q: state.q || '',
+      sortKey: state.sortKey,
+      sortDir: state.sortDir || 'asc',
+      selected: state.selected || {},
+      newLabel: 'New Job',
+      onNew: 'showNewJobForm()',
+      onExport: 'uxExportCSV(lsAll(\'jobs\'),[{key:\'job_name\',label:\'Job\'},{key:\'client_name\',label:\'Client\'},{key:\'status\',label:\'Status\'},{key:\'contract_price\',label:\'Contract\'},{key:\'address\',label:\'Address\'}],\'jobs.csv\')',
+      filters: [{
+        key:'status', label:'All Statuses',
+        options:[
+          {value:'active',label:'Active'},
+          {value:'in_progress',label:'In Progress'},
+          {value:'pre-construction',label:'Pre-Con'},
+          {value:'complete',label:'Complete'},
+          {value:'on_hold',label:'On Hold'},
+        ],
+        selected: state.filters&&state.filters.status
+      }],
+      emptyIcon: '🏗️',
+      emptyMsg: jobs.length ? 'No jobs match your search' : 'No jobs yet',
+      emptyAction: {label:'+ Create First Job', fn:'showNewJobForm()'},
+      bulkActions: [
+        {label:'Export Selected', fn:'eisBulkExportJobs()'}
+      ],
+      onRowClick: 'selectJob(\'__ID__\')',
+      columns: [
+        {key:'job_name', label:'Job Name', flex:3,
+          render: function(j){ return '<div style="font-weight:700">'+uxEsc(j.job_name||'Unnamed')+'</div>'
+            +'<div style="font-size:11px;color:var(--muted)">'+uxEsc(j.client_name||'')+(j.address?' · '+uxEsc(j.address.split(',')[0]):'')+'</div>'; }},
+        {key:'status', label:'Status', flex:1, hide_mobile:true,
+          render: function(j){ return uxStatusBadge(j.status||'active', statusOpts, 'updateJobStatus', j.id); }},
+        {key:'progress_pct', label:'Progress', flex:1, hide_mobile:true,
+          render: function(j){
+            var pct = j.progress_pct||0;
+            return '<div style="display:flex;align-items:center;gap:6px">'
+              +'<div style="flex:1;height:4px;background:var(--border);border-radius:2px">'
+              +'<div style="height:100%;background:var(--teal);border-radius:2px;width:'+pct+'%"></div></div>'
+              +'<span style="font-size:11px;color:var(--muted);white-space:nowrap">'+pct+'%</span></div>'; }},
+        {key:'contract_price', label:'Contract', flex:1, right:true, hide_mobile:true,
+          render: function(j){ return '<div style="font-weight:700">'+fmt$(j.contract_price||0)+'</div>'; }},
+        {key:'created_at', label:'Started', flex:1, hide_mobile:true,
+          render: function(j){ return fmtD(j.created_at); }},
+      ],
+      rowActions: function(j){
+        return [
+          {icon:'📋', label:'Open', fn:'selectJob(\''+j.id+'\')'},
+          {icon:'✕',  label:'Delete', fn:'delRecord(\''+j.id+'\',\'jobs\',pgJobsV2)'},
+        ];
+      }
+    });
+
+    $('content').innerHTML = html;
+    uxRegister('jobs', pgJobsV2);
+  }catch(e){
+    $('content').innerHTML = '<div class="empty"><div class="et">Error loading jobs: '+e.message+'</div></div>';
+  }
 }
+
+async function updateJobStatus(jobId, newStatus){
+  await dbUpd('jobs', jobId, {status:newStatus, updated_at:new Date().toISOString()});
+  await auditLog('jobs', jobId, 'status_changed', null, newStatus, false, 'Job status changed to '+newStatus);
+  await runBusinessCascade('job.status_changed','job',jobId,{status:newStatus}).catch(function(){});
+  pgJobsV2();
+}
+
 
 async function filterJobsV2(q,status){
   var jobs = await dbGet('jobs','?order=created_at.desc');
@@ -8110,58 +8757,88 @@ async function pgBudget(){
   try{$('content').innerHTML=html;}catch(e){logErr('pgBudget',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgBudget()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 async function pgPOs(){
-  var pos=await dbGet('purchase_orders','?order=created_at.desc');
-  var jobs=await dbGet('jobs','?order=job_name.asc');
-  var subs=await dbGet('subcontractors','?order=company_name.asc');
-  var totalOpen=pos.filter(function(p){return p.status!=='Closed'&&p.status!=='Cancelled';}).reduce(function(s,p){return s+parseFloat(p.total||0);},0);
-  var sColors={'Draft':'var(--muted)','Pending Authorization':'var(--amber)','Authorized':'var(--blue)','Sent':'var(--blue)','Acknowledged':'var(--teal)','Delivered':'var(--green)','Invoiced':'var(--purple)','Closed':'var(--dim)','Cancelled':'var(--red)'};
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Purchase Orders</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+pos.length+' total &nbsp;·&nbsp; '+fmt$(totalOpen)+' open value</div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="voicePO()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice PO</button>'
-    +'<button onclick="showNewPOForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ Request PO</button></div></div>'
-    +'<div id="po-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">Request Purchase Order<button onclick="$(\'po-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
-    +'\'<div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--amber);font-weight:700;">⚠️ PO Policy: Purchase Orders require 3-stage approval. This request will route to Gatekeeper for authorization. POs are never created directly. (DEC-022)</div>\''
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
-    +'<select id="npo-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
-    +'<option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Supplier / Sub</div>'
-    +'<div style="display:flex;gap:6px"><input id="npo-supplier" placeholder="Supplier name..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
-    +'<button onclick="micFillField(\'npo-supplier\',\'What is the supplier or subcontractor name\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Delivery Date</div>'
-    +'<input id="npo-delivery" type="date" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Items (one per line: Description, Qty, Unit, Unit Price)</div>'
-    +'<div style="display:flex;gap:6px"><textarea id="npo-items" rows="4" placeholder="Lumber 2x6x16, 100, ea, $8.50\nConcrete mix 80lb bags, 20, bag, $6.25" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
-    +'<button onclick="micFillField(\'npo-items\',\'List each material item with quantity and price\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Notes</div>'
-    +'<input id="npo-notes" placeholder="Special instructions, delivery notes..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="requestNewPO()" style="padding:9px 18px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">📋 Submit PO Request → Gatekeeper</button>'
-    +'<button onclick="aiDraftPO()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Fill Items</button>'
-    +'</div></div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
-    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:80px 1fr 150px 120px 100px 100px">PO# &nbsp; JOB<span>SUPPLIER</span><span>DELIVERY</span><span>TOTAL</span><span>STATUS</span><span></span></div>';
-  if(!pos.length){html+='<div style="padding:40px;text-align:center;color:var(--dim)">No purchase orders yet.</div>';}
-  else{pos.forEach(function(po,i){
-    var job=jobs.find(function(j){return j.id===po.job_id;})||{job_name:'—'};
-    html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:80px 1fr 150px 120px 100px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'">'
-      +'<div style="font-size:11px;font-weight:800;color:var(--muted)">PO-'+String(i+1).padStart(3,'0')+'<br><span style="font-weight:400;font-size:10px">'+job.job_name.substring(0,14)+'</span></div>'
-      +'<div><div style="font-weight:700;font-size:13px">'+po.supplier_name+'</div><div style="font-size:11px;color:var(--muted)">'+(po.notes||'').substring(0,40)+'</div></div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+(po.delivery_date||'—')+'</div>'
-      +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(po.total||0)+'</div>'
-      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[po.status]||'var(--muted)')+';color:#fff">'+(po.status||'Draft')+'</span></div>'
-      +'<div style="display:flex;gap:4px">'
-      +(po.status==='Draft'||po.status==='Sent'?'<button onclick="updatePOStatus(\''+po.id+'\',\'Delivered\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">✓ Rcvd</button>':'')
-      +'<button onclick="delRecord(\''+po.id+'\',\'purchase_orders\',pgPOs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
-      +'</div></div>';
-  });}
-  html+='</div>';
-  try{$('content').innerHTML=html;}catch(e){logErr('pgPOs',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgPOs()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
+  uxLoading('content','Loading purchase orders...');
+  try{
+    var pos = await dbGet('purchase_orders','?order=created_at.desc') || [];
+    var state = uxGetState('pos');
+    var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+
+    var filtered = pos;
+    if(state.q){
+      var ql = state.q.toLowerCase();
+      filtered = pos.filter(function(p){
+        var job=jobs.find(function(j){return j.id===p.job_id;})||{};
+        return (p.supplier_name||'').toLowerCase().includes(ql)
+          || (p.status||'').toLowerCase().includes(ql)
+          || (job.job_name||'').toLowerCase().includes(ql);
+      });
+    }
+    if(state.filters&&state.filters.status){
+      filtered = filtered.filter(function(p){return p.status===state.filters.status;});
+    }
+
+    var totalAmt = pos.reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var pendingAuth = pos.filter(function(p){return p.status==='Pending Authorization';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var authorized = pos.filter(function(p){return p.status==='Authorized'||p.status==='Delivered';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+
+    var poStatusOpts = {
+      'Pending Authorization': {label:'Pending Auth', color:'var(--amber)', bg:'var(--amber-bg)'},
+      'Authorized':  {label:'Authorized',  color:'var(--blue)',  bg:'var(--blue-bg)'},
+      'Sent':        {label:'Sent',        color:'var(--blue)',  bg:'var(--blue-bg)'},
+      'Delivered':   {label:'Delivered',   color:'var(--green)', bg:'#f0fdf4'},
+      'Closed':      {label:'Closed',      color:'var(--muted)', bg:'#f8fafc'},
+      'Cancelled':   {label:'Cancelled',   color:'var(--red)',   bg:'var(--red-bg)'},
+      'Draft':       {label:'Draft',       color:'var(--muted)', bg:'#f8fafc'},
+    };
+
+    var html = '<div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius);padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--amber);font-weight:700">'
+      +'⚠️ PO Policy (DEC-022): All purchase orders require 3-stage Gatekeeper authorization. Use "Request PO" — never created directly.</div>';
+
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--text)">'+fmt$(totalAmt)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total POs</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--amber)">'+fmt$(pendingAuth)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pending Auth</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--green)">'+fmt$(authorized)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Authorized</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id:'pos', title:'Purchase Orders', items:filtered, q:state.q||'',
+      sortKey:state.sortKey, sortDir:state.sortDir||'asc', selected:state.selected||{},
+      newLabel:'Request PO', onNew:'showNewPOForm()',
+      onExport:'uxExportCSV(lsAll(\'purchase_orders\'),[{key:\'supplier_name\',label:\'Supplier\'},{key:\'total\',label:\'Total\'},{key:\'status\',label:\'Status\'},{key:\'delivery_date\',label:\'Delivery\'}],\'pos.csv\')',
+      filters:[{key:'status',label:'All Statuses',options:[
+        {value:'Pending Authorization',label:'Pending Auth'},{value:'Authorized',label:'Authorized'},
+        {value:'Delivered',label:'Delivered'},{value:'Closed',label:'Closed'}],
+        selected:state.filters&&state.filters.status}],
+      emptyIcon:'📦', emptyMsg:pos.length?'No POs match':'No purchase orders yet',
+      emptyAction:{label:'+ Request PO',fn:'showNewPOForm()'},
+      onRowClick: null,
+      columns:[
+        {key:'supplier_name',label:'Supplier',flex:3,
+          render:function(p){
+            var job=jobs.find(function(j){return j.id===p.job_id;})||{};
+            return '<div style="font-weight:700">'+uxEsc(p.supplier_name||'Unknown')+'</div>'
+              +(job.job_name?'<div style="font-size:11px;color:var(--muted)">'+uxEsc(job.job_name)+'</div>':'');}},
+        {key:'total',label:'Total',flex:1,right:true,
+          render:function(p){return '<div style="font-weight:800">'+fmt$(p.total||0)+'</div>';}},
+        {key:'status',label:'Status',flex:2,
+          render:function(p){return uxStatusBadge(p.status||'Draft',poStatusOpts,null,p.id);}},
+        {key:'delivery_date',label:'Delivery',flex:1,hide_mobile:true,
+          render:function(p){return p.delivery_date?fmtD(p.delivery_date):'—';}},
+      ],
+      rowActions:function(p){return[
+        {icon:'🔑',label:'Review in GK',fn:'goTab(\'gatekeeper\')'},
+        {icon:'✕',label:'Cancel PO',fn:'delRecord(\''+p.id+'\',\'purchase_orders\',pgPOs)'},
+      ];}
+    });
+
+    $('content').innerHTML = html;
+    uxRegister('pos', pgPOs);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
+  }
 }
-function showNewPOForm(){var w=$('po-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
+
+
 async function saveNewPO(){
   // LEGACY ALIAS — all calls now route through requestNewPO per DEC-022
   await requestNewPO();
@@ -11375,494 +12052,780 @@ function renderNotificationList() {
 // END NOTIFICATION CENTER
 
 
+
 // ═══════════════════════════════════════════════════════════════════════════
-// EXECUTIVE FEEDBACK SYSTEM v2 — OS #9
-// President-first issue reporting. No technical knowledge required.
-// One button. One sentence. Corestone does the rest.
+// EXECUTIVE ISSUE MANAGEMENT SYSTEM (EIS) — OS #9
+// Complete engineering issue lifecycle. Permanent IDs. Live board.
+// President-first: one sentence to log, full lifecycle to track.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── ISSUE QUEUE (persists across testing session) ─────────────────────────
-var EFQ = {
-  issues: [],        // all issues captured this session
-  sessionStart: null,
-  clickHistory: [],  // last 20 user clicks
-  consoleErrors: [], // auto-captured JS errors
-  active: false
+// ── ISSUE TYPE PREFIXES ───────────────────────────────────────────────────
+// BUG-##### · WF-##### · UI-##### · AI-##### · AUTO-#####
+
+var EIS = {
+  issues: [],         // loaded from localStorage
+  sessionClicks: [],  // last 30 user clicks (auto-captured)
+  sessionErrors: [],  // JS errors (auto-captured)
+  initialized: false
 };
 
-// ── AUTO-CAPTURE: track clicks and JS errors silently ─────────────────────
+// ── STORAGE HELPERS ────────────────────────────────────────────────────────
+function eisLoad(){
+  try{
+    EIS.issues = JSON.parse(localStorage.getItem('cs_eis_issues')||'[]');
+  }catch(e){ EIS.issues = []; }
+}
+function eisSave(){
+  try{
+    localStorage.setItem('cs_eis_issues', JSON.stringify(EIS.issues));
+  }catch(e){ console.warn('EIS save failed',e); }
+}
+
+// ── GENERATE PERMANENT ID ─────────────────────────────────────────────────
+function eisNextId(type){
+  var prefix = {bug:'BUG',workflow:'WF',button:'BUG',ui:'UI',
+                automation:'WF',feature:'WF',ai_review:'AI',auto:'AUTO',general:'BUG'}[type]||'BUG';
+  eisLoad();
+  var same = EIS.issues.filter(function(i){ return i.id.startsWith(prefix+'-'); });
+  var maxNum = same.reduce(function(max, i){
+    var num = parseInt((i.id.split('-')[1])||'0');
+    return Math.max(max, num);
+  }, 0);
+  var nextNum = String(maxNum + 1).padStart(5,'0');
+  return prefix + '-' + nextNum;
+}
+
+// ── AUTO-CAPTURE: CLICKS & JS ERRORS ─────────────────────────────────────
 (function(){
-  // Track last 20 clicks
   document.addEventListener('click', function(e){
-    var target = e.target;
-    var label = target.textContent ? target.textContent.trim().substring(0,40) : '';
-    var id = target.id || target.className || target.tagName;
-    EFQ.clickHistory.push({
-      t: new Date().toISOString(),
-      label: label,
-      el: String(id).substring(0,40),
-      page: window.CUR || 'unknown'
-    });
-    if(EFQ.clickHistory.length > 20) EFQ.clickHistory.shift();
+    var t = e.target;
+    var label = (t.textContent||'').trim().substring(0,50);
+    var id = t.id || (t.className ? String(t.className).substring(0,30) : t.tagName);
+    EIS.sessionClicks.push({ t:new Date().toISOString(), label:label, el:String(id).substring(0,40), page:window.CUR||'?' });
+    if(EIS.sessionClicks.length > 30) EIS.sessionClicks.shift();
   }, true);
 
-  // Auto-capture JS errors
-  window._efsOrigError = window.onerror;
+  window._eisOrigError = window.onerror;
   window.onerror = function(msg, src, line, col, err){
-    EFQ.consoleErrors.push({
-      t: new Date().toISOString(),
-      msg: String(msg).substring(0,200),
-      src: String(src).split('/').pop(),
-      line: line,
-      page: window.CUR || 'unknown'
+    var errObj = { t:new Date().toISOString(), msg:String(msg).substring(0,200),
+      src:String(src).split('/').pop(), line:line, page:window.CUR||'?' };
+    EIS.sessionErrors.push(errObj);
+    if(EIS.sessionErrors.length > 15) EIS.sessionErrors.shift();
+    // Auto-log as an issue immediately
+    var autoId = eisNextId('auto');
+    eisLoad();
+    EIS.issues.push({
+      id: autoId,
+      type: 'auto',
+      module: window.CUR||'unknown',
+      workflow: null,
+      priority: 'high',
+      status: 'new',
+      description: 'AUTO-CAPTURED: '+errObj.msg+' ('+errObj.src+':'+errObj.line+')',
+      comments: [],
+      engineering_notes: '',
+      version_fixed: null,
+      ready_for_retest: false,
+      related_ids: [],
+      context: eisCaptureContext(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     });
-    if(EFQ.consoleErrors.length > 10) EFQ.consoleErrors.shift();
-    // Update badge if panel open
-    var badge = document.getElementById('efq-auto-badge');
-    if(badge && EFQ.consoleErrors.length){
-      badge.textContent = EFQ.consoleErrors.length;
-      badge.style.display = 'inline';
-    }
-    if(window._efsOrigError) return window._efsOrigError.apply(this, arguments);
+    eisSave();
+    eisUpdateFab();
+    if(window._eisOrigError) return window._eisOrigError.apply(this,arguments);
     return false;
   };
 })();
 
-// ── CAPTURE FULL PAGE CONTEXT ──────────────────────────────────────────────
-function efqCaptureContext(){
-  var ctx = {
-    timestamp: new Date().toISOString(),
-    page: window.CUR || 'unknown',
+// ── CAPTURE FULL CONTEXT ──────────────────────────────────────────────────
+function eisCaptureContext(){
+  var visible_errors = [];
+  document.querySelectorAll('[class*="err"],[class*="error"]').forEach(function(el){
+    var txt = el.textContent.trim();
+    if(txt && txt.length > 3) visible_errors.push(txt.substring(0,100));
+  });
+  var modalTitle = document.querySelector('.mt');
+  var gkBadge = document.getElementById('gk-count-top');
+  return {
+    page: window.CUR||'unknown',
     job_name: AJOB ? AJOB.job_name : null,
     job_id: AJOB ? AJOB.id : null,
     job_status: AJOB ? AJOB.status : null,
-    job_phase: AJOB ? (AJOB.current_phase || AJOB.phase) : null,
-    active_record: null,
-    recent_clicks: EFQ.clickHistory.slice(-8),
-    console_errors: EFQ.consoleErrors.slice(-5),
-    visible_errors: [],
-    gk_pending: 0,
-    viewport: window.innerWidth + 'x' + window.innerHeight,
-    storage_keys: Object.keys(localStorage).filter(function(k){return k.startsWith('cs_');}).length + ' keys'
+    job_phase: AJOB ? (AJOB.current_phase||AJOB.phase) : null,
+    active_record: modalTitle ? modalTitle.textContent.trim().substring(0,60) : null,
+    recent_clicks: EIS.sessionClicks.slice(-10),
+    recent_errors: EIS.sessionErrors.slice(-3),
+    visible_errors: visible_errors,
+    gk_pending: gkBadge ? (parseInt(gkBadge.textContent)||0) : 0,
+    viewport: window.innerWidth+'x'+window.innerHeight,
+    timestamp: new Date().toISOString()
   };
-
-  // Capture any visible error messages on screen
-  document.querySelectorAll('[class*="err"],[class*="error"],.toast').forEach(function(el){
-    var txt = el.textContent.trim();
-    if(txt && txt.length > 3) ctx.visible_errors.push(txt.substring(0,100));
-  });
-
-  // Active record (try to find what's open)
-  var modalTitle = document.querySelector('.mt');
-  if(modalTitle) ctx.active_record = modalTitle.textContent.trim().substring(0,60);
-
-  // GK count
-  var gkBadge = document.getElementById('gk-count-top');
-  if(gkBadge) ctx.gk_pending = parseInt(gkBadge.textContent)||0;
-
-  return ctx;
 }
 
-// ── FEEDBACK BUTTON — always visible, every screen ────────────────────────
+// ── MODULE DETECTION FROM CURRENT PAGE ───────────────────────────────────
+function eisDetectModule(){
+  var moduleMap = {
+    sales:'Sales / Leads', jobs:'Jobs', estimates:'Estimates', proposals:'Proposals',
+    gatekeeper:'Gatekeeper', financial:'Financial', invoices:'Invoices', bills:'Bills',
+    pos:'Purchase Orders', budget:'Budget', cos:'Change Orders', schedule:'Schedule',
+    daily:'Daily Logs', punch:'Punch List', rfis:'RFIs', photos:'Photo Log',
+    lien:'Lien Waivers', specs:'Specifications', selections:'Selections',
+    warranty:'Warranty', subs:'Subcontractors', reports:'Reports',
+    files:'Files / Plans', msgs:'Messages', emails:'Emails', todos:'Todos',
+    bids:'Bids / RFQ', settings:'Settings', dashboard:'Dashboard',
+    requirements:'Requirements', survey:'Survey'
+  };
+  var page = window.CUR||'';
+  for(var key in moduleMap){
+    if(page.toLowerCase().indexOf(key)>=0) return moduleMap[key];
+  }
+  return page||'General';
+}
+
+// ── WORKFLOW DETECTION ────────────────────────────────────────────────────
+function eisDetectWorkflow(){
+  var workflowMap = {
+    sales:'Lead → Survey → Estimate → Proposal', estimates:'Estimate → Proposal',
+    proposals:'Proposal → Sign → Job', jobs:'Job → Schedule → Daily Logs → Closeout',
+    gatekeeper:'Approval → Execution', invoices:'Invoice → Send → Collect',
+    bills:'Bill → Approval → Payment', pos:'PO Request → Authorization → Delivery',
+    cos:'Change Order → Approval → Job Update', schedule:'Schedule → Progress → Completion',
+    punch:'Punch List → Complete → Closeout', financial:'Financial → Reports'
+  };
+  var page = window.CUR||'';
+  for(var key in workflowMap){
+    if(page.toLowerCase().indexOf(key)>=0) return workflowMap[key];
+  }
+  return null;
+}
+
+// ── FAB BUTTON ────────────────────────────────────────────────────────────
 function buildExecFeedbackBtn(){
-  if(document.getElementById('efq-fab')) return;
+  if(document.getElementById('eis-fab')) return;
+  eisLoad();
 
   var fab = document.createElement('div');
-  fab.id = 'efq-fab';
+  fab.id = 'eis-fab';
   fab.style.cssText = 'position:fixed;bottom:24px;left:20px;z-index:8000;display:flex;flex-direction:column;align-items:flex-start;gap:6px';
-
   fab.innerHTML =
-    // Issue count badge + main button
-    '<div id="efq-fab-row" style="display:flex;align-items:center;gap:8px">'
-    + '<button id="efq-main-btn" onclick="efqOpen()" style="width:48px;height:48px;border-radius:50%;background:#1e293b;color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.25);position:relative;display:flex;align-items:center;justify-content:center" title="Report issue or feedback">💬'
-    + '<span id="efq-count-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#dc2626;color:#fff;font-size:9px;font-weight:800;border-radius:10px;padding:1px 5px;min-width:16px;text-align:center">0</span>'
-    + '</button>'
-    + '<div id="efq-hint" style="background:#1e293b;color:#fff;font-size:11px;font-weight:700;padding:5px 10px;border-radius:20px;white-space:nowrap;opacity:0;transition:opacity 0.2s;pointer-events:none">Report Issue</div>'
-    + '</div>';
+    '<div style="display:flex;align-items:center;gap:8px">'
+    +'<button id="eis-main-btn" onclick="eisOpenPanel()" style="width:48px;height:48px;border-radius:50%;background:#1e293b;color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.3);position:relative;display:flex;align-items:center;justify-content:center;font-family:inherit">💬'
+    +'<span id="eis-fab-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#dc2626;color:#fff;font-size:9px;font-weight:800;border-radius:10px;padding:1px 5px;min-width:16px;text-align:center">0</span>'
+    +'</button>'
+    +'<div id="eis-fab-hint" style="background:#1e293b;color:#fff;font-size:11px;font-weight:700;padding:5px 10px;border-radius:20px;white-space:nowrap;opacity:0;transition:opacity 0.2s;pointer-events:none">Issues</div>'
+    +'</div>';
 
   document.body.appendChild(fab);
 
-  // Show hint on hover
-  var btn = document.getElementById('efq-main-btn');
-  var hint = document.getElementById('efq-hint');
-  if(btn && hint){
+  var btn = document.getElementById('eis-main-btn');
+  var hint = document.getElementById('eis-fab-hint');
+  if(btn&&hint){
     btn.onmouseenter = function(){ hint.style.opacity='1'; };
     btn.onmouseleave = function(){ hint.style.opacity='0'; };
   }
-
-  EFQ.sessionStart = EFQ.sessionStart || new Date().toISOString();
+  eisUpdateFab();
 }
 
-// ── OPEN THE FEEDBACK PANEL ────────────────────────────────────────────────
-function efqOpen(){
-  var existing = document.getElementById('efq-panel');
-  if(existing){ existing.remove(); return; }
+function eisUpdateFab(){
+  eisLoad();
+  var badge = document.getElementById('eis-fab-badge');
+  if(!badge) return;
+  var open = EIS.issues.filter(function(i){ return i.status!=='closed'; }).length;
+  badge.textContent = open;
+  badge.style.display = open > 0 ? 'inline' : 'none';
+}
 
-  var ctx = efqCaptureContext();
+// ── LOG ISSUE PANEL ───────────────────────────────────────────────────────
+function eisOpenPanel(){
+  var existing = document.getElementById('eis-log-panel');
+  if(existing){ existing.remove(); return; }
+  var ctx = eisCaptureContext();
+  var module = eisDetectModule();
+  var workflow = eisDetectWorkflow();
 
   var el = document.createElement('div');
-  el.id = 'efq-panel';
-  el.style.cssText = 'position:fixed;bottom:80px;left:20px;z-index:8500;width:380px;background:#fff;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,0.2);border:1px solid #e2e8f0;overflow:hidden;font-family:inherit';
+  el.id = 'eis-log-panel';
+  el.style.cssText = 'position:fixed;bottom:80px;left:20px;z-index:8500;width:400px;background:#fff;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,0.2);border:1px solid #e2e8f0;overflow:hidden;font-family:inherit;max-height:90vh;overflow-y:auto';
 
-  var issueCount = EFQ.issues.length;
-  var errorCount = EFQ.consoleErrors.length;
+  eisLoad();
+  var openCount = EIS.issues.filter(function(i){return i.status!=='closed';}).length;
+  var retestCount = EIS.issues.filter(function(i){return i.status==='ready_for_retest';}).length;
 
   el.innerHTML =
-    // Header
-    '<div style="background:#1e293b;padding:14px 16px;display:flex;align-items:center;justify-content:space-between">'
-    + '<div>'
-    + '<div style="color:#fff;font-size:14px;font-weight:800">Executive Feedback</div>'
-    + '<div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:2px">Page: <strong style="color:rgba(255,255,255,0.8)">'+(ctx.page||'unknown')+'</strong>'+(ctx.job_name?' · '+ctx.job_name:'')+'</div>'
-    + '</div>'
-    + '<div style="display:flex;gap:8px;align-items:center">'
-    + (errorCount ? '<span style="background:#dc2626;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px" title="Auto-captured JS errors">'+errorCount+' error'+(errorCount>1?'s':'')+'</span>' : '')
-    + '<button onclick="document.getElementById(\'efq-panel\').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:13px">×</button>'
-    + '</div></div>'
-    // Issue type grid - 7 categories
-    + '<div style="padding:14px 16px 10px">'
-    + '<div style="font-size:11px;color:#64748b;margin-bottom:10px;font-weight:600">What are you reporting?</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">'
-    + efqTypeBtn('bug','🐛','Bug / Error','Something broke')
-    + efqTypeBtn('automation','⚡','Missing Automation','Should have happened automatically')
-    + efqTypeBtn('button','🔘','Button Not Working','Clicked but nothing happened')
-    + efqTypeBtn('workflow','🔄','Workflow Feels Wrong','Stopped or went wrong direction')
-    + efqTypeBtn('feature','💡','Missing Feature','Something I expected isn\'t there')
-    + efqTypeBtn('ui','🎨','UI Problem','Looks wrong or confusing')
-    + '</div>'
-    + '<div style="margin-bottom:10px">'
-    + efqTypeBtn('ai_review','🤖','AI Should Review This Page','Let AI analyze what\'s wrong here')
-    + '</div>'
-    // Free text
-    + '<textarea id="efq-text" placeholder="One sentence is enough. \'This button did nothing.\' \'This should have gone automatic.\' \'I expected something else.\'" style="width:100%;min-height:72px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>'
-    + '<input type="hidden" id="efq-type" value="">'
-    // Context preview (collapsed)
-    + '<details style="margin-top:8px">'
-    + '<summary style="font-size:11px;color:#94a3b8;cursor:pointer">Auto-captured context ('+Object.keys(ctx).length+' fields)</summary>'
-    + '<div style="margin-top:6px;background:#f8fafc;border-radius:6px;padding:8px;font-size:10px;color:#64748b;line-height:1.8">'
-    + '📍 Page: '+ctx.page+'<br>'
-    + (ctx.job_name ? '🏗️ Job: '+ctx.job_name+'<br>' : '')
-    + (ctx.active_record ? '📄 Active: '+ctx.active_record+'<br>' : '')
-    + '🖱️ Last clicks: '+(ctx.recent_clicks.slice(-3).map(function(c){return c.label||c.el;}).join(' → ')||'none')+'<br>'
-    + (ctx.console_errors.length ? '⚠️ JS errors: '+ctx.console_errors.length+'<br>' : '')
-    + '🔑 GK pending: '+ctx.gk_pending
-    + '</div></details>'
+    '<div style="background:#1e293b;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:1">'
+    +'<div><div style="color:#fff;font-size:14px;font-weight:800">💬 Log Issue</div>'
+    +'<div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:1px">'+(ctx.page||'unknown')+(ctx.job_name?' · '+ctx.job_name:'')+'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:6px;align-items:center">'
+    +(retestCount?'<span style="background:#d97706;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px">'+retestCount+' retest needed</span>':'')
+    +'<button onclick="eisOpenBoard()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:4px 8px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700">📋 Board</button>'
+    +'<button onclick="document.getElementById(\'eis-log-panel\').remove()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">×</button>'
+    +'</div></div>'
+    // Type selector
+    +'<div style="padding:14px 16px 0">'
+    +'<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">What type of issue?</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">'
+    +eisTypeBtn('bug','🐛','Bug','Something broke or errored')
+    +eisTypeBtn('automation','⚡','Missing Automation','Should have happened automatically')
+    +eisTypeBtn('button','🔘','Button Not Working','Clicked, nothing happened')
+    +eisTypeBtn('workflow','🔄','Workflow Stopped','Went wrong or incomplete')
+    +eisTypeBtn('feature','💡','Missing Feature','Expected something not there')
+    +eisTypeBtn('ui','🎨','UI Problem','Looks wrong or confusing')
+    +'</div>'
+    +'<button data-type="ai_review" onclick="eisTypeBtn_select(\'ai_review\',this)" style="width:100%;display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f8fafc;border:2px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;margin-bottom:12px">'
+    +'<span style="font-size:18px">🤖</span><div><div style="font-size:12px;font-weight:700;color:#1e293b">AI Should Review This Page</div><div style="font-size:10px;color:#94a3b8">Let AI find what\'s wrong automatically</div></div></button>'
+    +'<input type="hidden" id="eis-type" value="">'
+    // Description
+    +'<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Describe in one sentence</div>'
+    +'<textarea id="eis-desc" placeholder="\'This button did nothing.\' · \'Status didn\'t change automatically.\' · \'I expected something else to happen.\'" style="width:100%;min-height:68px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:none;box-sizing:border-box;outline:none;margin-bottom:10px"></textarea>'
+    // Auto-detected fields
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+    +'<div><div style="font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;margin-bottom:4px">Module</div>'
+    +'<input id="eis-module" value="'+module+'" style="width:100%;padding:7px 9px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;font-family:inherit;box-sizing:border-box;background:#f8fafc"></div>'
+    +'<div><div style="font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;margin-bottom:4px">Priority</div>'
+    +'<select id="eis-priority" style="width:100%;padding:7px 9px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;font-family:inherit;background:#f8fafc">'
+    +'<option value="high">🔴 High</option><option value="normal" selected>🟡 Normal</option><option value="low">⚪ Low</option>'
+    +'</select></div></div>'
+    // Context preview
+    +'<details style="margin-bottom:12px">'
+    +'<summary style="font-size:11px;color:#94a3b8;cursor:pointer;user-select:none">Auto-captured context · '+(ctx.recent_clicks.length)+' clicks · '+(ctx.recent_errors.length)+' JS errors</summary>'
+    +'<div style="margin-top:6px;background:#f8fafc;border-radius:6px;padding:8px;font-size:10px;color:#64748b;line-height:1.8">'
+    +(ctx.job_name?'🏗️ Job: '+ctx.job_name+' ('+ctx.job_status+')<br>':'')
+    +(ctx.active_record?'📄 Open: '+ctx.active_record+'<br>':'')
+    +'🖱️ Last clicks: '+ctx.recent_clicks.slice(-4).map(function(c){return c.label||c.el;}).join(' → ')+'<br>'
+    +(ctx.recent_errors.length?'⚠️ '+ctx.recent_errors.length+' JS error(s) on this page<br>':'')
+    +(workflow?'🔄 Workflow: '+workflow:'')
+    +'</div></details>'
     // Actions
-    + '<div style="display:flex;gap:8px;margin-top:12px">'
-    + '<button onclick="efqLogAndKeepTesting()" style="flex:1;padding:10px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Log &amp; Keep Testing</button>'
-    + '<button onclick="efqLogAndShowQueue()" style="padding:10px 14px;background:#f1f5f9;color:#1e293b;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">View Queue ('+issueCount+')</button>'
-    + '</div>'
-    + '</div>';
+    +'<div style="display:flex;gap:8px;padding-bottom:4px">'
+    +'<button onclick="eisLogIssue()" style="flex:1;padding:11px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">Log &amp; Keep Testing</button>'
+    +'<button onclick="eisLogAndViewBoard()" style="padding:11px 14px;background:#f1f5f9;color:#1e293b;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">View Board ('+openCount+')</button>'
+    +'</div>'
+    +'</div>';
 
   document.body.appendChild(el);
-  setTimeout(function(){ var t=document.getElementById('efq-text');if(t)t.focus(); },100);
+  setTimeout(function(){var t=document.getElementById('eis-desc');if(t)t.focus();},100);
 }
 
-function efqTypeBtn(type, icon, label, sub){
-  var isAI = type === 'ai_review';
-  return '<button onclick="efqSelectType(\''+type+'\',this)" data-type="'+type+'" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:2px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;'+(isAI?'grid-column:span 2;':'')+'width:100%">'
-    + '<span style="font-size:16px">'+icon+'</span>'
-    + '<div><div style="font-size:12px;font-weight:700;color:#1e293b">'+label+'</div>'
-    + '<div style="font-size:10px;color:#94a3b8">'+sub+'</div></div>'
-    + '</button>';
+function eisTypeBtn(type, icon, label, sub){
+  return '<button data-type="'+type+'" onclick="eisTypeBtn_select(\''+type+'\',this)" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:2px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;width:100%">'
+    +'<span style="font-size:16px">'+icon+'</span>'
+    +'<div><div style="font-size:12px;font-weight:700;color:#1e293b">'+label+'</div>'
+    +'<div style="font-size:10px;color:#94a3b8">'+sub+'</div></div></button>';
 }
 
-function efqSelectType(type, btn){
-  document.querySelectorAll('#efq-panel button[data-type]').forEach(function(b){
+function eisTypeBtn_select(type, btn){
+  document.querySelectorAll('#eis-log-panel button[data-type]').forEach(function(b){
     b.style.borderColor='#e2e8f0'; b.style.background='#f8fafc';
   });
-  btn.style.borderColor='#0d7a70'; btn.style.background='#e8f5f3';
-  document.getElementById('efq-type').value = type;
-  if(type === 'ai_review'){
-    var txt = document.getElementById('efq-text');
-    if(txt && !txt.value) txt.value = 'Please review this page for issues and missing automations.';
+  if(btn){ btn.style.borderColor='#0d7a70'; btn.style.background='#e8f5f3'; }
+  var inp = document.getElementById('eis-type');
+  if(inp) inp.value = type;
+  if(type==='ai_review'){
+    var t=document.getElementById('eis-desc');
+    if(t&&!t.value) t.value='Please review this page for issues and missing automations.';
   }
 }
 
-// ── LOG ISSUE AND KEEP TESTING ─────────────────────────────────────────────
-async function efqLogAndKeepTesting(){
-  var text = (document.getElementById('efq-text')||{}).value || '';
-  var type = (document.getElementById('efq-type')||{}).value || 'general';
-  if(!text.trim()){ toast('Describe the issue in one sentence','err'); return; }
+// ── LOG THE ISSUE ─────────────────────────────────────────────────────────
+async function eisLogIssue(){
+  var desc = (document.getElementById('eis-desc')||{}).value||'';
+  var type = (document.getElementById('eis-type')||{}).value||'bug';
+  var module = (document.getElementById('eis-module')||{}).value||eisDetectModule();
+  var priority = (document.getElementById('eis-priority')||{}).value||'normal';
 
-  var ctx = efqCaptureContext();
+  if(!desc.trim()&&type!=='ai_review'){toast('One sentence is enough — describe what happened','err');return;}
+  if(!type){toast('Select issue type first','err');return;}
+
+  var id = eisNextId(type);
+  var ctx = eisCaptureContext();
+  var workflow = eisDetectWorkflow();
+
   var issue = {
-    id: 'efq_' + Date.now(),
-    type: type || 'general',
-    description: text.trim(),
+    id: id,
+    type: type,
+    module: module,
+    workflow: workflow,
+    priority: priority,
+    status: 'new',
+    description: desc.trim()||'AI Review requested',
+    comments: [],
+    engineering_notes: '',
+    version_fixed: null,
+    ready_for_retest: false,
+    related_ids: [],
     context: ctx,
-    severity: efqSeverity(type),
-    status: 'open',
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
   };
 
-  EFQ.issues.push(issue);
-  efqUpdateBadge();
+  eisLoad();
+  EIS.issues.push(issue);
+  eisSave();
+  eisUpdateFab();
 
-  // Special handling for AI review
-  if(type === 'ai_review'){
-    var panel = document.getElementById('efq-panel');
-    if(panel) panel.remove();
-    await efqRunAIReview(issue);
+  var panel = document.getElementById('eis-log-panel');
+  if(panel) panel.remove();
+
+  if(type==='ai_review'){
+    await eisRunAIReview(issue);
     return;
   }
 
-  toast('Issue logged ✅ — '+ EFQ.issues.length +' total. Keep testing.','ok',3000);
-  var panel = document.getElementById('efq-panel');
-  if(panel) panel.remove();
+  toast(id+' logged ✅ — keep testing','ok',3000);
 }
 
-async function efqRunAIReview(issue){
+async function eisLogAndViewBoard(){
+  var desc = (document.getElementById('eis-desc')||{}).value||'';
+  var type = (document.getElementById('eis-type')||{}).value||'general';
+  if(desc.trim()&&type){
+    document.getElementById('eis-type').value = type||'bug';
+    await eisLogIssue();
+  } else {
+    var panel = document.getElementById('eis-log-panel');
+    if(panel) panel.remove();
+  }
+  eisOpenBoard();
+}
+
+// ── AI REVIEW ─────────────────────────────────────────────────────────────
+async function eisRunAIReview(issue){
   var ctx = issue.context;
-  toast('🤖 AI reviewing '+ctx.page+'...','ok',10000);
+  toast('🤖 AI reviewing '+ctx.page+'...','ok',12000);
   try{
-    var prompt = 'You are the QA Director for Corestone OS, an AI-powered construction management system.\n'
-      + 'Review this page from the perspective of a construction company president.\n\n'
-      + 'PAGE: ' + ctx.page + '\n'
-      + 'ACTIVE JOB: ' + (ctx.job_name||'none') + ' (status: '+(ctx.job_status||'unknown')+')\n'
-      + 'ACTIVE RECORD: ' + (ctx.active_record||'none') + '\n'
-      + 'RECENT CLICKS: ' + ctx.recent_clicks.map(function(c){return c.label;}).join(' → ') + '\n'
-      + 'JS ERRORS: ' + (ctx.console_errors.length ? JSON.stringify(ctx.console_errors) : 'none') + '\n'
-      + 'GK PENDING: ' + ctx.gk_pending + '\n\n'
-      + 'Identify:\n'
-      + '1. What should be happening automatically on this page that might not be?\n'
-      + '2. What downstream workflows might be missing?\n'
-      + '3. What would a construction company president expect to see here?\n'
-      + '4. Any obvious gaps in business logic?\n'
-      + 'Be specific. Construction company context. 5-8 bullet points.';
+    var clickStr = ctx.recent_clicks.slice(-6).map(function(c){return c.label||c.el;}).join(' → ');
+    var prompt = 'You are the QA Director for Corestone OS, a construction company management system.\n'
+      +'PAGE: '+ctx.page+'\nMODULE: '+issue.module+'\n'
+      +'JOB: '+(ctx.job_name||'none')+' ('+(ctx.job_status||'unknown')+')\n'
+      +'OPEN RECORD: '+(ctx.active_record||'none')+'\n'
+      +'RECENT USER CLICKS: '+clickStr+'\n'
+      +'JS ERRORS: '+(ctx.recent_errors.length ? ctx.recent_errors.map(function(e){return e.msg;}).join('; ') : 'none')+'\n\n'
+      +'Review this page from the company president\'s perspective:\n'
+      +'1. What should be happening automatically here that might not be?\n'
+      +'2. What downstream cascades, GK items, or workflow triggers are likely missing?\n'
+      +'3. What would a construction company president expect to see or happen next?\n'
+      +'4. Any business logic gaps or incomplete workflows?\n'
+      +'5 bullet points max. Plain language. Specific and actionable.';
 
-    var result = await ai(prompt,'Senior QA Director. Construction industry expert. No markdown.',1200);
-    issue.ai_analysis = result;
-    issue.type = 'ai_review';
-    efqUpdateBadge();
+    var result = await ai(prompt,'Senior QA Director. Construction software expert.',1200);
 
-    // Show result briefly then add to queue
+    eisLoad();
+    var idx = EIS.issues.findIndex(function(i){return i.id===issue.id;});
+    if(idx>=0){
+      EIS.issues[idx].engineering_notes = 'AI Review:\n'+result;
+      EIS.issues[idx].status = 'under_review';
+      EIS.issues[idx].updated_at = new Date().toISOString();
+    }
+    eisSave();
+
+    // Show result
     var el = document.createElement('div');
-    el.className = 'ov'; el.id = 'efq-ai-result'; el.style.zIndex = '9000';
-    el.innerHTML = '<div class="modal" style="max-width:500px">'
-      + '<div class="mh"><div><div class="mt">🤖 AI Page Review — '+ctx.page+'</div>'
-      + '<div class="ms">'+ctx.job_name||''+'</div></div>'
-      + '<button class="mc" onclick="closeOv(this)">×</button></div>'
-      + '<div class="mb"><div style="font-size:13px;line-height:1.8;color:var(--text);white-space:pre-wrap">'+result+'</div></div>'
-      + '<div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Dismiss</button>'
-      + '<button class="btn btn-p" onclick="closeOv(this);efqSendToQueue()">Send to Fix Queue</button></div></div>';
+    el.className='ov'; el.id='eis-ai-result'; el.style.zIndex='9000';
+    el.innerHTML='<div class="modal" style="max-width:500px">'
+      +'<div class="mh"><div><div class="mt">🤖 AI Review — '+ctx.page+'</div>'
+      +'<div class="ms">'+issue.id+' · '+(ctx.job_name||'')+'</div></div>'
+      +'<button class="mc" onclick="closeOv(this)">×</button></div>'
+      +'<div class="mb"><div style="font-size:13px;line-height:1.8;color:var(--text);white-space:pre-wrap">'+result+'</div></div>'
+      +'<div class="mf">'
+      +'<button class="btn btn-g" onclick="closeOv(this)">Dismiss</button>'
+      +'<button class="btn btn-p" onclick="closeOv(this);eisOpenBoard()">View Issue Board</button>'
+      +'</div></div>';
     document.body.appendChild(el);
   }catch(e){
-    toast('AI review failed: '+e.message,'err');
+    toast(issue.id+' logged. AI review failed: '+e.message,'err');
   }
 }
 
-// ── VIEW ISSUE QUEUE ───────────────────────────────────────────────────────
-function efqLogAndShowQueue(){
-  var text = (document.getElementById('efq-text')||{}).value || '';
-  var type = (document.getElementById('efq-type')||{}).value || 'general';
-  if(text.trim()){
-    var ctx = efqCaptureContext();
-    EFQ.issues.push({
-      id:'efq_'+Date.now(), type:type||'general', description:text.trim(),
-      context:ctx, severity:efqSeverity(type), status:'open', created_at:new Date().toISOString()
-    });
-    efqUpdateBadge();
-  }
-  var panel = document.getElementById('efq-panel');
-  if(panel) panel.remove();
-  efqShowQueue();
-}
-
-function efqShowQueue(){
-  var existing = document.getElementById('efq-queue-panel');
+// ── ENGINEERING BOARD ─────────────────────────────────────────────────────
+function eisOpenBoard(){
+  var existing = document.getElementById('eis-board');
   if(existing){ existing.remove(); return; }
+  eisLoad();
+  eisRenderBoard();
+}
 
-  var autoIssues = EFQ.consoleErrors.map(function(e){
-    return {id:'auto_'+e.t, type:'bug', description:'JS Error: '+e.msg+' ('+e.src+':'+e.line+')',
-      context:{page:e.page,timestamp:e.t}, severity:'high', status:'open', created_at:e.t, auto:true};
+var EIS_BOARD_FILTER = { status:'all', module:'all', priority:'all' };
+
+function eisRenderBoard(){
+  var existing = document.getElementById('eis-board');
+  if(existing) existing.remove();
+
+  eisLoad();
+  var all = EIS.issues.slice().sort(function(a,b){ return new Date(b.created_at)-new Date(a.created_at); });
+
+  // Apply filters
+  var filtered = all.filter(function(i){
+    if(EIS_BOARD_FILTER.status!=='all' && i.status!==EIS_BOARD_FILTER.status) return false;
+    if(EIS_BOARD_FILTER.module!=='all' && i.module!==EIS_BOARD_FILTER.module) return false;
+    if(EIS_BOARD_FILTER.priority!=='all' && i.priority!==EIS_BOARD_FILTER.priority) return false;
+    return true;
   });
 
-  var allIssues = EFQ.issues.concat(autoIssues);
+  // Stats
+  var stats = {
+    total: all.length,
+    new: all.filter(function(i){return i.status==='new';}).length,
+    under_review: all.filter(function(i){return i.status==='under_review';}).length,
+    in_progress: all.filter(function(i){return i.status==='in_progress';}).length,
+    fixed: all.filter(function(i){return i.status==='fixed';}).length,
+    ready_for_retest: all.filter(function(i){return i.status==='ready_for_retest';}).length,
+    closed: all.filter(function(i){return i.status==='closed';}).length
+  };
 
-  var panel = document.createElement('div');
-  panel.id = 'efq-queue-panel';
-  panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:420px;background:#fff;border-left:1px solid #e2e8f0;z-index:8500;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.1);font-family:inherit';
+  // Unique modules
+  var modules = ['all'].concat([...new Set(all.map(function(i){return i.module||'unknown';}))]);
 
-  var typeIcon = {bug:'🐛',automation:'⚡',button:'🔘',workflow:'🔄',feature:'💡',ui:'🎨',ai_review:'🤖',general:'📝'};
-  var sevColor = {high:'var(--red)',normal:'var(--amber)',low:'var(--muted)'};
+  var statusConfig = {
+    new:       { label:'New',              color:'#6366f1', bg:'#eef2ff' },
+    under_review:{ label:'Under Review',  color:'#d97706', bg:'#fffbeb' },
+    in_progress: { label:'In Progress',   color:'#0d7a70', bg:'#e8f5f3' },
+    fixed:     { label:'Fixed',            color:'#16a34a', bg:'#f0fdf4' },
+    ready_for_retest:{ label:'Retest ✓',  color:'#7c3aed', bg:'#f5f3ff' },
+    closed:    { label:'Closed',           color:'#64748b', bg:'#f8fafc' }
+  };
 
-  var issueHtml = allIssues.length === 0
-    ? '<div style="text-align:center;padding:48px 20px;color:#94a3b8"><div style="font-size:32px;margin-bottom:10px">✅</div><div style="font-size:13px;font-weight:700">No issues logged yet</div><div style="font-size:11px;margin-top:4px">Keep testing. Log issues with the 💬 button.</div></div>'
-    : allIssues.map(function(issue, i){
+  var typeIcon = { bug:'🐛', workflow:'🔄', button:'🔘', automation:'⚡',
+                   feature:'💡', ui:'🎨', ai_review:'🤖', auto:'🤖', general:'📝' };
+
+  var board = document.createElement('div');
+  board.id = 'eis-board';
+  board.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:520px;background:#f8fafc;border-left:1px solid #e2e8f0;z-index:8500;display:flex;flex-direction:column;font-family:inherit;box-shadow:-4px 0 24px rgba(0,0,0,0.12)';
+
+  // Header
+  var headerHtml =
+    '<div style="background:#1e293b;padding:14px 16px;flex-shrink:0">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+    +'<div><div style="color:#fff;font-size:15px;font-weight:800">Engineering Board</div>'
+    +'<div style="color:rgba(255,255,255,0.5);font-size:11px">'+all.length+' total issues · '+stats.ready_for_retest+' waiting for your test</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:6px">'
+    +'<button onclick="eisOpenPanel()" style="background:#0d7a70;border:none;color:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700">+ Log Issue</button>'
+    +'<button onclick="document.getElementById(\'eis-board\').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:6px 10px;cursor:pointer;font-family:inherit">×</button>'
+    +'</div></div>'
+    // KPI row
+    +'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px">'
+    +Object.entries(stats).filter(function(e){return e[0]!=='total';}).map(function(e){
+      var cfg = statusConfig[e[0]]||{label:e[0],color:'#64748b',bg:'#f8fafc'};
+      return '<div onclick="EIS_BOARD_FILTER.status=\''+(e[0]==='new'?'new':e[0])+'\';eisRenderBoard()" style="background:rgba(255,255,255,0.08);border-radius:6px;padding:6px 4px;text-align:center;cursor:pointer;border:1px solid rgba(255,255,255,0.05)">'
+        +'<div style="font-size:15px;font-weight:800;color:'+(e[1]>0?'#fff':'rgba(255,255,255,0.3)')+'">'+e[1]+'</div>'
+        +'<div style="font-size:9px;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-top:1px">'+cfg.label+'</div>'
+        +'</div>';
+    }).join('')
+    +'</div></div>';
+
+  // Filter bar
+  var filterHtml =
+    '<div style="padding:10px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;align-items:center;flex-shrink:0;overflow-x:auto">'
+    +'<span style="font-size:11px;color:#94a3b8;font-weight:700;white-space:nowrap">Filter:</span>'
+    +'<select onchange="EIS_BOARD_FILTER.status=this.value;eisRenderBoard()" style="font-size:11px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;background:#f8fafc">'
+    +'<option value="all">All Status</option>'
+    +Object.entries(statusConfig).map(function(e){return '<option value="'+e[0]+'"'+(EIS_BOARD_FILTER.status===e[0]?' selected':'')+'>'+e[1].label+'</option>';}).join('')
+    +'</select>'
+    +'<select onchange="EIS_BOARD_FILTER.module=this.value;eisRenderBoard()" style="font-size:11px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;background:#f8fafc">'
+    +modules.map(function(m){return '<option value="'+m+'"'+(EIS_BOARD_FILTER.module===m?' selected':'')+'>'+m+'</option>';}).join('')
+    +'</select>'
+    +'<select onchange="EIS_BOARD_FILTER.priority=this.value;eisRenderBoard()" style="font-size:11px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;background:#f8fafc">'
+    +'<option value="all">All Priority</option>'
+    +'<option value="high"'+(EIS_BOARD_FILTER.priority==='high'?' selected':'')+'>🔴 High</option>'
+    +'<option value="normal"'+(EIS_BOARD_FILTER.priority==='normal'?' selected':'')+'>🟡 Normal</option>'
+    +'<option value="low"'+(EIS_BOARD_FILTER.priority==='low'?' selected':'')+'>⚪ Low</option>'
+    +'</select>'
+    +(EIS_BOARD_FILTER.status!=='all'||EIS_BOARD_FILTER.module!=='all'||EIS_BOARD_FILTER.priority!=='all'
+      ?'<button onclick="EIS_BOARD_FILTER={status:\'all\',module:\'all\',priority:\'all\'};eisRenderBoard()" style="font-size:11px;color:#dc2626;background:none;border:none;cursor:pointer;font-family:inherit;white-space:nowrap">✕ Clear</button>':''  )
+    +'<div style="margin-left:auto;font-size:11px;color:#94a3b8">'+filtered.length+' of '+all.length+'</div>'
+    +'</div>';
+
+  // Issue list
+  var issuesHtml = filtered.length === 0
+    ? '<div style="text-align:center;padding:48px 20px;color:#94a3b8">'
+      +'<div style="font-size:36px;margin-bottom:10px">✅</div>'
+      +'<div style="font-size:14px;font-weight:700">No issues match this filter</div>'
+      +'</div>'
+    : filtered.map(function(issue){
+        var cfg = statusConfig[issue.status]||{label:issue.status,color:'#64748b',bg:'#f8fafc'};
         var icon = typeIcon[issue.type]||'📝';
-        var sc = sevColor[issue.severity]||sevColor.normal;
         var age = Math.round((Date.now()-new Date(issue.created_at).getTime())/60000);
-        var ageStr = age < 60 ? age+'m ago' : Math.round(age/60)+'h ago';
-        return '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;border-left:3px solid '+sc+'">'
-          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">'
-          + '<div style="display:flex;align-items:center;gap:6px">'
-          + '<span>'+icon+'</span>'
-          + '<span style="font-size:11px;font-weight:800;color:#1e293b;text-transform:uppercase">'+(issue.auto?'AUTO ':'')+(issue.type||'general')+'</span>'
-          + '<span style="font-size:10px;color:#94a3b8">'+issue.context.page+'</span>'
-          + '</div>'
-          + '<span style="font-size:10px;color:#94a3b8">'+ageStr+'</span>'
-          + '</div>'
-          + '<div style="font-size:13px;color:#1e293b;line-height:1.5">'+issue.description+'</div>'
-          + (issue.ai_analysis?'<div style="font-size:11px;color:#0d7a70;margin-top:4px;background:#e8f5f3;padding:6px;border-radius:4px">🤖 '+issue.ai_analysis.substring(0,120)+'...</div>':'')
-          + (issue.context.job_name?'<div style="font-size:10px;color:#94a3b8;margin-top:4px">🏗️ '+issue.context.job_name+'</div>':'')
-          + '</div>';
+        var ageStr = age<60?age+'m':age<1440?Math.round(age/60)+'h':Math.round(age/1440)+'d';
+        var priColor = {high:'#dc2626',normal:'#d97706',low:'#94a3b8'}[issue.priority]||'#94a3b8';
+        var retest = issue.status==='ready_for_retest';
+        return '<div onclick="eisOpenIssue(\''+issue.id+'\')" style="background:#fff;border:1px solid '+(retest?'#7c3aed':'#e2e8f0')+';border-left:4px solid '+priColor+';border-radius:8px;padding:12px 14px;margin-bottom:8px;cursor:pointer;'+(retest?'box-shadow:0 0 0 2px #f5f3ff;':'')+'" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'
+          +'<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">'
+          +'<div style="display:flex;align-items:center;gap:6px">'
+          +'<span style="font-size:14px">'+icon+'</span>'
+          +'<code style="font-size:11px;font-weight:800;color:#1e293b;background:#f1f5f9;padding:2px 6px;border-radius:4px">'+issue.id+'</code>'
+          +(retest?'<span style="background:#7c3aed;color:#fff;font-size:9px;font-weight:800;padding:2px 7px;border-radius:10px;animation:pulse 2s infinite">RETEST</span>':'')
+          +'</div>'
+          +'<div style="display:flex;align-items:center;gap:6px">'
+          +'<span style="font-size:10px;color:#94a3b8">'+ageStr+' ago</span>'
+          +'<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+cfg.bg+';color:'+cfg.color+'">'+cfg.label+'</span>'
+          +'</div></div>'
+          +'<div style="font-size:13px;color:#1e293b;font-weight:600;margin-bottom:4px;line-height:1.4">'+issue.description+'</div>'
+          +'<div style="display:flex;gap:12px;align-items:center">'
+          +'<span style="font-size:11px;color:#64748b">📦 '+issue.module+'</span>'
+          +(issue.workflow?'<span style="font-size:11px;color:#64748b">🔄 '+issue.workflow.split('→')[0].trim()+'</span>':'')
+          +(issue.version_fixed?'<span style="font-size:11px;color:#16a34a;font-weight:700">✅ '+issue.version_fixed+'</span>':'')
+          +(issue.comments&&issue.comments.length?'<span style="font-size:11px;color:#94a3b8">💬 '+issue.comments.length+'</span>':'')
+          +'</div>'
+          +(issue.engineering_notes?'<div style="font-size:11px;color:#0d7a70;margin-top:6px;background:#e8f5f3;padding:5px 8px;border-radius:4px;line-height:1.5">🔧 '+issue.engineering_notes.substring(0,120)+(issue.engineering_notes.length>120?'...':'')+'</div>':'')
+          +'</div>';
       }).join('');
 
-  panel.innerHTML =
-    '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;background:#1e293b;display:flex;align-items:center;justify-content:space-between">'
-    + '<div><div style="color:#fff;font-size:14px;font-weight:800">Issue Queue</div>'
-    + '<div style="color:rgba(255,255,255,0.5);font-size:11px">'+allIssues.length+' issue'+(allIssues.length!==1?'s':'')+' captured this session</div>'
-    + '</div>'
-    + '<button onclick="document.getElementById(\'efq-queue-panel\').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">×</button>'
-    + '</div>'
-    + '<div style="flex:1;overflow-y:auto">'+issueHtml+'</div>'
-    + (allIssues.length > 0 ?
-      '<div style="padding:14px 16px;border-top:1px solid #e2e8f0;background:#f8fafc;display:flex;gap:8px">'
-      + '<button onclick="efqClearQueue()" style="padding:10px 14px;background:#fff;color:#64748b;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Clear All</button>'
-      + '<button onclick="efqSendToQueue()" style="flex:1;padding:10px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">📤 Send All Issues to Engineering</button>'
-      + '</div>' : '')
-    + '</div>';
+  // Footer actions
+  var footerHtml =
+    '<div style="padding:12px 16px;border-top:1px solid #e2e8f0;background:#fff;flex-shrink:0;display:flex;gap:8px">'
+    +(all.length>0?'<button onclick="eisSendToEngineering()" style="flex:1;padding:10px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">📤 Send to Engineering</button>':'')
+    +'<button onclick="eisClearClosed()" style="padding:10px 12px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Clear Closed</button>'
+    +'</div>';
 
-  document.body.appendChild(panel);
+  board.innerHTML = headerHtml
+    + filterHtml
+    + '<div style="flex:1;overflow-y:auto;padding:12px 16px">'+issuesHtml+'</div>'
+    + footerHtml;
+
+  document.body.appendChild(board);
 }
 
-// ── SEND ALL ISSUES TO ENGINEERING ────────────────────────────────────────
-async function efqSendToQueue(){
-  var autoIssues = EFQ.consoleErrors.map(function(e){
-    return {type:'bug',description:'AUTO JS Error: '+e.msg+' at '+e.src+':'+e.line,
-      context:{page:e.page,timestamp:e.t},severity:'high',status:'open',created_at:e.t};
-  });
-  var allIssues = EFQ.issues.concat(autoIssues);
-  if(!allIssues.length){ toast('No issues to send','ok'); return; }
+// ── ISSUE DETAIL VIEW ─────────────────────────────────────────────────────
+function eisOpenIssue(id){
+  eisLoad();
+  var issue = EIS.issues.find(function(i){return i.id===id;});
+  if(!issue) return;
 
-  toast('🤖 Generating Fix Report...','ok',15000);
+  var existing = document.getElementById('eis-issue-detail');
+  if(existing) existing.remove();
 
-  // Group by module/page
-  var byPage = {};
-  allIssues.forEach(function(issue){
-    var pg = (issue.context&&issue.context.page)||'unknown';
-    if(!byPage[pg]) byPage[pg] = [];
-    byPage[pg].push(issue);
-  });
+  var statusConfig = {
+    new:{label:'New',color:'#6366f1'},
+    under_review:{label:'Under Review',color:'#d97706'},
+    in_progress:{label:'In Progress',color:'#0d7a70'},
+    fixed:{label:'Fixed',color:'#16a34a'},
+    ready_for_retest:{label:'Ready for Retest',color:'#7c3aed'},
+    closed:{label:'Closed',color:'#64748b'}
+  };
 
-  // AI generates the engineering report
-  var issueList = allIssues.map(function(issue,i){
-    return (i+1)+'. ['+issue.type.toUpperCase()+'] Page: '+(issue.context&&issue.context.page||'unknown')
-      +' | '+issue.description
-      +(issue.context&&issue.context.job_name?' | Job: '+issue.context.job_name:'')
-      +(issue.context&&issue.context.recent_clicks&&issue.context.recent_clicks.length
-        ?' | Recent clicks: '+issue.context.recent_clicks.slice(-3).map(function(c){return c.label||c.el;}).join(' → '):'')
-      +(issue.context&&issue.context.console_errors&&issue.context.console_errors.length?' | JS errors on page: yes':'');
+  var age = Math.round((Date.now()-new Date(issue.created_at).getTime())/60000);
+  var ageStr = age<60?age+'m ago':age<1440?Math.round(age/60)+'h ago':Math.round(age/1440)+'d ago';
+
+  var el = document.createElement('div');
+  el.className='ov'; el.id='eis-issue-detail'; el.style.zIndex='9000';
+  el.innerHTML =
+    '<div class="modal" style="max-width:540px;max-height:90vh;overflow-y:auto">'
+    +'<div class="mh">'
+    +'<div><div class="mt"><code style="font-size:13px;background:#f1f5f9;padding:2px 8px;border-radius:4px;margin-right:8px">'+issue.id+'</code>'+issue.type.toUpperCase()+'</div>'
+    +'<div class="ms">'+issue.module+(issue.workflow?' · '+issue.workflow:'')+'</div>'
+    +'</div>'
+    +'<button class="mc" onclick="closeOv(this)">×</button></div>'
+    +'<div class="mb">'
+    // Status + Priority row
+    +'<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
+    +'<div style="flex:1"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Status</div>'
+    +'<select id="eis-det-status" onchange="eisUpdateIssueField(\''+id+'\',\'status\',this.value)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px">'
+    +Object.entries(statusConfig).map(function(e){return '<option value="'+e[0]+'"'+(issue.status===e[0]?' selected':'')+'>'+e[1].label+'</option>';}).join('')
+    +'</select></div>'
+    +'<div style="flex:1"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Priority</div>'
+    +'<select id="eis-det-priority" onchange="eisUpdateIssueField(\''+id+'\',\'priority\',this.value)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px">'
+    +'<option value="high"'+(issue.priority==='high'?' selected':'')+'>🔴 High</option>'
+    +'<option value="normal"'+(issue.priority==='normal'?' selected':'')+'>🟡 Normal</option>'
+    +'<option value="low"'+(issue.priority==='low'?' selected':'')+'>⚪ Low</option>'
+    +'</select></div>'
+    +'</div>'
+    // Description (editable)
+    +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Description</div>'
+    +'<textarea id="eis-det-desc" onblur="eisUpdateIssueField(\''+id+'\',\'description\',this.value)" style="width:100%;min-height:72px;border:1px solid var(--border);border-radius:6px;padding:10px;font-size:13px;font-family:inherit;resize:none;box-sizing:border-box;margin-bottom:12px">'+issue.description+'</textarea>'
+    // Reported info
+    +'<div style="display:flex;gap:12px;margin-bottom:14px;font-size:11px;color:var(--muted)">'
+    +'<span>📍 '+issue.module+'</span>'
+    +'<span>⏰ '+ageStr+'</span>'
+    +(issue.context&&issue.context.job_name?'<span>🏗️ '+issue.context.job_name+'</span>':'')
+    +(issue.version_fixed?'<span style="color:var(--green);font-weight:700">✅ '+issue.version_fixed+'</span>':'')
+    +'</div>'
+    // Comments
+    +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">Comments</div>'
+    +'<div id="eis-comments-list" style="margin-bottom:8px">'
+    +(issue.comments&&issue.comments.length
+      ? issue.comments.map(function(c){
+          var cAge = Math.round((Date.now()-new Date(c.t).getTime())/60000);
+          return '<div style="background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px">'
+            +'<div style="font-size:10px;color:var(--muted);margin-bottom:3px">'+(c.author||'Feishy')+' · '+(cAge<60?cAge+'m':Math.round(cAge/60)+'h')+' ago</div>'
+            +'<div style="font-size:12px;color:var(--text)">'+c.text+'</div>'
+            +'</div>';
+        }).join('')
+      : '<div style="font-size:12px;color:var(--dim);padding:8px 0">No comments yet.</div>')
+    +'</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:14px">'
+    +'<input id="eis-new-comment" placeholder="Add comment..." style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit">'
+    +'<button onclick="eisAddComment(\''+id+'\')" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Add</button>'
+    +'</div>'
+    // Engineering notes
+    +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Engineering Notes <span style="color:var(--teal);font-weight:400;text-transform:none">(filled in by engineering)</span></div>'
+    +'<textarea id="eis-det-eng" onblur="eisUpdateIssueField(\''+id+'\',\'engineering_notes\',this.value)" placeholder="Root cause, fix applied, classes changed..." style="width:100%;min-height:60px;border:1px solid var(--border);border-radius:6px;padding:10px;font-size:12px;font-family:inherit;resize:none;box-sizing:border-box;margin-bottom:12px;background:var(--bg)">'+( issue.engineering_notes||'')+'</textarea>'
+    // Related IDs
+    +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Related Issues</div>'
+    +'<input id="eis-det-related" onblur="eisUpdateIssueField(\''+id+'\',\'related_ids\',this.value.split(\',\').map(function(s){return s.trim();}).filter(Boolean))" placeholder="BUG-00001, WF-00003..." value="'+(issue.related_ids||[]).join(', ')+'" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;box-sizing:border-box;margin-bottom:12px">'
+    // Context
+    +(issue.context&&issue.context.recent_clicks&&issue.context.recent_clicks.length
+      ?'<details style="margin-bottom:8px"><summary style="font-size:11px;color:var(--muted);cursor:pointer">Auto-captured context</summary>'
+        +'<div style="margin-top:6px;background:var(--bg);border-radius:6px;padding:8px;font-size:10px;color:var(--muted);line-height:1.8">'
+        +'Last clicks: '+issue.context.recent_clicks.slice(-5).map(function(c){return c.label||c.el;}).join(' → ')
+        +(issue.context.recent_errors&&issue.context.recent_errors.length?'<br>JS errors: '+issue.context.recent_errors.length:'')
+        +'</div></details>':'' )
+    +'</div>'
+    +'<div class="mf">'
+    +'<button class="btn btn-g" onclick="closeOv(this)">Close</button>'
+    +(issue.status==='ready_for_retest'?'<button class="btn btn-p" onclick="eisUpdateIssueField(\''+id+'\',\'status\',\'closed\');closeOv(this)">✅ Mark Retested & Close</button>':'')
+    +(issue.status!=='closed'?'<button onclick="eisUpdateIssueField(\''+id+'\',\'status\',\'closed\');closeOv(this)" style="padding:9px 14px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Close Issue</button>':'')
+    +'</div></div>';
+
+  document.body.appendChild(el);
+}
+
+// ── ISSUE FIELD UPDATE ────────────────────────────────────────────────────
+function eisUpdateIssueField(id, field, value){
+  eisLoad();
+  var idx = EIS.issues.findIndex(function(i){return i.id===id;});
+  if(idx<0) return;
+  EIS.issues[idx][field] = value;
+  EIS.issues[idx].updated_at = new Date().toISOString();
+  eisSave();
+  eisUpdateFab();
+  // Refresh board if open
+  var board = document.getElementById('eis-board');
+  if(board) eisRenderBoard();
+}
+
+function eisAddComment(id){
+  var inp = document.getElementById('eis-new-comment');
+  var text = inp ? inp.value.trim() : '';
+  if(!text) return;
+  eisLoad();
+  var idx = EIS.issues.findIndex(function(i){return i.id===id;});
+  if(idx<0) return;
+  if(!EIS.issues[idx].comments) EIS.issues[idx].comments = [];
+  EIS.issues[idx].comments.push({ t:new Date().toISOString(), author:'Feishy', text:text });
+  EIS.issues[idx].updated_at = new Date().toISOString();
+  eisSave();
+  // Refresh detail view
+  var ov = document.getElementById('eis-issue-detail');
+  if(ov) ov.remove();
+  eisOpenIssue(id);
+}
+
+// ── SEND TO ENGINEERING ────────────────────────────────────────────────────
+async function eisSendToEngineering(){
+  eisLoad();
+  var open = EIS.issues.filter(function(i){return i.status==='new'||i.status==='under_review';});
+  if(!open.length){ toast('No new issues to send','ok'); return; }
+
+  toast('🤖 Generating engineering report...','ok',15000);
+
+  var issueList = open.map(function(issue,i){
+    return (i+1)+'. ['+issue.id+'] ['+issue.priority.toUpperCase()+'] '+issue.module+'\n'
+      +'   Type: '+issue.type+'\n'
+      +'   Description: '+issue.description+'\n'
+      +(issue.workflow?'   Workflow: '+issue.workflow+'\n':'')
+      +(issue.context&&issue.context.job_name?'   Job: '+issue.context.job_name+'\n':'')
+      +(issue.context&&issue.context.recent_errors&&issue.context.recent_errors.length?'   JS Errors: '+issue.context.recent_errors.map(function(e){return e.msg;}).join('; ')+'\n':'')
+      +(issue.comments&&issue.comments.length?'   President Comments: '+issue.comments.map(function(c){return c.text;}).join('; ')+'\n':'');
   }).join('\n');
 
-  var prompt = 'You are the engineering team for Corestone OS, a construction management platform.\n'
-    + 'The company president reported these issues during Executive Testing:\n\n'
-    + issueList + '\n\n'
-    + 'Generate a structured Fix Report:\n\n'
-    + 'GROUP 1 — By Module (which pages/modules are affected)\n'
-    + 'GROUP 2 — By Severity (Critical/High/Medium/Low) with business impact\n'
-    + 'GROUP 3 — Root Cause Analysis (what class of problem is this — missing cascade, broken onclick, missing GK executor, UI only, workflow gap)\n'
-    + 'GROUP 4 — Likely Duplicates (issues that probably share the same root cause)\n'
-    + 'GROUP 5 — Recommended Fix Categories (what needs to change in the codebase)\n\n'
-    + 'Engineering Standard: Do not patch individual buttons. Fix the entire class of problem.\n'
-    + 'Language: Clear technical language. No jargon. The dev team will execute this report.\n'
-    + 'Format: Plain text sections. No markdown headers. Be specific and complete.';
+  var prompt = 'You are the CTO of Corestone OS, a construction company management system.\n'
+    +'The company president reported these issues during Executive Testing:\n\n'
+    +issueList+'\n'
+    +'Generate a structured engineering Fix Report:\n\n'
+    +'MODULE GROUPING: Group issues by affected module\n'
+    +'SEVERITY RANKING: Order by business impact (Critical → High → Medium → Low)\n'
+    +'ROOT CAUSE CLASSES: Identify the class of problem (cascade missing, GK executor gap, onclick broken, workflow incomplete, UI only, etc.)\n'
+    +'LIKELY DUPLICATES: Which issues probably share the same root cause?\n'
+    +'FIX STRATEGY: For each class, what specifically needs to change?\n'
+    +'ENGINEERING STANDARD: Do not patch individual buttons. Fix the complete workflow class.\n'
+    +'Format: Clear sections, plain text, no markdown. CTO-level technical precision.';
 
   try{
-    var report = await ai(prompt, 'Engineering lead. Construction software expert. Systematic thinker.', 2000);
+    var report = await ai(prompt,'CTO of construction software company. Systematic root-cause thinker.',2000);
 
-    // Save to GK as urgent engineering task
-    var gkDesc = 'Executive Testing Fix Report — '+ allIssues.length +' issues reported\nSession: '+EFQ.sessionStart+'\n\n'
-      + '── ISSUES REPORTED ──\n' + issueList + '\n\n'
-      + '── AI FIX REPORT ──\n' + report;
+    // Update issues to 'in_progress'
+    open.forEach(function(issue){
+      var idx = EIS.issues.findIndex(function(i){return i.id===issue.id;});
+      if(idx>=0){
+        EIS.issues[idx].status = 'in_progress';
+        EIS.issues[idx].updated_at = new Date().toISOString();
+      }
+    });
+    eisSave();
+
+    // Send to GK
+    var gkDesc = 'Executive Issue Report — '+open.length+' issues\n'
+      +'IDs: '+open.map(function(i){return i.id;}).join(', ')+'\n\n'
+      +'── ISSUES ──\n'+issueList+'\n\n'
+      +'── FIX REPORT ──\n'+report;
 
     await addToGatekeeper(
       'engineering_fix_report',
-      'Fix Report: '+allIssues.length+' Executive Testing Issue'+(allIssues.length!==1?'s':''),
+      'Engineering Fix Report: '+open.length+' issue'+(open.length!==1?'s':''),
       gkDesc,
       'urgent',
-      'Investigate each issue class. Fix the complete workflow, not just the reported button. Internal QA before next Executive Testing.',
+      'Fix each issue class completely. Internal QA before marking ready_for_retest. Update each issue ID with version_fixed and engineering_notes.',
       'engineering_fix_report',
       null
     );
 
-    await auditLog('gatekeeper_queue',null,'fix_report_submitted',null,allIssues.length+' issues','false','ETM fix report sent to engineering: '+allIssues.length+' issues');
+    await auditLog('gatekeeper_queue',null,'fix_report_submitted',null,open.length+' issues','false','EIS fix report sent: '+open.map(function(i){return i.id;}).join(', '));
 
-    // Clear and show summary
-    var panel = document.getElementById('efq-queue-panel');
-    if(panel) panel.remove();
+    // Show report
+    var board = document.getElementById('eis-board');
+    if(board) board.remove();
 
-    efqShowReportModal(allIssues, byPage, report);
+    var el = document.createElement('div');
+    el.className='ov'; el.id='eis-report-modal'; el.style.zIndex='9500';
+    el.innerHTML='<div class="modal" style="max-width:560px">'
+      +'<div class="mh" style="background:#1e293b;border:none">'
+      +'<div><div class="mt" style="color:#fff">📤 Engineering Fix Report Sent</div>'
+      +'<div class="ms" style="color:rgba(255,255,255,0.6)">'+open.length+' issues → Gatekeeper · Status set to In Progress</div>'
+      +'</div><button class="mc" style="color:#fff" onclick="closeOv(this)">×</button></div>'
+      +'<div class="mb">'
+      +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--red)">'+open.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Sent</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">'+[...new Set(open.map(function(i){return i.module;}))].length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Modules</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">🔑</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">In Gatekeeper</div></div>'
+      +'</div>'
+      +'<div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;font-size:12px;line-height:1.8;color:#374151;white-space:pre-wrap">'+report+'</div>'
+      +'</div>'
+      +'<div class="mf">'
+      +'<button class="btn btn-g" onclick="closeOv(this)">Continue Testing</button>'
+      +'<button class="btn btn-p" onclick="closeOv(this);eisOpenBoard()">View Board</button>'
+      +'<button onclick="closeOv(this);goTab(\'gatekeeper\')" style="padding:9px 14px;background:var(--amber);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">View in Gatekeeper</button>'
+      +'</div></div>';
+    document.body.appendChild(el);
 
-    // Clear queue
-    EFQ.issues = [];
-    EFQ.consoleErrors = [];
-    efqUpdateBadge();
+    eisUpdateFab();
+    eisRenderBoard();
 
   }catch(e){
-    // Save without AI analysis
-    await addToGatekeeper('engineering_fix_report','Fix Report: '+allIssues.length+' issues (no AI)',issueList,'urgent','Fix all reported issues before next Executive Testing.','engineering_fix_report',null);
-    toast('Report sent to Gatekeeper (AI analysis failed)','ok');
-    EFQ.issues = [];
-    efqUpdateBadge();
+    await addToGatekeeper('engineering_fix_report','Fix Report: '+open.length+' issues (no AI)',issueList,'urgent','Fix all issues. Internal QA before retest.','engineering_fix_report',null);
+    toast('Report sent (AI unavailable)','ok');
   }
 }
 
-function efqShowReportModal(allIssues, byPage, report){
-  var el = document.createElement('div');
-  el.className='ov'; el.id='efq-report-modal'; el.style.zIndex='9500';
-  el.innerHTML = '<div class="modal" style="max-width:560px">'
-    + '<div class="mh" style="background:#1e293b;border:none">'
-    + '<div><div class="mt" style="color:#fff">📤 Fix Report Sent to Engineering</div>'
-    + '<div class="ms" style="color:rgba(255,255,255,0.6)">'+allIssues.length+' issues · '+Object.keys(byPage).length+' pages affected</div></div>'
-    + '<button class="mc" style="color:#fff" onclick="closeOv(this)">×</button></div>'
-    + '<div class="mb">'
-    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
-    + '<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--red)">'+allIssues.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Issues</div></div>'
-    + '<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">'+Object.keys(byPage).length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pages</div></div>'
-    + '<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">🔑</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">In Gatekeeper</div></div>'
-    + '</div>'
-    + '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;font-size:12px;line-height:1.8;color:#374151;white-space:pre-wrap">'+report+'</div>'
-    + '</div>'
-    + '<div class="mf">'
-    + '<button class="btn btn-g" onclick="closeOv(this)">Continue Testing</button>'
-    + '<button class="btn btn-p" onclick="closeOv(this);goTab(\'gatekeeper\')">View in Gatekeeper</button>'
-    + '</div></div>';
-  document.body.appendChild(el);
+function eisClearClosed(){
+  if(!confirm('Remove all closed issues from the board? Open issues are kept.')) return;
+  eisLoad();
+  EIS.issues = EIS.issues.filter(function(i){return i.status!=='closed';});
+  eisSave();
+  eisUpdateFab();
+  eisRenderBoard();
 }
 
-function efqClearQueue(){
-  if(!confirm('Clear all logged issues?')) return;
-  EFQ.issues = [];
-  EFQ.consoleErrors = [];
-  efqUpdateBadge();
-  var p = document.getElementById('efq-queue-panel');
-  if(p) p.remove();
-  toast('Issue queue cleared','ok');
-}
-
-function efqUpdateBadge(){
-  var badge = document.getElementById('efq-count-badge');
-  var total = EFQ.issues.length + EFQ.consoleErrors.length;
-  if(badge){
-    badge.textContent = total;
-    badge.style.display = total > 0 ? 'inline' : 'none';
-  }
-}
-
-function efqSeverity(type){
-  return {bug:'high',button:'high',workflow:'high',automation:'normal',feature:'low',ui:'low',ai_review:'normal',general:'normal'}[type]||'normal';
-}
-
-// ── LEGACY COMPATIBILITY (keep old functions working) ─────────────────────
-function openExecFeedback(){ efqOpen(); }
+// ── LEGACY COMPATIBILITY ──────────────────────────────────────────────────
+function openExecFeedback(){ eisOpenPanel(); }
 function initExecFeedback(){ buildExecFeedbackBtn(); }
-function launchExecFeedback(mode){ efqOpen(); }
+function launchExecFeedback(mode){ eisOpenPanel(); }
+function efqOpen(){ eisOpenPanel(); }
 
-// Initialize on load
-document.addEventListener('DOMContentLoaded', function(){ buildExecFeedbackBtn(); });
-setTimeout(buildExecFeedbackBtn, 1000);
-// END EXECUTIVE FEEDBACK SYSTEM v2
+// ── INITIALIZE ────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function(){ buildExecFeedbackBtn(); eisLoad(); });
+setTimeout(function(){ buildExecFeedbackBtn(); eisLoad(); }, 800);
+// END EXECUTIVE ISSUE MANAGEMENT SYSTEM
 
 
 
