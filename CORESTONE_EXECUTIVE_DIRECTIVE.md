@@ -281,3 +281,84 @@ Once architectural completion work is finished and all permanent documents updat
 
 *Established OS #8 — July 2, 2026*
 *This directive governs all future Corestone development without exception.*
+
+---
+
+## 9. ENTERPRISE UX & BUSINESS INTELLIGENCE STANDARD
+## Established: OS #9 — July 3, 2026
+## Authority: Feishy Felberbaum, President
+
+This is a permanent governing engineering principle. Not a feature request.
+
+### 9.1 Stop Waiting for the President to Design Software
+
+Every page built must automatically meet or exceed the standards of professional enterprise 
+construction software (ERP, CRM, estimating, accounting, project management platforms).
+
+Do not wait for the President to request:
+- Edit buttons, row click-to-open, search bars, filters, sort headers
+- Empty states with actionable guidance
+- Bulk actions, export, print
+- Keyboard shortcuts, inline editing
+- Related records on every detail form
+- Audit trail, comment threads, attachments
+- AI assistance on every significant screen
+
+These are enterprise software standards. Build them by default.
+
+### 9.2 Every Screen Must Feel Complete
+
+When any screen is opened, it must never feel 20% finished.
+Every page must naturally include the full capabilities a professional user expects.
+
+REQUIRED on every list page:
+- Search / filter bar (live, instant)
+- Column sort (click header)
+- Row click to open detail
+- Bulk select + bulk actions (delete, export, archive, status change)
+- Empty state with clear next action
+- Export CSV + Print
+
+REQUIRED on every detail form:
+- View / Edit / Save / Cancel / Duplicate / Archive / Delete
+- Comments thread
+- Related records section
+- Audit history
+- AI suggestions where appropriate
+- Attachment support
+- Status indicator
+- Auto-save draft for long forms
+
+### 9.3 Think in Override Levels
+
+Never hardcode settings. Always design with intelligent override levels:
+Company Default → Client Default → Project Default → Estimate Default → Line Item → Change Order
+
+When any setting changes, ask: Apply only here? To this record? To this project? As future default?
+
+### 9.4 Every Feature Must Think Downstream
+
+Every button must ask: What should happen next?
+Every workflow must ask: What else should the company know?
+Every AI must ask: What advice should I give?
+Every page must ask: What would an experienced construction company owner expect?
+
+Never stop at completing the requested action. Always follow through downstream.
+
+### 9.5 Build Complete Business Departments
+
+Do not build isolated pages. Build complete business departments with:
+daily work, communication, approvals, AI, reporting, dashboards, automation,
+reminders, audit trail, collaboration, document management, executive oversight.
+
+### 9.6 Every Feature Inherits Corestone Intelligence
+
+No feature may be built in isolation. Everything automatically integrates with:
+Business Brain, Workflow Engine, Event Engine, Gatekeeper, Business Cascade,
+Document Intelligence, AI Review, Executive Feedback, Audit Trail, Reporting.
+
+### 9.7 Build Like Version 10.0, Not Version 0.1
+
+Ask: "Would this impress an executive running a multimillion-dollar construction company every day?"
+If not — improve it before considering it complete.
+
