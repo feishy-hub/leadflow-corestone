@@ -1687,6 +1687,7 @@ async function saveLead(id=null,runAI=true){
       {icon:'✉️', label:'Send follow-up email', sub:'AI drafts it for you', fn:"goTab('messages')", primary:false}
     ]);
     await dbIns('audit_log',{object_type:'leads',object_id:sid,action:id?'updated':'created',new_value:JSON.stringify({stage:d.stage,client_name:d.client_name}),changed_by_ai:false,timestamp:new Date().toISOString()});
+    if(!id&&sid) await runBusinessCascade('lead.created','lead',sid,{lead:{id:sid,client_name:d.client_name}}).catch(function(e){console.warn('Cascade warn:',e);});
     if(runAI&&sid){toast('🤖 Generating AI script...');generateLeadAI(sid,d);}
     pgSales();
   }catch(e){if($('l-name'))$('l-name').disabled=false;toast(e.message,'err');}
@@ -2184,7 +2185,9 @@ async function saveNewInvoice(){
   try{
   var amount=parseFloat(($('ninv-amount')||{}).value||0);
   if(!amount){toast('Amount required','err');return;}
-  await dbIns('invoices',{job_id:($('ninv-job')||{}).value||null,amount:amount,description:($('ninv-desc')||{}).value||'Invoice',due_date:($('ninv-due')||{}).value||null,status:'Draft'});
+  var newInv = await dbIns('invoices',{job_id:($('ninv-job')||{}).value||null,amount:amount,description:($('ninv-desc')||{}).value||'Invoice',due_date:($('ninv-due')||{}).value||null,status:'Draft'});
+  var newInvId = newInv&&newInv[0]?newInv[0].id:null;
+  if(newInvId) await runBusinessCascade('invoice.sent','invoice',newInvId,{invoice:{amount:amount}}).catch(function(){});
   await aiLogTransaction('Invoice Created','New invoice for '+fmt$(amount)+' — '+($('ninv-desc')||{}).value,'normal');
   // Schedule overdue check
   setTimeout(aiCheckOverdue, 2000);
@@ -2781,6 +2784,18 @@ async function gkExecuteAction(item) {
 
     case 'warranty_claim':
       toast('Warranty claim reviewed — schedule inspection','ok');
+      break;
+
+    case 'cert_expiry':
+      // Cert expired — sub cannot work until renewed
+      if(item.reference_id){
+        await dbUpd('subcontractors',item.reference_id,{cert_status:'flagged',cert_flagged_at:new Date().toISOString()});
+      }
+      toast('Cert expiry acknowledged — do not schedule this sub until renewed','err',5000);
+      break;
+
+    case 'co_execution':
+      toast('Change order execution acknowledged — coordinate with trades','ok');
       break;
 
     case 'deposit_invoice_review':
@@ -7973,6 +7988,7 @@ async function sendProposalToClient(propId) {
   }
 
   await addToGatekeeper('proposal_sent', 'Proposal sent: ' + prop.client_name, 'Magic Link sent. Awaiting client review and signature. Day 3/5/7 follow-up reminders queued in Gatekeeper.', 'high', 'Follow up if not signed in 48 hours.');
+  await runBusinessCascade('proposal.sent','proposal',propId,{lead:{client_name:prop.client_name,id:prop.lead_id}}).catch(function(){});
   toast('Proposal sent — Day 3/5/7 follow-ups queued in Gatekeeper', 'ok');
 }
 
@@ -9933,6 +9949,37 @@ async function runBusinessCascade(action, objectType, objectId, context) {
   var triggered = [];
   try {
     switch(action) {
+
+      // ── LEAD CREATED ──────────────────────────────────────────────────────
+      case 'lead.created': {
+        var lead = context.lead || (await dbGet('leads','?id=eq.'+objectId))[0];
+        if(!lead) break;
+        // Update GK badge
+        var gkItems = await dbGet('gatekeeper_queue','?status=eq.pending') || [];
+        updateGKBadge(gkItems.length);
+        triggered.push('Lead created: '+lead.client_name);
+        break;
+      }
+
+      // ── PROPOSAL SENT ─────────────────────────────────────────────────────
+      case 'proposal.sent': {
+        var lead = context.lead || (objectId ? (await dbGet('leads','?id=eq.'+objectId))[0] : null);
+        if(!lead) break;
+        // Queue Day 3, Day 7 follow-ups if not already queued
+        await addToGatekeeper('follow_up','Day 3 Follow-up: '+lead.client_name,'Proposal was sent 3 days ago. Follow up to confirm receipt and answer questions.','high','Call or email the client to confirm they received the proposal.','follow_up',objectId);
+        triggered.push('Day 3 follow-up queued');
+        break;
+      }
+
+      // ── INVOICE SENT ─────────────────────────────────────────────────────
+      case 'invoice.sent': {
+        var inv = context.invoice || (objectId ? (await dbGet('invoices','?id=eq.'+objectId))[0] : null);
+        if(!inv) break;
+        // Queue follow-up if not paid in 3 days
+        await addToGatekeeper('follow_up','Invoice Follow-up: '+fmt$(inv.amount||0),'Invoice sent '+new Date().toLocaleDateString()+'. Follow up in 3 days if unpaid.','normal','Check if client received invoice and confirm payment timeline.','follow_up',objectId);
+        triggered.push('Invoice follow-up queued');
+        break;
+      }
 
       // ── CHANGE ORDER APPROVED ─────────────────────────────────────────────
       case 'co.approved': {
