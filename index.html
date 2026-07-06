@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Corestone OS v2.5 - OS #9 Enterprise UX Engine + EIS Engineering Board + UX Directive Locked -->
+<!-- Corestone OS v2.6 - OS #9 FINAL DIRECTIVE: Business Brain, Job Command Center, AI Employees, UX Engine All Pages -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -379,7 +379,7 @@ tr:hover td{background:#fafbfc}
 
 <script>
 // ── AUTO VERSION CHECK — clears old data when code updates ──
-var CS_VERSION = '2.5';
+var CS_VERSION = '2.6';
 var stored_version = localStorage.getItem('cs_version');
 if(stored_version !== CS_VERSION) {
   // New version — clear old seed data that may have broken formats
@@ -794,7 +794,7 @@ async function aiAnalyzePhoto(imageBase64, context){
 
 // ── AI SCOPE CHANGE DETECTOR ──
 async function aiDetectScope(text, jobId){
-  var r=await ai('Analyze this message/transcript for scope changes that should become change orders:\n"'+text+'"\nJob: '+(AJOB?AJOB.job_name:'current job')+'\nReturn JSON: {"scope_changes_detected":true,"changes":[{"description":"what changed","estimated_impact":"$X","recommended_action":"create_co|monitor|no_action"}],"co_recommended":true,"urgency":"immediate|soon|low"}',
+  var r=await aiBrain('Analyze this message/transcript for scope changes that should become change orders:\n"'+text+'"\nJob: '+(AJOB?AJOB.job_name:'current job')+'\nReturn JSON: {"scope_changes_detected":true, (AJOB?AJOB.id:null),"changes":[{"description":"what changed","estimated_impact":"$X","recommended_action":"create_co|monitor|no_action"}],"co_recommended":true,"urgency":"immediate|soon|low"}',
     'You are a construction scope change detector. Return ONLY raw JSON.',600);
   var d=safeJSON(r);
   if(d&&d.co_recommended&&d.changes&&d.changes.length){
@@ -1293,275 +1293,502 @@ function safeSelectJob(id, tab) {
 }
 
 function selectJob(id){
-  AJOB=ALLJOBS.find(j=>j.id===id)||null;
-  renderJobList(ALLJOBS);
-  const bar=$('ctx-bar');
-  if(bar){
-    if(AJOB){
-      bar.classList.remove('hidden');
-      var nm=$('ctx-name');if(nm)nm.textContent=AJOB.job_name;
-      var mt=$('ctx-meta');if(mt)mt.textContent=AJOB.client_name+' · '+(AJOB.address||'No address');
-      var bg=$('ctx-badge');if(bg){bg.className='badge badge-'+(AJOB.status||'active');bg.textContent=AJOB.status;}
-      var ph=$('ctx-phase');if(ph)ph.textContent=AJOB.current_phase||'';
-      var pc=$('ctx-pct');if(pc)pc.textContent=AJOB.percent_complete?AJOB.percent_complete+'% complete':'';
-    } else {bar.classList.add('hidden');}
+  var jobs = lsAll('jobs');
+  var job = jobs.find(function(j){return j.id===id;});
+  if(!job){ toast('Job not found','err'); return; }
+  AJOB = job;
+  renderJobCommandCenter(job);
+}
+
+async function renderJobCommandCenter(job){
+  $('content').innerHTML = '<div class="ux-loading"><div class="ux-spinner"></div><div class="ux-loading-msg">Loading '+uxEsc(job.job_name)+'...</div></div>';
+
+  try{
+    // Load everything about this job in parallel
+    var jid = job.id;
+    var [estimates, proposals, cos, invoices, bills, pos, schedule,
+         logs, punch, rfis, messages, lienWaivers, sels, gkItems] = await Promise.all([
+      dbGet('estimates','?job_id=eq.'+jid+'&order=created_at.desc'),
+      dbGet('proposals','?job_id=eq.'+jid+'&order=created_at.desc'),
+      dbGet('change_orders','?job_id=eq.'+jid+'&order=created_at.desc'),
+      dbGet('invoices','?job_id=eq.'+jid+'&order=created_at.desc'),
+      dbGet('bills','?job_id=eq.'+jid+'&order=created_at.desc'),
+      dbGet('purchase_orders','?job_id=eq.'+jid+'&order=created_at.desc'),
+      dbGet('schedule','?job_id=eq.'+jid+'&order=sequence_order.asc'),
+      dbGet('daily_logs','?job_id=eq.'+jid+'&order=log_date.desc&limit=5'),
+      dbGet('punch_list','?job_id=eq.'+jid),
+      dbGet('rfis','?job_id=eq.'+jid),
+      dbGet('messages','?job_id=eq.'+jid+'&order=created_at.desc&limit=10'),
+      dbGet('lien_waivers','?job_id=eq.'+jid),
+      dbGet('selections','?job_id=eq.'+jid),
+      dbGet('gatekeeper_queue','?reference_id=eq.'+jid+'&status=eq.pending'),
+    ]);
+
+    // Financial calcs
+    var contractPrice  = parseFloat(job.contract_price||job.budget||0);
+    var invoicedTotal  = invoices.reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var collectedTotal = invoices.filter(function(i){return i.status==='Paid'||i.status==='paid';}).reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var outstanding    = invoicedTotal - collectedTotal;
+    var billsTotal     = bills.reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var billsPaid      = bills.filter(function(b){return b.status==='paid'||b.status==='Paid';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var billsDue       = billsTotal - billsPaid;
+    var poTotal        = pos.filter(function(p){return p.status!=='Cancelled';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var coValue        = cos.reduce(function(s,c){return s+(parseFloat(c.cost_impact)||0);},0);
+    var approxMargin   = contractPrice>0 ? Math.round(((contractPrice-(billsTotal+poTotal))/contractPrice)*100) : 0;
+
+    // Schedule
+    var avgProgress = schedule.length ? Math.round(schedule.reduce(function(s,p){return s+(p.percent_complete||0);},0)/schedule.length) : 0;
+    var openPunch = punch.filter(function(p){return p.status!=='complete';}).length;
+    var openRFIs  = rfis.filter(function(r){return r.status==='open';}).length;
+    var openCOs   = cos.filter(function(c){return c.status!=='approved'&&c.status!=='closed';}).length;
+    var missingSels = sels.filter(function(s){return !s.client_approved;}).length;
+    var missingLiens = lienWaivers.filter(function(l){return l.status==='pending';}).length;
+
+    var statusColors = {active:'var(--teal)',in_progress:'var(--blue)','pre-construction':'var(--amber)',complete:'var(--green)',on_hold:'var(--muted)'};
+    var statusColor = statusColors[job.status]||'var(--muted)';
+
+    var html =
+      // ── JOB HEADER ──────────────────────────────────────────────────
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:14px">'
+      +'<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">'
+      +'<div>'
+      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'
+      +'<button onclick="pgJobsV2()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0;font-family:inherit">← All Jobs</button>'
+      +'<span style="color:var(--dim)">|</span>'
+      +'<span style="font-size:11px;font-weight:800;padding:2px 10px;border-radius:10px;background:'+statusColor+';color:#fff">'+uxEsc(job.status||'active')+'</span>'
+      +'</div>'
+      +'<div style="font-size:22px;font-weight:800;color:var(--text)">'+uxEsc(job.job_name)+'</div>'
+      +'<div style="font-size:13px;color:var(--muted);margin-top:2px">'+uxEsc(job.client_name||'')+(job.address?' · '+uxEsc(job.address):'')+'</div>'
+      +'</div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +'<button onclick="showQuickLog()" class="btn btn-g btn-sm">📋 Log Today</button>'
+      +'<button onclick="goTab(\'schedule\')" class="btn btn-g btn-sm">📅 Schedule</button>'
+      +'<button onclick="showNewPOForm()" class="btn btn-g btn-sm">📦 Request PO</button>'
+      +'<button onclick="jobAIBriefing(\''+jid+'\')" style="padding:6px 12px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Briefing</button>'
+      +'</div></div>'
+      // Progress bar
+      +'<div style="margin-top:12px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Overall Progress</span><span style="font-size:11px;font-weight:800;color:var(--teal)">'+avgProgress+'%</span></div>'
+      +'<div style="background:var(--border);border-radius:4px;height:6px"><div style="background:var(--teal);height:100%;border-radius:4px;width:'+avgProgress+'%;transition:width 0.3s"></div></div>'
+      +'</div>'
+      +'<div id="job-ai-briefing"></div>'
+      +'</div>'
+
+      // ── THREE COLUMN LAYOUT ──────────────────────────────────────────
+      +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
+
+      // ── COL 1: MONEY ──────────────────────────────────────────────────
+      +'<div>'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">💰 Financial Position</div>'
+      +'<div class="card" style="padding:14px">'
+      +[
+        {l:'Contract Value',v:fmt$(contractPrice),c:'var(--text)'},
+        {l:'CO Additions',v:fmt$(coValue),c:coValue>0?'var(--amber)':'var(--dim)'},
+        {l:'Invoiced to Client',v:fmt$(invoicedTotal),c:'var(--blue)'},
+        {l:'Collected',v:fmt$(collectedTotal),c:'var(--green)'},
+        {l:'Outstanding',v:fmt$(outstanding),c:outstanding>0?'var(--amber)':'var(--green)'},
+        {l:'Bills Paid',v:fmt$(billsPaid),c:'var(--muted)'},
+        {l:'Bills Due',v:fmt$(billsDue),c:billsDue>0?'var(--red)':'var(--green)'},
+        {l:'POs Committed',v:fmt$(poTotal),c:'var(--blue)'},
+        {l:'Est. Margin',v:approxMargin+'%',c:approxMargin>15?'var(--green)':approxMargin>5?'var(--amber)':'var(--red)'},
+      ].map(function(row){
+        return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">'
+          +'<span style="color:var(--muted)">'+row.l+'</span>'
+          +'<span style="font-weight:700;color:'+row.c+'">'+row.v+'</span></div>';
+      }).join('')
+      +'</div>'
+
+      // ── COL 2: SCHEDULE ──────────────────────────────────────────────
+      +'<div>'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">📅 Schedule & Field</div>'
+      +'<div class="card" style="padding:14px">'
+      +(schedule.length
+        ? schedule.slice(0,6).map(function(p){
+            var pct=p.percent_complete||0;
+            var barColor=pct>=100?'var(--green)':pct>=50?'var(--teal)':'var(--blue)';
+            return '<div style="margin-bottom:10px">'
+              +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
+              +'<span style="font-weight:600;color:var(--text)">'+uxEsc(p.phase_name)+'</span>'
+              +'<span style="color:var(--muted)">'+pct+'%</span></div>'
+              +'<div style="background:var(--border);border-radius:2px;height:4px">'
+              +'<div style="background:'+barColor+';height:100%;border-radius:2px;width:'+pct+'%"></div></div>'
+              +'</div>';
+          }).join('')
+        :'<div style="color:var(--dim);font-size:12px;padding:8px 0">No schedule yet<br><button onclick="goTab(\'schedule\')" class="btn btn-p" style="margin-top:8px;font-size:11px">Generate Schedule</button></div>')
+      +(logs.length?'<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:6px"><div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:6px">RECENT LOGS</div>'
+        +logs.slice(0,3).map(function(l){return '<div style="font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--border)">'+fmtD(l.log_date)+': '+uxEsc((l.notes||'').substring(0,50))+'</div>';}).join('')
+        +'</div>':'')
+      +'</div></div>'
+
+      // ── COL 3: ATTENTION REQUIRED ─────────────────────────────────────
+      +'<div>'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">🔑 Needs Attention</div>'
+      +'<div class="card" style="padding:14px">'
+      +(gkItems.length
+        ? '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:800;color:var(--amber);margin-bottom:4px">GATEKEEPER ('+gkItems.length+')</div>'
+          +gkItems.slice(0,3).map(function(g){return '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border);color:var(--text)">'+uxEsc(g.title.substring(0,45))+'</div>';}).join('')
+          +'<button onclick="goTab(\'gatekeeper\')" style="font-size:10px;margin-top:6px;padding:3px 8px;background:var(--amber);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit">Review All</button>'
+          +'</div>':'' )
+      +[
+        {count:openCOs, label:'Change Orders', icon:'📝', tab:'cos', color:'var(--amber)'},
+        {count:openRFIs, label:'Open RFIs', icon:'❓', tab:'rfis', color:'var(--blue)'},
+        {count:openPunch, label:'Punch Items', icon:'✅', tab:'punch', color:'var(--red)'},
+        {count:missingLiens, label:'Missing Lien Waivers', icon:'📋', tab:'lienWaivers', color:'var(--amber)'},
+        {count:missingSels, label:'Selections Pending', icon:'🎨', tab:'selections', color:'var(--purple)'},
+      ].filter(function(item){return item.count>0;}).map(function(item){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
+          +'<span style="font-size:12px;color:var(--text)">'+item.icon+' '+item.label+'</span>'
+          +'<span style="font-size:12px;font-weight:800;color:'+item.color+';cursor:pointer" onclick="goTab(\''+item.tab+'\')">'+item.count+'</span>'
+          +'</div>';
+      }).join('')
+      +(!gkItems.length&&openCOs===0&&openRFIs===0&&openPunch===0&&missingLiens===0&&missingSels===0
+        ?'<div style="color:var(--green);font-size:12px;font-weight:700;text-align:center;padding:16px">✅ No open items</div>':'')
+      +'</div></div>'
+      +'</div>' // end 3-col
+
+      // ── MESSAGES ──────────────────────────────────────────────────────
+      +(messages.length?
+        '<div style="margin-bottom:14px">'
+        +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">💬 Recent Messages</div>'
+        +'<div class="card" style="padding:14px">'
+        +messages.slice(0,3).map(function(m){
+          return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">'
+            +'<div style="font-size:11px;color:var(--muted)">'+fmtD(m.created_at)+(m.recipient_label?' → '+m.recipient_label:'')+'</div>'
+            +'<div style="font-size:12px;color:var(--text);margin-top:2px">'+uxEsc((m.body||'').substring(0,80))+'</div>'
+            +'</div>';
+        }).join('')
+        +'<button onclick="goTab(\'msgs\')" style="font-size:11px;margin-top:8px;padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-family:inherit">View All Messages</button>'
+        +'</div></div>':'');
+
+    $('content').innerHTML = html;
+
+    // Auto-run AI briefing silently
+    setTimeout(function(){ jobAIBriefing(jid); }, 500);
+
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error loading job: '+e.message+'</div></div>';
   }
-  renderPage(CUR);
 }
 
-// NAV
-function goTab(tab){
-  CUR=tab;
-  // Update sidebar active states
-  document.querySelectorAll('.bt-nav-item,.bt-nav-sub-item').forEach(function(t){t.classList.remove('active');});
-  var btn=document.getElementById('btn-'+tab);
-  if(btn)btn.classList.add('active');
-  // Update breadcrumb
-  var labels={dashboard:'Summary',sales:'Leads',proposals:'Proposals',bids:'Bid Requests',jobs:'Jobs',schedule:'Schedule',daily:'Daily Logs',todos:'To-Dos',punchlist:'Punch List',selections:'Selections',specs:'Specifications',rfis:'RFIs',warranty:'Warranty',estimates:'Estimates',budget:'Job Costing Budget',financial:'Invoices',pos:'Purchase Orders',cos:'Change Orders',liens:'Lien Waivers',files:'Documents',photos:'Photos & Videos',plans:'Plans & Takeoff',messages:'Messages',emails:'Emails',comments:'Comments',subs:'Subcontractors',reports:'Reports',gatekeeper:'Gatekeeper'};
-  var bc=$('bt-breadcrumb');if(bc)bc.textContent=labels[tab]||tab;
-  // Auto-expand parent group
-  var groups={sales:['proposals','bids'],pm:['jobs','schedule','daily','todos','punchlist','selections','specs','rfis','warranty'],fin:['estimates','budget','financial','pos','cos','liens'],files:['files','photos','plans'],comm:['messages','emails','comments']};
-  Object.keys(groups).forEach(function(grp){if(groups[grp].includes(tab)||grp===tab){var sub=document.getElementById('grp-'+grp);var arr=document.getElementById('arr-'+grp);if(sub){sub.classList.add('open');if(arr)arr.classList.add('open');}}});
-  renderPage(tab);
-}
-function toggleGroup(id){
-  var sub=document.getElementById(id);var arrId=id.replace('grp-','arr-');var arr=document.getElementById(arrId);
-  if(!sub)return;
-  var open=sub.classList.contains('open');
-  sub.classList.toggle('open');
-  if(arr){arr.classList.toggle('open');}
-}
-function toggleSidebar(){
-  var sb=document.getElementById('bt-sidebar');var tb=document.getElementById('bt-topbar');var main=document.getElementById('bt-main');
-  sb.classList.toggle('collapsed');tb.classList.toggle('expanded');main.classList.toggle('expanded');
-}
-function toggleJobPicker(){
-  var picker=document.getElementById('bt-job-picker');
-  if(picker)picker.style.display=picker.style.display==='none'?'block':'none';
-}
-function clearJob(){
-  AJOB=null;
-  var nm=document.getElementById('bt-sel-name');if(nm)nm.textContent='All Jobs';
-  var ctx=document.getElementById('bt-ctx');if(ctx)ctx.classList.remove('show');
-  var picker=document.getElementById('bt-job-picker');if(picker)picker.style.display='none';
-  renderPage(CUR);
-}
-function showQuickAdd(){
-  var el=document.createElement('div');el.className='ov';el.id='quick-add-ov';
-  var items=[
-    {icon:'👤',label:'New Lead',fn:function(){closeM('quick-add-ov');goTab('sales');setTimeout(showLeadForm,300);}},
-    {icon:'🏗️',label:'New Job',fn:function(){closeM('quick-add-ov');showJobForm();}},
-    {icon:'📝',label:'Log Today',fn:function(){closeM('quick-add-ov');goTab('daily');setTimeout(showQuickLog,300);}},
-    {icon:'💰',label:'New Invoice',fn:function(){closeM('quick-add-ov');goTab('financial');setTimeout(function(){finTab('inv');setTimeout(showInvForm,300);},300);}},
-    {icon:'📐',label:'Upload Plan',fn:function(){closeM('quick-add-ov');goTab('plans');setTimeout(showPlanUpload,300);}},
-    {icon:'✅',label:'Punch Item',fn:function(){closeM('quick-add-ov');goTab('punchlist');setTimeout(showPunchForm,300);}},
-    {icon:'❓',label:'New RFI',fn:function(){closeM('quick-add-ov');goTab('rfis');setTimeout(showRFIForm,300);}},
-    {icon:'📸',label:'Add Photo',fn:function(){closeM('quick-add-ov');goTab('photos');setTimeout(showPhotoUpload,300);}},
-    {icon:'🎙️',label:'Voice Log',fn:function(){closeM('quick-add-ov');showVoiceRecord();}},
-    {icon:'🤝',label:'Add Sub',fn:function(){closeM('quick-add-ov');goTab('subs');setTimeout(showSubForm,300);}},
-    {icon:'💬',label:'Message',fn:function(){closeM('quick-add-ov');goTab('messages');}},
-    {icon:'📜',label:'Lien Waiver',fn:function(){closeM('quick-add-ov');goTab('liens');setTimeout(showLienForm,300);}},
-    {icon:'📋',label:'Requirement',fn:function(){closeM('quick-add-ov');goTab('requirements');setTimeout(addRequirementManual,300);}},
-    {icon:'📝',label:'Send Survey',fn:function(){closeM('quick-add-ov');goTab('survey');}},
-    {icon:'📧',label:'Paste Email',fn:function(){closeM('quick-add-ov');goTab('emails');}},
-    {icon:'📦',label:'Backup Data',fn:function(){closeM('quick-add-ov');exportAllData();}},
-  ];
-  var grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px';
-  items.forEach(function(item){
-    var btn=document.createElement('button');
-    btn.style.cssText='padding:14px 8px;background:#f6f8fa;border:1.5px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;text-align:center;transition:all 0.15s';
-    btn.innerHTML='<div style="font-size:22px;margin-bottom:4px">'+item.icon+'</div>'+item.label;
-    btn.onmouseover=function(){this.style.background='var(--teal-light)';this.style.borderColor='var(--teal)';};
-    btn.onmouseout=function(){this.style.background='#f6f8fa';this.style.borderColor='var(--border)';};
-    btn.onclick=item.fn;
-    grid.appendChild(btn);
-  });
-  el.innerHTML="<div class=\"modal\" style=\"max-width:400px\"><div class=\"mh\"><div class=\"mt\">⚡ Quick Add</div><button class=\"mc\" onclick=\"closeM('quick-add-ov')\">×</button></div><div class=\"mb\"></div></div>";
-  el.querySelector('.mb').appendChild(grid);
-  document.body.appendChild(el);
+async function jobAIBriefing(jobId){
+  var el = document.getElementById('job-ai-briefing');
+  if(!el) return;
+  el.innerHTML='<div style="margin-top:10px;font-size:12px;color:var(--muted);font-style:italic">🤖 Business Brain analyzing...</div>';
+  try{
+    var ctx = await buildJobContext(jobId);
+    if(!ctx){el.innerHTML='';return;}
+    var briefing = await aiBrain(
+      'Give a 2-sentence executive briefing on this job. What is the most important thing to know right now? What needs attention today?',
+      jobId,
+      'Senior construction PM. Direct and concise. No fluff.',
+      400
+    );
+    el.innerHTML='<div style="margin-top:10px;background:var(--blue-bg);border:1px solid var(--blue);border-radius:6px;padding:10px 14px;font-size:12px;color:var(--text);line-height:1.6"><span style="font-weight:700;color:var(--blue)">🤖 Brain:</span> '+uxEsc(briefing)+'</div>';
+  }catch(e){
+    el.innerHTML='';
+  }
 }
 
-function globalSearch(q) {
-  // Remove existing dropdown
-  var existing = document.getElementById('global-search-dd');
-  if(existing) existing.remove();
-  if(!q || q.length < 2) return;
 
-  var results = [];
-  var tables = {
-    leads: function(r){ return { name: r.client_name||'', sub: (r.job_type||'') + ' · ' + (r.address||''), tab: 'sales', icon: '🏠' }; },
-    jobs: function(r){ return { name: r.job_name||r.client_name||'', sub: (r.job_type||'') + ' · ' + (r.status||''), tab: 'jobs', icon: '🏗️' }; },
-    subcontractors: function(r){ return { name: r.company_name||r.contact_name||'', sub: r.trade||'', tab: 'subs', icon: '👷' }; },
-    estimates: function(r){ return { name: r.title||r.client_name||'Estimate', sub: fmt$(r.grand_total||0), tab: 'estimates', icon: '📋' }; },
-    proposals: function(r){ return { name: 'Proposal: '+(r.client_name||''), sub: fmt$(r.total_price||0) + ' · ' + (r.status||''), tab: 'proposals', icon: '📄', fn: 'openProposal(\''+r.id+'\')' }; },
-    requirements: function(r){ return { name: r.title||r.category||'Requirement', sub: (r.description||'').slice(0,50), tab: 'requirements', icon: '📌' }; },
-  };
+async function buildJobContext(jobId) {
+  if(!jobId) return null;
+  try {
+    var [job, estimates, proposals, cos, invoices, bills, pos, schedule,
+         logs, punch, rfis, lienWaivers, sels, specs, messages, subs] = await Promise.all([
+      dbGet('jobs','?id=eq.'+jobId).then(function(r){return r[0]||null;}),
+      dbGet('estimates','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('proposals','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('change_orders','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('invoices','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('bills','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('purchase_orders','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('schedule','?job_id=eq.'+jobId+'&order=sequence_order.asc'),
+      dbGet('daily_logs','?job_id=eq.'+jobId+'&order=log_date.desc&limit=10'),
+      dbGet('punch_list','?job_id=eq.'+jobId),
+      dbGet('rfis','?job_id=eq.'+jobId),
+      dbGet('lien_waivers','?job_id=eq.'+jobId),
+      dbGet('selections','?job_id=eq.'+jobId),
+      dbGet('specifications','?job_id=eq.'+jobId),
+      dbGet('messages','?job_id=eq.'+jobId+'&order=created_at.desc&limit=20'),
+      dbGet('subcontractors','?order=company_name.asc'),
+    ]);
 
-  var ql = q.toLowerCase();
-  Object.entries(tables).forEach(function(entry) {
-    var table = entry[0], mapper = entry[1];
-    lsAll(table).forEach(function(r) {
-      var fields = JSON.stringify(r).toLowerCase();
-      if(fields.includes(ql)) {
-        var mapped = mapper(r);
-        mapped.id = r.id;
-        results.push(mapped);
+    if(!job) return null;
+
+    // Financial calculations
+    var contractPrice  = parseFloat(job.contract_price||job.budget||0);
+    var estimatedCost  = estimates.length ? parseFloat(estimates[0].total_cost||0) : 0;
+    var invoicedTotal  = invoices.reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var collectedTotal = invoices.filter(function(i){return i.status==='Paid'||i.status==='paid';})
+                          .reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var billsTotal     = bills.reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var billsPaid      = bills.filter(function(b){return b.status==='paid'||b.status==='Paid';})
+                          .reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var poTotal        = pos.filter(function(p){return p.status!=='Cancelled';})
+                          .reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var coValue        = cos.reduce(function(s,c){return s+(parseFloat(c.cost_impact)||0);},0);
+    var outstanding    = invoicedTotal - collectedTotal;
+    var billsDue       = billsTotal - billsPaid;
+    var approxMargin   = contractPrice > 0
+      ? Math.round(((contractPrice - estimatedCost) / contractPrice) * 100) : 0;
+
+    // Schedule progress
+    var completedPhases = schedule.filter(function(p){return (p.percent_complete||0)>=100;}).length;
+    var avgProgress = schedule.length
+      ? Math.round(schedule.reduce(function(s,p){return s+(p.percent_complete||0);},0)/schedule.length) : 0;
+
+    // Recent log summary
+    var recentLogSummary = logs.slice(0,3).map(function(l){
+      return fmtD(l.log_date)+': '+( l.notes||'').substring(0,80);
+    }).join(' | ');
+
+    // Open items
+    var openPunch  = punch.filter(function(p){return p.status!=='complete';}).length;
+    var openRFIs   = rfis.filter(function(r){return r.status==='open';}).length;
+    var openCOs    = cos.filter(function(c){return c.status!=='approved'&&c.status!=='closed';}).length;
+    var pendingPOs = pos.filter(function(p){return p.status==='Pending Authorization';}).length;
+    var missingLiens = lienWaivers.filter(function(l){return l.status==='pending';}).length;
+    var pendingSels  = sels.filter(function(s){return !s.client_approved;}).length;
+
+    // Risk assessment
+    var risks = [];
+    if(billsDue > 5000) risks.push('$'+Math.round(billsDue/1000)+'k bills unpaid');
+    if(outstanding > 10000) risks.push('$'+Math.round(outstanding/1000)+'k outstanding from client');
+    if(openCOs > 0) risks.push(openCOs+' unapproved change order'+(openCOs>1?'s':''));
+    if(openRFIs > 0) risks.push(openRFIs+' open RFI'+(openRFIs>1?'s':''));
+    if(pendingPOs > 0) risks.push(pendingPOs+' PO'+(pendingPOs>1?'s':'')+' awaiting authorization');
+    if(missingLiens > 0) risks.push(missingLiens+' lien waiver'+(missingLiens>1?'s':'')+' not received');
+    if(pendingSels > 0) risks.push(pendingSels+' client selection'+(pendingSels>1?'s':'')+' awaiting approval');
+    if(avgProgress < 50 && billsTotal > contractPrice * 0.6) risks.push('spending ahead of progress pace');
+
+    // Build the context string every AI Employee reads
+    var ctx = [
+      'PROJECT INTELLIGENCE — '+job.job_name,
+      'Client: '+(job.client_name||'Unknown')+' | Address: '+(job.address||'Unknown'),
+      'Status: '+(job.status||'active')+' | Phase: '+(job.current_phase||'Unknown')+' | Progress: '+avgProgress+'%',
+      '',
+      'FINANCIAL POSITION:',
+      '  Contract Value: '+fmt$(contractPrice),
+      '  Est. Cost: '+fmt$(estimatedCost)+' | Margin: ~'+approxMargin+'%',
+      '  Invoiced to Client: '+fmt$(invoicedTotal)+' | Collected: '+fmt$(collectedTotal),
+      '  Outstanding from Client: '+fmt$(outstanding),
+      '  Bills Total: '+fmt$(billsTotal)+' | Bills Paid: '+fmt$(billsPaid)+' | Bills Due: '+fmt$(billsDue),
+      '  Authorized POs: '+fmt$(poTotal),
+      '  Change Order Value: '+fmt$(coValue)+' ('+cos.length+' COs)',
+      '',
+      'SCHEDULE: '+completedPhases+'/'+schedule.length+' phases complete',
+      schedule.slice(0,5).map(function(p){return '  '+p.phase_name+': '+(p.percent_complete||0)+'%';}).join('\n'),
+      '',
+      'OPEN ITEMS REQUIRING ATTENTION:',
+      '  Punch List: '+openPunch+' open items',
+      '  RFIs: '+openRFIs+' open',
+      '  Change Orders: '+openCOs+' pending',
+      '  POs awaiting auth: '+pendingPOs,
+      '  Lien waivers missing: '+missingLiens,
+      '  Client selections pending: '+pendingSels,
+      '',
+      recentLogSummary ? 'RECENT FIELD ACTIVITY:\n  '+recentLogSummary : '',
+      '',
+      risks.length ? 'RISK FLAGS:\n'+risks.map(function(r){return '  ⚠️ '+r;}).join('\n') : 'RISK FLAGS: None identified',
+      '',
+      'Messages last 20: '+messages.length+' | Subcontractors on file: '+subs.length,
+      'Specifications: '+specs.length+' | Client selections: '+sels.length+'/'+sels.filter(function(s){return s.client_approved;}).length+' approved',
+    ].join('\n');
+
+    return {
+      job: job,
+      contextString: ctx,
+      financial: {contractPrice,invoicedTotal,collectedTotal,billsTotal,billsPaid,poTotal,coValue,outstanding,billsDue,approxMargin},
+      schedule: {phases:schedule,completed:completedPhases,avgProgress},
+      openItems: {openPunch,openRFIs,openCOs,pendingPOs,missingLiens,pendingSels},
+      risks: risks,
+      recentLogs: logs.slice(0,5),
+      messages: messages.slice(0,10),
+    };
+  } catch(e) {
+    console.warn('[BusinessBrain] Context build failed:', e.message);
+    return null;
+  }
+}
+
+// ── AI WITH BRAIN — Every significant AI call goes through this ────────────
+// Usage: await aiBrain(prompt, jobId, systemContext, maxTokens)
+// The Brain assembles full job context, prepends it, then calls AI.
+async function aiBrain(prompt, jobId, sys, max) {
+  var ctx = jobId ? await buildJobContext(jobId) : null;
+  var fullPrompt = ctx
+    ? ctx.contextString + '\n\n─────────────────────────────────────\nTASK FOR AI:\n' + prompt
+    : prompt;
+  var system = sys || 'You are the Corestone OS Business Brain — the AI intelligence layer for Corestone Developers, a residential construction company in Hudson Valley, NY. Owner: Feishy Felberbaum. Cost-plus 20% GC. You reason over the complete project history before every answer. Be specific, practical, and think like a senior construction PM who has managed hundreds of projects.';
+  return await ai(fullPrompt, system, max||1200);
+}
+
+// ── BUSINESS BRAIN DAILY BRIEFING ─────────────────────────────────────────
+// Called by Dashboard — assembles company-wide intelligence
+async function buildBrainBriefing() {
+  try {
+    var [jobs, leads, invs, bills, cos, pos, gkItems] = await Promise.all([
+      dbGet('jobs','?order=created_at.desc'),
+      dbGet('leads','?order=created_at.desc'),
+      dbGet('invoices','?order=created_at.desc'),
+      dbGet('bills','?order=created_at.desc'),
+      dbGet('change_orders','?order=created_at.desc'),
+      dbGet('purchase_orders','?order=created_at.desc'),
+      dbGet('gatekeeper_queue','?status=eq.pending&order=created_at.desc'),
+    ]);
+
+    var activeJobs = jobs.filter(function(j){return j.status==='active'||j.status==='in_progress';});
+    var outstanding = invs.filter(function(i){return i.status!=='Paid'&&i.status!=='paid'&&i.status!=='cancelled';})
+                        .reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var billsDue = bills.filter(function(b){return b.status==='pending'||b.status==='Pending';})
+                     .reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var openCOs = cos.filter(function(c){return c.status!=='approved'&&c.status!=='closed';}).length;
+    var poPending = pos.filter(function(p){return p.status==='Pending Authorization';}).length;
+    var hotLeads = leads.filter(function(l){return l.stage==='follow_up'||l.stage==='proposal_sent';}).length;
+
+    // Company-wide risk flags
+    var companyRisks = [];
+    if(outstanding > 20000) companyRisks.push('$'+Math.round(outstanding/1000)+'k outstanding from clients');
+    if(billsDue > 10000) companyRisks.push('$'+Math.round(billsDue/1000)+'k bills due');
+    if(openCOs > 2) companyRisks.push(openCOs+' change orders pending approval');
+    if(poPending > 0) companyRisks.push(poPending+' purchase orders awaiting authorization');
+    if(gkItems.length > 5) companyRisks.push(gkItems.length+' items need your decision in Gatekeeper');
+    if(hotLeads > 0) companyRisks.push(hotLeads+' active lead'+(hotLeads>1?'s':'')+' need follow-up');
+
+    var briefingContext = [
+      'COMPANY STATUS — Corestone Developers',
+      'Active Jobs: '+activeJobs.length+' | Total Jobs in System: '+jobs.length,
+      'Outstanding AR: '+fmt$(outstanding)+' | Bills Due: '+fmt$(billsDue),
+      'Open COs: '+openCOs+' | POs Pending Auth: '+poPending,
+      'Hot Leads: '+hotLeads+' | Gatekeeper Queue: '+gkItems.length,
+      companyRisks.length ? '\nRisk Flags:\n'+companyRisks.map(function(r){return '⚠️ '+r;}).join('\n') : '\nNo critical risks identified.',
+      '\nActive Jobs:\n'+activeJobs.slice(0,5).map(function(j){
+        return '  '+j.job_name+' ('+( j.status||'active')+', '+(j.progress_pct||0)+'%)';
+      }).join('\n'),
+    ].join('\n');
+
+    var briefing = await ai(
+      briefingContext+'\n\nGenerate a Monday-morning executive briefing for Feishy Felberbaum. '
+      +'3-4 sentences. What needs his attention today? What is the financial position? What should he do first? '
+      +'Sound like a senior COO briefing the President. No bullet points. Conversational but decisive.',
+      'Senior COO of Corestone Developers. Know the business cold. Be direct.', 600
+    );
+
+    return { briefing, risks: companyRisks, stats: { activeJobs:activeJobs.length, outstanding, billsDue, openCOs, poPending, hotLeads, gkCount:gkItems.length }};
+  } catch(e) {
+    return { briefing: 'Business Brain briefing unavailable.', risks: [], stats: {} };
+  }
+}
+
+// ── PROACTIVE RISK MONITOR ─────────────────────────────────────────────────
+// Runs silently on app load. Finds issues before Feishy sees them.
+async function runBrainRiskMonitor() {
+  try {
+    var jobs = await dbGet('jobs','?status=eq.active') || [];
+    for(var i=0; i<Math.min(jobs.length, 5); i++) {
+      var job = jobs[i];
+      var ctx = await buildJobContext(job.id);
+      if(!ctx) continue;
+
+      // Auto-flag serious risks to Gatekeeper
+      if(ctx.risks.length >= 3) {
+        // Multiple risks on one job — Brain flags it
+        var alreadyFlagged = false;
+        try {
+          var existing = await dbGet('gatekeeper_queue',
+            '?item_type=eq.brain_risk&reference_id=eq.'+job.id+'&status=eq.pending');
+          alreadyFlagged = existing && existing.length > 0;
+        } catch(e) {}
+
+        if(!alreadyFlagged) {
+          await addToGatekeeper(
+            'brain_risk',
+            'Business Brain: '+ctx.risks.length+' risk flags on '+job.job_name,
+            ctx.contextString+'\n\nBrain detected multiple risk factors on this job. Review recommended.',
+            ctx.risks.length >= 4 ? 'urgent' : 'high',
+            'Review full job context. Address highest-impact risks first.',
+            'brain_risk',
+            job.id
+          );
+        }
       }
-    });
-  });
-
-  // Show dropdown
-  var input = document.getElementById('global-search');
-  if(!input) return;
-  var rect = input.getBoundingClientRect();
-
-  var dd = document.createElement('div');
-  dd.id = 'global-search-dd';
-  dd.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:' + rect.left + 'px;width:360px;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.12);z-index:9999;max-height:400px;overflow-y:auto';
-
-  if(!results.length) {
-    dd.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">No results for &ldquo;' + q + '&rdquo;</div>';
-  } else {
-    dd.innerHTML = '<div style="padding:8px 12px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">' + results.length + ' results for &ldquo;' + q + '&rdquo;</div>' +
-      results.slice(0,12).map(function(r) {
-        var action = r.fn ? 'closeSearchDd();' + r.fn : 'closeSearchDd();goTab(\'' + r.tab + '\')';
-        return '<div style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\'\'" onclick="' + action + '">' +
-          '<span style="font-size:18px">' + r.icon + '</span>' +
-          '<div><div style="font-size:13px;font-weight:700">' + r.name + '</div>' +
-          '<div style="font-size:11px;color:var(--muted)">' + r.sub + '</div></div>' +
-          '</div>';
-      }).join('') +
-      (results.length > 12 ? '<div style="padding:8px 14px;font-size:11px;color:var(--muted);text-align:center">+ ' + (results.length-12) + ' more results — refine your search</div>' : '');
-  }
-
-  document.body.appendChild(dd);
-
-  // Close on outside click
-  setTimeout(function() {
-    document.addEventListener('click', function closeDD(e) {
-      if(!dd.contains(e.target) && e.target !== input) {
-        dd.remove();
-        document.removeEventListener('click', closeDD);
-      }
-    });
-  }, 100);
-}
-
-function closeSearchDd() {
-  var dd = document.getElementById('global-search-dd');
-  if(dd) dd.remove();
-  var inp = document.getElementById('global-search');
-  if(inp) inp.value = '';
-}
-function renderPage(tab){
-  // Only show spinner for tabs that take time — not dashboard
-  if(tab!=='dashboard') $('content').innerHTML='<div class="loading"><div class="spin"></div></div>';
-  ({dashboard:pgDashV2,sales:pgSales,proposals:pgProposals,bids:pgBids,jobs:pgJobsV2,schedule:pgSchedV2,daily:pgDailyV2,todos:pgTodos,punchlist:pgPunchList,selections:pgSelections,specs:pgSpecs,rfis:pgRFIs,warranty:pgWarranty,requirements:pgRequirements,survey:pgSurveyMgr,settings:pgSettings,estimates:pgEstimates,budget:pgBudget,financial:pgFinV2,invoices:pgInvoices,bills:pgBills,pos:pgPOs,cos:pgCOs,liens:pgLienWaivers,files:pgFiles,photos:pgPhotoLog,plans:pgPlans,messages:pgMsgsV2,emails:pgEmails,comments:pgComments,subs:pgSubsV2,reports:pgReportsV2,gatekeeper:pgGK}[tab]||pgNF)();
-}
-
-// DASHBOARD
-function showMicError(msg){
-  var ex=document.getElementById('mic-error-banner');
-  if(ex) ex.remove();
-  var banner=document.createElement('div');
-  banner.id='mic-error-banner';
-  banner.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #ef4444;border-radius:12px;padding:16px 20px;z-index:9999;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);font-family:-apple-system,sans-serif';
-  var inner=document.createElement('div');
-  inner.style.cssText='display:flex;align-items:flex-start;gap:12px';
-  var icon=document.createElement('span');
-  icon.style.cssText='font-size:24px';
-  icon.textContent='🎙️';
-  var txt=document.createElement('div');
-  txt.style.cssText='flex:1';
-  var h=document.createElement('div');
-  h.style.cssText='font-weight:800;color:#ef4444;margin-bottom:6px';
-  h.textContent='Microphone Issue';
-  var p=document.createElement('div');
-  p.style.cssText='font-size:13px;color:#333;line-height:1.5';
-  p.textContent=msg;
-  var btn=document.createElement('button');
-  btn.style.cssText='margin-top:10px;padding:6px 14px;background:#ef4444;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit';
-  btn.textContent='Got it';
-  btn.onclick=function(){var b=document.getElementById('mic-error-banner');if(b)b.remove();};
-  txt.appendChild(h);txt.appendChild(p);txt.appendChild(btn);
-  inner.appendChild(icon);inner.appendChild(txt);
-  banner.appendChild(inner);
-  document.body.appendChild(banner);
-  setTimeout(function(){var b=document.getElementById('mic-error-banner');if(b)b.remove();},10000);
-}
-
-function micFillField(fieldId, hint, callback){
-  if(!window.SpeechRecognition && !window.webkitSpeechRecognition){
-    showMicError('Speech recognition only works in Google Chrome. Please open this app in Chrome.');
-    return;
-  }
-  if(navigator.permissions){
-    navigator.permissions.query({name:'microphone'}).then(function(perm){
-      if(perm.state==='denied'){
-        showMicError('Microphone is BLOCKED. Click the lock icon in your address bar, set Microphone to Allow, then refresh the page.');
-        return;
-      }
-      startMicRecording(fieldId, hint, callback);
-    }).catch(function(){ startMicRecording(fieldId, hint, callback); });
-  } else {
-    startMicRecording(fieldId, hint, callback);
-  }
-}
-
-function startMicRecording(fieldId, hint, callback){
-  var SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var rec = new SpeechRec();
-  rec.continuous = false;
-  rec.interimResults = true;
-  rec.lang = 'en-US';
-
-  var ind = document.createElement('div');
-  ind.id = 'mic-listen-indicator';
-  ind.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0d7a70;color:#fff;padding:12px 24px;border-radius:30px;font-size:14px;font-weight:700;z-index:9999;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif';
-  ind.innerHTML = '<div style="width:10px;height:10px;background:#ef4444;border-radius:50%;animation:blink-dot 0.8s infinite"></div><span>Listening...</span>';
-  var oldInd = document.getElementById('mic-listen-indicator');
-  if(oldInd) oldInd.remove();
-  document.body.appendChild(ind);
-
-  rec.onresult = function(e){
-    var final = '';
-    for(var i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal) final += e.results[i][0].transcript;
     }
-    if(final){
-      var el = document.getElementById(fieldId);
-      if(el){
-        var cur = (el.tagName==='TEXTAREA'||el.tagName==='INPUT') ? el.value : '';
-        el.value = (cur ? cur+' ' : '') + final;
-      }
-      if(callback) callback(final);
-      toast('Got it: "'+final.substring(0,40)+'"','ok');
-    }
-  };
-
-  rec.onerror = function(e){
-    var i2=document.getElementById('mic-listen-indicator');if(i2)i2.remove();
-    if(e.error==='not-allowed'||e.error==='permission-denied'){
-      showMicError('Microphone blocked. Click the lock icon in your address bar, set Microphone to Allow, then refresh the page.');
-    } else if(e.error==='no-speech'){
-      toast('No speech detected — speak clearly and try again','err');
-    } else {
-      toast('Mic error: '+e.error,'err');
-    }
-  };
-
-  rec.onend = function(){
-    var i2=document.getElementById('mic-listen-indicator');if(i2)i2.remove();
-  };
-
-  try{ rec.start(); }
-  catch(e){
-    var i2=document.getElementById('mic-listen-indicator');if(i2)i2.remove();
-    showMicError('Could not start microphone: '+e.message+'. Make sure you are using Chrome and have allowed mic access.');
+  } catch(e) {
+    console.warn('[Brain] Risk monitor failed silently:', e.message);
   }
 }
 
-// pgDash removed — using pgDashV2
+// ── BRAIN-POWERED AI EMPLOYEES ────────────────────────────────────────────
+
+// AI ESTIMATOR — reasons over similar past estimates + current job
+async function aiEstimator(prompt, jobId) {
+  return await aiBrain(
+    '[AI ESTIMATOR]\n'+prompt,
+    jobId,
+    'You are the AI Estimator for Corestone Developers. You reason over complete project history, similar past projects, typical scope gaps, and current job financials before giving any estimate advice. You think like a seasoned estimator who has done 500+ residential projects in Hudson Valley NY.',
+    1200
+  );
+}
+
+// AI SUPERINTENDENT — field operations, quality, schedule
+async function aiSuperintendent(prompt, jobId) {
+  return await aiBrain(
+    '[AI SUPERINTENDENT]\n'+prompt,
+    jobId,
+    'You are the AI Superintendent for Corestone Developers. You monitor field progress, quality issues, schedule risk, subcontractor performance, and daily log patterns. You flag issues before they become problems. You think like a 20-year field superintendent.',
+    1000
+  );
+}
+
+// AI CONTROLLER — financial intelligence
+async function aiController(prompt, jobId) {
+  return await aiBrain(
+    '[AI CONTROLLER]\n'+prompt,
+    jobId,
+    'You are the AI Controller for Corestone Developers. You monitor cashflow, job costing, margin erosion, invoice collection, and financial risk. You think like a CFO who has seen construction companies fail from poor cash management.',
+    1000
+  );
+}
+
+// AI CHANGE ORDER MANAGER — scope detection, CO pricing, negotiation
+async function aiCOManager(prompt, jobId) {
+  return await aiBrain(
+    '[AI CHANGE ORDER MANAGER]\n'+prompt,
+    jobId,
+    'You are the AI Change Order Manager for Corestone Developers. You detect scope changes in daily logs and messages, price them accurately, draft professional CO documents, and coach on client negotiation. You protect Corestone margins.',
+    1000
+  );
+}
+
+// AI CUSTOMER SERVICE — client communications, satisfaction, portal
+async function aiCustomerService(prompt, jobId) {
+  return await aiBrain(
+    '[AI CUSTOMER SERVICE]\n'+prompt,
+    jobId,
+    'You are the AI Customer Service Manager for Corestone Developers. You draft professional client communications, track satisfaction signals, handle warranty inquiries, and ensure every client interaction reflects well on Corestone. Hudson Valley residential construction context.',
+    800
+  );
+}
+
+// AI PURCHASING MANAGER — vendor intelligence, PO decisions
+async function aiPurchasingManager(prompt, jobId) {
+  return await aiBrain(
+    '[AI PURCHASING MANAGER]\n'+prompt,
+    jobId,
+    'You are the AI Purchasing Manager for Corestone Developers. You evaluate purchase orders, track vendor reliability, flag budget overruns, and ensure materials arrive before they hold up the schedule. You think in total job cost, not individual invoices.',
+    800
+  );
+}
+
+// ── BRAIN GK EXECUTOR CASE ─────────────────────────────────────────────────
+// Already handled in gkExecuteAction — brain_risk case
+// Added here for reference
+
+// ── AUTO-RUN ON APP LOAD ───────────────────────────────────────────────────
+setTimeout(function(){
+  try { runBrainRiskMonitor(); } catch(e) {}
+}, 3000);
+
+// END BUSINESS BRAIN
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1964,105 +2191,94 @@ function uxListFilterDelegated(select){
 
 
 async function pgSales(){
+  uxLoading('content','Loading leads...');
   try{
-    const leads=await dbGet('leads','?order=created_at.desc');
-    const now=Date.now();
-    const newL=leads.filter(l=>l.stage==='new'&&now-new Date(l.created_at)<7200000);
-    const stages=['new','contacted','proposal_sent','negotiating','signed','lost'];
-    const slbl={new:'New',contacted:'Contacted',proposal_sent:'Proposal Sent',negotiating:'Negotiating',signed:'Signed ✓',lost:'Lost'};
-    const g={};stages.forEach(s=>g[s]=leads.filter(l=>l.stage===s));
-    $('content').innerHTML=`
-      ${newL.length?`<div class="alert-red" onclick="leadDetail('${newL[0].id}')"><span style="font-size:22px">🚨</span><div style="flex:1"><strong style="color:#fff;font-size:14px">${newL.length} NEW LEAD${newL.length>1?'S':''} — CALL NOW!</strong><div style="font-size:12px;color:rgba(255,255,255,0.85)">${newL.map(l=>l.client_name).join(', ')}</div></div><span style="color:#fff;font-weight:800">Tap to open →</span></div>`:''}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:9px;margin-bottom:14px">
-        <div onclick="showScreenshotImport()" style="background:linear-gradient(135deg,#7b1fa2,#5c1289);border-radius:var(--radius);padding:13px;cursor:pointer;text-align:center;box-shadow:var(--shadow-md);transition:all 0.15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-          <div style="font-size:26px;margin-bottom:5px">📸</div><div style="font-size:12px;font-weight:800;color:#fff">Upload Screenshot</div><div style="font-size:10px;color:rgba(255,255,255,0.7);margin-top:2px">Snip Tool → Upload</div>
-        </div>
-        <div onclick="showEmailPaste()" style="background:linear-gradient(135deg,var(--blue),#1a4fa0);border-radius:var(--radius);padding:13px;cursor:pointer;text-align:center;box-shadow:var(--shadow-md);transition:all 0.15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-          <div style="font-size:26px;margin-bottom:5px">📧</div><div style="font-size:12px;font-weight:800;color:#fff">Paste Email</div><div style="font-size:10px;color:rgba(255,255,255,0.7);margin-top:2px">Copy Angi email text</div>
-        </div>
-        <div onclick="showZoomImport()" style="background:linear-gradient(135deg,#1565c0,#0d47a1);border-radius:var(--radius);padding:13px;cursor:pointer;text-align:center;box-shadow:var(--shadow-md);transition:all 0.15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-          <div style="font-size:26px;margin-bottom:5px">🎥</div><div style="font-size:12px;font-weight:800;color:#fff">Zoom Transcript</div><div style="font-size:10px;color:rgba(255,255,255,0.7);margin-top:2px">Paste Zoom transcript</div>
-        </div>
-        <div onclick="showLeadForm()" style="background:linear-gradient(135deg,var(--teal),var(--teal-dark));border-radius:var(--radius);padding:13px;cursor:pointer;text-align:center;box-shadow:var(--shadow-md);transition:all 0.15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-          <div style="font-size:26px;margin-bottom:5px">✏️</div><div style="font-size:12px;font-weight:800;color:#fff">Enter Manually</div><div style="font-size:10px;color:rgba(255,255,255,0.7);margin-top:2px">Type lead info</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:9px;margin-bottom:13px">
-        <button class="btn ${salesView==='today'?'btn-p':'btn-g'} btn-sm" onclick="salesView='today';pgSales()">📋 Today's Actions</button>
-        <button class="btn ${salesView==='pipeline'?'btn-p':'btn-g'} btn-sm" onclick="salesView='pipeline';pgSales()">🔄 Pipeline</button>
-        <div style="margin-left:auto;display:flex;gap:6px">
-          <button class="btn btn-g btn-sm" onclick="simAngiLead()">🧪 Test Lead</button>
-          <button class="btn btn-p" onclick="showLeadForm()">+ New Lead</button>
-        </div>
-      </div>
-      ${salesView==='today'?renderTodayLeads(leads,now):renderPipe(stages,slbl,g)}`;
-  }catch(e){$('content').innerHTML=`<div class="empty"><div class="et">Error: ${e.message}</div></div>`;}
+    var leads = await dbGet('leads','?order=created_at.desc') || [];
+    var state = uxGetState('sales');
+    var filtered = leads;
+
+    if(state.q){
+      var ql=state.q.toLowerCase();
+      filtered = leads.filter(function(l){
+        return (l.client_name||'').toLowerCase().includes(ql)
+          ||(l.phone||'').includes(ql)||(l.email||'').toLowerCase().includes(ql)
+          ||(l.address||'').toLowerCase().includes(ql)||(l.stage||'').includes(ql);
+      });
+    }
+    if(state.filters&&state.filters.stage){
+      filtered=filtered.filter(function(l){return l.stage===state.filters.stage;});
+    }
+    if(state.sortKey){
+      filtered=filtered.slice().sort(function(a,b){
+        var av=String(a[state.sortKey]||'').toLowerCase();
+        var bv=String(b[state.sortKey]||'').toLowerCase();
+        return state.sortDir==='asc'?av.localeCompare(bv):bv.localeCompare(av);
+      });
+    }
+
+    var stageConfig={
+      new:{label:'New',color:'#6366f1',bg:'#eef2ff'},
+      contacted:{label:'Contacted',color:'var(--blue)',bg:'var(--blue-bg)'},
+      survey_needed:{label:'Survey Needed',color:'var(--amber)',bg:'var(--amber-bg)'},
+      proposal_sent:{label:'Proposal Sent',color:'#0d7a70',bg:'#e8f5f3'},
+      follow_up:{label:'Follow Up',color:'#d97706',bg:'#fffbeb'},
+      signed:{label:'Signed ✓',color:'var(--green)',bg:'#f0fdf4'},
+      lost:{label:'Lost',color:'var(--red)',bg:'var(--red-bg)'},
+    };
+
+    var totalPipeline = leads.filter(function(l){return l.stage!=='lost'&&l.stage!=='signed';})
+      .reduce(function(s,l){return s+(parseFloat(l.estimated_value)||0);},0);
+    var signed = leads.filter(function(l){return l.stage==='signed';}).length;
+    var hot = leads.filter(function(l){return l.stage==='follow_up'||l.stage==='proposal_sent';}).length;
+
+    var html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--blue)">'+fmt$(totalPipeline)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pipeline Value</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">'+hot+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Need Attention</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+signed+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Signed</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id:'sales', title:'Leads', items:filtered, q:state.q||'',
+      sortKey:state.sortKey, sortDir:state.sortDir||'asc', selected:state.selected||{},
+      newLabel:'New Lead', onNew:'showNewLeadForm()',
+      onExport:'uxExportCSV(lsAll(\'leads\'),[{key:\'client_name\',label:\'Name\'},{key:\'phone\',label:\'Phone\'},{key:\'email\',label:\'Email\'},{key:\'stage\',label:\'Stage\'},{key:\'address\",label:\'Address\'}],\'leads.csv\')',
+      filters:[{key:'stage',label:'All Stages',
+        options:Object.entries(stageConfig).map(function(e){return {value:e[0],label:e[1].label};}),
+        selected:state.filters&&state.filters.stage}],
+      emptyIcon:'📞', emptyMsg:leads.length?'No leads match':'No leads yet',
+      emptyAction:{label:'+ Add First Lead',fn:'showNewLeadForm()'},
+      bulkActions:[{label:'Export',fn:'uxExportCSV(lsAll(\'leads\'),[{key:\'client_name\',label:\'Name\'},{key:\'stage\',label:\'Stage\"}],\'leads.csv\')'}],
+      onRowClick:'openLead(\'__ID__\')',
+      columns:[
+        {key:'client_name',label:'Client',flex:2,
+          render:function(l){return '<div style="font-weight:700">'+uxEsc(l.client_name||'Unknown')+'</div>'
+            +(l.address?'<div style="font-size:11px;color:var(--muted)">'+uxEsc(l.address.split(',')[0])+'</div>':'');}},
+        {key:'stage',label:'Stage',flex:1,
+          render:function(l){
+            var cfg=stageConfig[l.stage]||{label:l.stage||'new',color:'var(--muted)',bg:'#f8fafc'};
+            return '<span style="font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px;background:'+cfg.bg+';color:'+cfg.color+'">'+cfg.label+'</span>';}},
+        {key:'phone',label:'Phone',flex:1,hide_mobile:true,
+          render:function(l){return l.phone?'<a href="tel:'+l.phone+'" onclick="event.stopPropagation()" style="color:var(--teal);text-decoration:none;font-size:12px">'+l.phone+'</a>':'—';}},
+        {key:'estimated_value',label:'Value',flex:1,right:true,hide_mobile:true,
+          render:function(l){return l.estimated_value?fmt$(l.estimated_value):'<span style="color:var(--dim)">—</span>';}},
+        {key:'created_at',label:'Added',flex:1,hide_mobile:true,
+          render:function(l){return fmtD(l.created_at);}},
+      ],
+      rowActions:function(l){return[
+        {icon:'📋',label:'Open',fn:'openLead(\''+l.id+'\')'},
+        {icon:'📞',label:'Call',fn:'startLiveCall(\''+l.id+'\')'},
+        {icon:'✕',label:'Delete',fn:'delRecord(\''+l.id+'\',\'leads\',pgSales)'},
+      ];}
+    });
+
+    $('content').innerHTML=html;
+    uxRegister('sales', pgSales);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
+  }
 }
 
-function renderTodayLeads(leads,now){
-  const secs=[
-    {l:'🔴 Call Right Now',c:'var(--red)',items:leads.filter(l=>l.stage==='new'&&now-new Date(l.created_at)<7200000)},
-    {l:'🟠 Overdue Follow-Up',c:'#ea580c',items:leads.filter(l=>l.next_followup&&new Date(l.next_followup)<new Date()&&!['signed','lost'].includes(l.stage))},
-    {l:'🟡 Follow Up Today',c:'var(--amber)',items:leads.filter(l=>l.next_followup&&new Date(l.next_followup).toDateString()===new Date().toDateString())},
-    {l:'❄️ Going Cold (5+ days)',c:'var(--dim)',items:leads.filter(l=>l.last_contact_at&&Math.floor((now-new Date(l.last_contact_at))/86400000)>=5&&!['signed','lost'].includes(l.stage))},
-  ];
-  const html=secs.map(s=>!s.items.length?'':
-    `<div style="margin-bottom:16px"><div style="font-size:10px;font-weight:800;color:${s.c};text-transform:uppercase;letter-spacing:0.1em;margin-bottom:7px">${s.l} (${s.items.length})</div>
-    ${s.items.map(l=>`<div onclick="leadDetail('${l.id}')" style="background:#fff;border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 13px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:11px;box-shadow:var(--shadow)">
-      <div style="flex:1"><div style="font-weight:800;font-size:13px">${l.client_name}</div><div style="font-size:11px;color:var(--muted)">${l.job_type||'General'} · ${l.address||'No address'}</div>
-      ${l.ai_next_action?`<div style="font-size:11px;color:var(--teal);margin-top:2px;font-weight:700">→ ${l.ai_next_action}</div>`:''}
-      <div style="display:flex;gap:5px;margin-top:4px;flex-wrap:wrap">
-        ${l.survey_completed?'<span style="font-size:9px;background:#f0fdf4;color:#16a34a;border:1px solid #16a34a;border-radius:3px;padding:1px 5px;font-weight:700">📝 SURVEY ✓</span>':l.survey_sent_at?'<span style="font-size:9px;background:#fef3c7;color:#d97706;border:1px solid #d97706;border-radius:3px;padding:1px 5px;font-weight:700">📝 SURVEY SENT</span>':''}
-        ${l.deposit_status?'<span style="font-size:9px;background:#f0fdf4;color:#16a34a;border:1px solid #16a34a;border-radius:3px;padding:1px 5px;font-weight:700">💰 DEPOSIT ✓</span>':''}
-        ${l.last_call_at?`<span style="font-size:9px;background:#f0f9ff;color:#1d4ed8;border:1px solid #1d4ed8;border-radius:3px;padding:1px 5px">📞 ${new Date(l.last_call_at).toLocaleDateString()}</span>`:''}
-      </div></div>
-      <div style="text-align:right"><div style="font-weight:800;color:var(--teal)">${fmt$(l.estimated_value)}</div><span class="badge badge-${l.stage}">${l.stage}</span></div>
-    </div>`).join('')}</div>`).join('');
-  return html||`<div class="empty"><div class="ei">✅</div><div class="et">All clear today</div></div>`;
-}
 
-function renderPipe(stages,slbl,g){
-  return `<div class="pipe-wrap">${stages.map(s=>`
-    <div class="pipe-col">
-      <div class="pipe-hd"><span class="pipe-hdt">${slbl[s]}</span><span class="pipe-hdc">${g[s].length}</span></div>
-      <div class="pipe-body">
-        ${g[s].map(l=>`<div class="lcard" onclick="leadDetail('${l.id}')">
-          <div class="lname">${l.client_name}</div>
-          <div class="ltype">${l.job_type||'General'} · ${l.lead_source||''}</div>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:12px;font-weight:800;color:var(--teal)">${fmt$(l.estimated_value)}</span>
-            <span style="font-size:10px;color:var(--dim)">${dAgo(l.created_at)}</span>
-          </div>
-          ${l.address?`<div style="font-size:10px;color:var(--dim);margin-top:3px">📍 ${l.address}</div>`:''}
-          ${l.ai_next_action?`<div style="font-size:10px;color:var(--teal);margin-top:2px;font-weight:700">→ ${l.ai_next_action}</div>`:''}
-        </div>`).join('')}
-        ${!g[s].length?`<div style="text-align:center;padding:14px;font-size:11px;color:var(--dim)">Empty</div>`:''}
-      </div>
-      <div style="text-align:center;font-size:10px;color:var(--dim);padding:4px">${fmt$(g[s].reduce((s,l)=>s+(l.estimated_value||0),0))}</div>
-    </div>`).join('')}</div>`;
-}
-
-// LEAD FORM
-function showLeadForm(l=null){
-  const E=!!l;
-  document.body.insertAdjacentHTML('beforeend',`
-    <div class="ov" id="lf">
-      <div class="modal">
-        <div class="mh"><div><div class="mt">${E?'Edit Lead':'New Lead'}</div><div class="ms">AI generates script & address intel after saving</div></div><button class="mc" onclick="closeOv(this)">×</button></div>
-        <div class="mb">
-          <div class="f2"><div class="fr"><label>Client Name *</label><input id="l-name" value="${l?.client_name||''}" placeholder="John & Sarah Johnson"></div><div class="fr"><label>Phone</label><input id="l-phone" value="${l?.phone||''}" placeholder="(845) 555-0100"></div></div>
-          <div class="f2"><div class="fr"><label>Email</label><input id="l-email" type="email" value="${l?.email||''}" placeholder="john@email.com"></div><div class="fr"><label>Lead Source</label><select id="l-src">${['Angi','Google','Houzz','Referral','Website','Instagram','Cold call','Repeat client','Other'].map(s=>`<option${l?.lead_source===s?' selected':''}>${s}</option>`).join('')}</select></div></div>
-          <div class="fr"><label>Project Address</label><input id="l-addr" value="${l?.address||''}" placeholder="123 Mountain Rd, Woodstock, NY 12498"></div>
-          <div class="f2"><div class="fr"><label>Job Type</label><select id="l-type">${jobTypes().map(t=>`<option${l?.job_type===t?' selected':''}>${t}</option>`).join('')}</select></div><div class="fr"><label>Est. Budget ($)</label><input id="l-val" type="number" value="${l?.estimated_value||''}" placeholder="400000"></div></div>
-          <div class="f2"><div class="fr"><label>Timeline</label><select id="l-tl">${['ASAP','1-3 months','3-6 months','6-12 months','Just exploring','Unknown'].map(t=>`<option${l?.timeline===t?' selected':''}>${t}</option>`).join('')}</select></div><div class="fr"><label>Owns Property?</label><select id="l-owns"><option value="">Unknown</option><option value="yes"${l?.owns_property==='yes'?' selected':''}>Yes — they own it</option><option value="no"${l?.owns_property==='no'?' selected':''}>No</option><option value="land"${l?.owns_property==='land'?' selected':''}>Own land — new build</option></select></div></div>
-          <div class="f2"><div class="fr"><label>Financing</label><select id="l-fin"><option>Cash</option><option>Construction loan</option><option>HELOC</option><option>Unknown</option></select></div><div class="fr"><label>Competing Bids?</label><select id="l-bids"><option>Unknown</option><option>No — only us</option><option>Yes — multiple bids</option></select></div></div>
-          <div class="fr"><label>Notes / Angi Lead Details</label><textarea id="l-notes" style="min-height:75px" placeholder="Paste Angi notes, what they said, any details...">${l?.notes||''}</textarea></div>
-          ${E ? `<div class="fr"><label>Stage</label><select id="l-stage">${['new','contacted','negotiating','lost'].map(s=>`<option value="${s}"${l?.stage===s?' selected':''}>${s}</option>`).join('')}</select><div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:5px;padding:6px 10px;font-size:11px;color:var(--amber);font-weight:600;margin-top:4px">⚠️ Stage is set by workflow actions. Only change to fix a data error. proposal_sent and signed cannot be set manually.</div></div>` : '<input type="hidden" id="l-stage" value="new">'}
-        </div>
-        <div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-g" onclick="saveLead(${E?`'${l.id}'`:null},false)">Save Only</button><button class="btn btn-p" onclick="saveLead(${E?`'${l.id}'`:null},true)">✨ Save + AI Generate</button></div>
-      </div>
-    </div>`);
-}
 
 async function editLeadById(id){
   var leads = await dbGet('leads','?id=eq.'+id);
@@ -3410,6 +3626,15 @@ async function gkExecuteAction(item) {
       toast('Warranty claim reviewed — schedule inspection','ok');
       break;
 
+    case 'brain_risk':
+      // Business Brain flagged risk on a job — review in Job Command Center
+      if(item.reference_id){
+        var jobs = lsAll('jobs');
+        var job = jobs.find(function(j){return j.id===item.reference_id;});
+        if(job){ selectJob(item.reference_id); toast('Opening job for review: '+job.job_name,'ok'); }
+      } else { toast('Open the Jobs tab to review job risks','ok'); }
+      break;
+
     case 'engineering_fix_report':
       // Engineering receives the fix report — acknowledge and begin investigation
       toast('Fix report received — investigating all issue classes before next Executive Testing','ok',5000);
@@ -4008,7 +4233,7 @@ async function endCallAndAnalyze(){
 async function generatePostCallReport(lead,notes,transcript){
   var ctx='CLIENT: '+lead.client_name+'|JOB: '+(lead.job_type||'Unknown')+'|ADDRESS: '+(lead.address||'Unknown')+'|BUDGET: '+fmt$(lead.estimated_value)+'|TIMELINE: '+(lead.timeline||'Unknown')+'|FINANCING: '+(lead.financing||'Unknown')+'|COMPETING BIDS: '+(lead.competing_bids||'Unknown')+'|FINISH ESTIMATES: standard '+fmt$(callIntel.finish_estimates.standard||0)+', mid '+fmt$(callIntel.finish_estimates.mid||0)+', premium '+fmt$(callIntel.finish_estimates.premium||0)+'|PERMIT INTEL: wetlands '+(callIntel.permit_intel.wetlands||'Unknown')+', sewer '+(callIntel.permit_intel.sewer||'Unknown')+', army corps '+(callIntel.permit_intel.army_corps||'Unknown')+', timeline '+(callIntel.permit_intel.timeline||'Unknown')+'|PERMIT NOTES: '+(callIntel.permit_intel.notes||'None')+'\nCALL NOTES: '+(notes||'None entered')+'\nLIVE TRANSCRIPT: '+(transcript||'Not captured');
   try{
-    var r=await ai('Senior sales analyst for Corestone Developers. Analyze this construction sales call. Return ONLY valid JSON.\n'+ctx+'\nReturn: {"sentiment":"hot|warm|cold","sentiment_reason":"one sentence","interest_score":7,"interest_reason":"one sentence","what_client_said":["point1","point2","point3"],"objections_raised":["objection and how handled"],"agreements_made":["what was agreed"],"what_client_must_send":["item they need to send us"],"what_we_must_send":["item we promised to send"],"bid_notes":"if scope discussed full scope notes for bidding else empty string","permit_flags":"concise permit risk or flag summary","timeline_impact":"how this call and permit issues affect project timing","finish_estimate_recommendation":"best estimate range and pricing guidance","follow_up_sequence":[{"day":"Day 1","action":"Send follow-up email","detail":"specific action"},{"day":"Day 3","action":"Second call","detail":"focus on this"},{"day":"Day 7","action":"Check-in","detail":"if no response"},{"day":"Day 14","action":"Final attempt","detail":"last touch"}],"email_subject":"subject line","email_body":"200-word personal follow-up email. Their project. Corestone value props. $5k deposit. Clear next step. Signed Feishy Felberbaum, Corestone Developers, 929-420-1008.","ai_recommendation":"3-4 sentences overall assessment biggest opportunity most important next action in 24 hours direct.","next_stage":"contacted|proposal|negotiating|signed|lost","priority":"urgent|high|normal|low"}','Return ONLY valid JSON. No markdown.',1500);
+    var r=await aiBrain('Senior sales analyst for Corestone Developers. Analyze this construction sales call. Return ONLY valid JSON.\n'+ctx+'\nReturn: {"sentiment":"hot|warm|cold", (AJOB?AJOB.id:null),"sentiment_reason":"one sentence","interest_score":7,"interest_reason":"one sentence","what_client_said":["point1","point2","point3"],"objections_raised":["objection and how handled"],"agreements_made":["what was agreed"],"what_client_must_send":["item they need to send us"],"what_we_must_send":["item we promised to send"],"bid_notes":"if scope discussed full scope notes for bidding else empty string","permit_flags":"concise permit risk or flag summary","timeline_impact":"how this call and permit issues affect project timing","finish_estimate_recommendation":"best estimate range and pricing guidance","follow_up_sequence":[{"day":"Day 1","action":"Send follow-up email","detail":"specific action"},{"day":"Day 3","action":"Second call","detail":"focus on this"},{"day":"Day 7","action":"Check-in","detail":"if no response"},{"day":"Day 14","action":"Final attempt","detail":"last touch"}],"email_subject":"subject line","email_body":"200-word personal follow-up email. Their project. Corestone value props. $5k deposit. Clear next step. Signed Feishy Felberbaum, Corestone Developers, 929-420-1008.","ai_recommendation":"3-4 sentences overall assessment biggest opportunity most important next action in 24 hours direct.","next_stage":"contacted|proposal|negotiating|signed|lost","priority":"urgent|high|normal|low"}','Return ONLY valid JSON. No markdown.',1500);
     var data=safeJSON(r);
     if(lead.id){
       var nextAction=data.follow_up_sequence&&data.follow_up_sequence[0]?data.follow_up_sequence[0].action:'Follow up';
@@ -4765,7 +4990,7 @@ async function aiGenerateSchedule(){
   if(!AJOB){toast('Select a job first','err');return;}
   toast('🤖 AI building full 13-phase schedule...','ok',10000);
   try{
-    var r=await ai(
+    var r=await aiBrain(
       'Generate a full construction schedule for this job:\n'
       +'Job: '+AJOB.job_name+'\n'
       +'Type: '+(AJOB.job_type||'General Construction')+'\n'
@@ -4958,6 +5183,7 @@ async function saveQuickLog(){
 
 // ── REPORTS WITH REAL NUMBERS ─────────────────────────────────
 async function pgReportsV2(){
+  uxLoading('content','Generating reports...');
   try{
     var [leads,jobs,invs,cos,logs,bills,pos,subs]=await Promise.all([
       dbGet('leads','?order=created_at.desc'),
@@ -4969,114 +5195,122 @@ async function pgReportsV2(){
       dbGet('purchase_orders','?order=created_at.desc'),
       dbGet('subcontractors','?order=company_name.asc')
     ]);
-    
-    var revenue=invs.filter(function(i){return i.status==='paid';}).reduce(function(s,i){return s+(i.amount||0);},0);
-    var outstanding=invs.filter(function(i){return i.status!=='paid'&&i.status!=='void';}).reduce(function(s,i){return s+(i.amount||0)-(i.amount_paid||0);},0);
-    var pipeline=leads.filter(function(l){return l.stage!=='lost';}).reduce(function(s,l){return s+(l.estimated_value||0);},0);
-    var convRate=leads.length?Math.round(leads.filter(function(l){return l.stage==='signed';}).length/leads.length*100):0;
-    var activeJobs=jobs.filter(function(j){return j.status==='active';});
-    var avgProgress=activeJobs.length?Math.round(activeJobs.reduce(function(s,j){return s+(j.percent_complete||0);},0)/activeJobs.length):0;
-    var coValue=cos.reduce(function(s,c){return s+(c.cost_impact||0);},0);
+
+    var activeJobs=jobs.filter(function(j){return j.status==='active'||j.status==='in_progress';});
+    var pipeline=leads.filter(function(l){return l.stage!=='lost'&&l.stage!=='signed';})
+      .reduce(function(s,l){return s+(parseFloat(l.estimated_value)||0);},0);
+    var totalContractValue=jobs.reduce(function(s,j){return s+(parseFloat(j.contract_price)||0);},0);
+    var invoicedTotal=invs.reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var collectedTotal=invs.filter(function(i){return i.status==='Paid'||i.status==='paid';})
+      .reduce(function(s,i){return s+(parseFloat(i.amount)||0);},0);
+    var coValue=cos.reduce(function(s,c){return s+(parseFloat(c.cost_impact)||0);},0);
     var billsTotal=bills.reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
-    var billsPaid=bills.filter(function(b){return b.status==='paid';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
-    var billsPending=bills.filter(function(b){return b.status==='pending'||b.status==='Pending';}).reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var billsPaid=bills.filter(function(b){return b.status==='paid'||b.status==='Paid';})
+      .reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
+    var billsPending=bills.filter(function(b){return b.status==='pending'||b.status==='Pending';})
+      .reduce(function(s,b){return s+(parseFloat(b.amount)||0);},0);
     var poTotal=pos.reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
-    var poAuthorized=pos.filter(function(p){return p.status==='Authorized'||p.status==='Delivered';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
-    var poPending=pos.filter(function(p){return p.status==='Pending Authorization';}).reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
-    
-    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+'<div style="font-size:18px;font-weight:800">Reports & Analytics</div>'+'<div style="display:flex;gap:8px">'+'<button onclick="aiWeeklySummary()" style="padding:7px 12px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">AI Summary</button>'+'<button onclick="aiCashFlow()" style="padding:7px 12px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">Cash Flow</button>'+'</div></div>'
-    +'<div style="font-size:18px;font-weight:800;margin-bottom:16px">📊 Reports</div>'
-    
-    // KPI cards
-    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">'
-    +[
-      ['Revenue Collected','💰',fmt$(revenue),'All time','var(--green)'],
-      ['Outstanding AR','⏳',fmt$(outstanding),'Unpaid invoices','var(--amber)'],
-      ['Lead Pipeline','🎯',fmt$(pipeline),'Active leads','var(--teal)'],
-      ['Conversion Rate','📈',convRate+'%','Leads → Signed','var(--blue)'],
-    ].map(function(s){
-      return '<div class="card" style="text-align:center">'
-        +'<div style="font-size:22px;margin-bottom:6px">'+s[1]+'</div>'
-        +'<div style="font-size:20px;font-weight:800;color:'+s[4]+'">'+s[2]+'</div>'
-        +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+s[0]+'</div>'
-        +'<div style="font-size:10px;color:var(--dim)">'+s[3]+'</div></div>';
-    }).join('')
-    +'</div>'
-    
-    // Second row
-    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">'
-    +[
-      ['Active Jobs','🏗️',activeJobs.length,'In progress','var(--teal)'],
-      ['Avg Progress','📐',avgProgress+'%','Across active jobs','var(--teal)'],
-      ['Change Orders','📋',fmt$(coValue),'Total CO value','var(--purple)'],
-      ['Total Logs','📝',logs.length,'Last 30 days','var(--muted)'],
-    ].map(function(s){
-      return '<div class="card" style="text-align:center">'
-        +'<div style="font-size:22px;margin-bottom:6px">'+s[1]+'</div>'
-        +'<div style="font-size:20px;font-weight:800;color:'+s[4]+'">'+s[2]+'</div>'
-        +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+s[0]+'</div>'
-        +'<div style="font-size:10px;color:var(--dim)">'+s[3]+'</div></div>';
-    }).join('')
-    +'</div>'
-    // Financial position row
-    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">'
-    +[
-      ['Bills Pending','🧾',fmt$(billsPending),'Awaiting payment','var(--amber)'],
-      ['Bills Paid','✅',fmt$(billsPaid),'Paid to date','var(--green)'],
-      ['POs Authorized','📦',fmt$(poAuthorized),'Committed materials','var(--blue)'],
-      ['POs Awaiting Auth','⏳',fmt$(poPending),'Pending Gatekeeper','var(--amber)'],
-    ].map(function(s){
-      return '<div class="card" style="text-align:center">'
-        +'<div style="font-size:22px;margin-bottom:6px">'+s[1]+'</div>'
-        +'<div style="font-size:20px;font-weight:800;color:'+s[4]+'">'+s[2]+'</div>'
-        +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+s[0]+'</div>'
-        +'<div style="font-size:10px;color:var(--dim)">'+s[3]+'</div></div>';
-    }).join('')
-    +'</div>'
-    
-    // Pipeline by stage
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'
-    +'<div class="card"><div class="ch"><div class="ct">Lead Pipeline by Stage</div></div>'
-    +['new','contacted','proposal','negotiating','signed'].map(function(stage){
-      var inStage=leads.filter(function(l){return l.stage===stage;});
-      var val=inStage.reduce(function(s,l){return s+(l.estimated_value||0);},0);
-      var pct=pipeline?Math.round(val/pipeline*100):0;
-      return '<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">'
-        +'<span style="font-weight:600;text-transform:capitalize">'+stage+'</span>'
-        +'<span style="color:var(--muted)">'+inStage.length+' leads · '+fmt$(val)+'</span></div>'
-        +'<div style="background:var(--border);border-radius:3px;height:6px">'
-        +'<div style="background:var(--teal);height:100%;border-radius:3px;width:'+pct+'%"></div></div></div>';
-    }).join('')
-    +'</div>'
-    
-    // Active jobs progress
-    +'<div class="card"><div class="ch"><div class="ct">Active Jobs — Progress</div></div>'
-    +(!activeJobs.length?'<div style="color:var(--dim);font-size:12px">No active jobs</div>'
-      :activeJobs.map(function(j){
-        var pct=j.percent_complete||0;
-        var costPct=j.budget?Math.round((j.actual_cost||0)/j.budget*100):0;
-        return '<div style="margin-bottom:12px">'
-          +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">'
-          +'<span style="font-weight:700">'+j.job_name+'</span>'
-          +'<span style="color:var(--teal);font-weight:700">'+pct+'% done</span></div>'
-          +'<div style="background:var(--border);border-radius:3px;height:7px;margin-bottom:3px">'
-          +'<div style="background:var(--teal);height:100%;border-radius:3px;width:'+pct+'%"></div></div>'
-          +'<div style="font-size:10px;color:var(--muted)">Cost: '+fmt$(j.actual_cost||0)+' of '+fmt$(j.budget)+' budget ('+costPct+'%)'+(j.current_phase?' · '+j.current_phase:'')+'</div>'
-          +'</div>';
-      }).join('')
-    )+'</div></div>';
-  }catch(e){$('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';}
+    var poAuthorized=pos.filter(function(p){return p.status==='Authorized'||p.status==='Delivered';})
+      .reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+    var poPending=pos.filter(function(p){return p.status==='Pending Authorization';})
+      .reduce(function(s,p){return s+(parseFloat(p.total)||0);},0);
+
+    function kpiCard(label,value,sub,color){
+      return '<div class="card" style="text-align:center;padding:16px">'
+        +'<div style="font-size:'+(String(value).length>8?'16':'18')+'px;font-weight:800;color:'+(color||'var(--text)')+'">'+value+'</div>'
+        +'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-top:4px">'+label+'</div>'
+        +(sub?'<div style="font-size:10px;color:var(--dim);margin-top:2px">'+sub+'</div>':'')
+        +'</div>';
+    }
+
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+      +'<div><div style="font-size:18px;font-weight:800">📊 Reports</div>'
+      +'<div style="font-size:12px;color:var(--muted)">Company-wide intelligence · '+new Date().toLocaleDateString()+'</div></div>'
+      +'<div style="display:flex;gap:8px">'
+      +'<button onclick="printReport()" style="padding:8px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🖨️ Print</button>'
+      +'<button onclick="aiGenerateExecutiveSummary()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Summary</button>'
+      +'</div></div>'
+      +'<div id="exec-summary-area"></div>'
+      // Jobs & Pipeline
+      +'<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">JOBS & PIPELINE</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">'
+      +kpiCard('Active Jobs',activeJobs.length,'Running now','var(--teal)')
+      +kpiCard('Total Jobs',jobs.length,'All time','var(--text)')
+      +kpiCard('Pipeline',fmt$(pipeline),'Est. value','var(--blue)')
+      +kpiCard('Change Orders',coValue>0?fmt$(coValue):'$0','CO value','var(--amber)')
+      +'</div>'
+      // Revenue
+      +'<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">REVENUE & COLLECTIONS</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">'
+      +kpiCard('Contract Value',fmt$(totalContractValue),'All jobs','var(--text)')
+      +kpiCard('Invoiced',fmt$(invoicedTotal),'To clients','var(--blue)')
+      +kpiCard('Collected',fmt$(collectedTotal),'Cash in','var(--green)')
+      +kpiCard('Outstanding',fmt$(invoicedTotal-collectedTotal),'Owed to us','var(--amber)')
+      +'</div>'
+      // Cost
+      +'<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">COSTS & PURCHASING</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">'
+      +kpiCard('Bills Total',fmt$(billsTotal),'All bills','var(--text)')
+      +kpiCard('Bills Paid',fmt$(billsPaid),'Paid out','var(--green)')
+      +kpiCard('Bills Pending',fmt$(billsPending),'Owed to subs','var(--red)')
+      +kpiCard('POs Authorized',fmt$(poAuthorized),'Committed','var(--blue)')
+      +'</div>'
+      // Activity
+      +'<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">FIELD ACTIVITY</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">'
+      +kpiCard('Total Leads',leads.length,'All time','var(--muted)')
+      +kpiCard('Daily Logs',logs.length,'Last 30','var(--muted)')
+      +kpiCard('Subs on File',subs.length,'','var(--muted)')
+      +kpiCard('COs Processed',cos.length,'All time','var(--muted)')
+      +'</div>'
+      // Job table
+      +'<div style="font-size:12px;font-weight:800;text-transform:uppercase;color:var(--muted);margin-bottom:8px">ACTIVE JOB STATUS</div>'
+      +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px">'
+      +(activeJobs.length?
+        '<div style="display:grid;grid-template-columns:3fr 1fr 1fr 1fr;padding:8px 14px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase">'
+        +'<div>Job</div><div style="text-align:right">Contract</div><div style="text-align:center">Progress</div><div style="text-align:right">Status</div></div>'
+        +activeJobs.map(function(j){
+          var pct=j.progress_pct||0;
+          return '<div style="display:grid;grid-template-columns:3fr 1fr 1fr 1fr;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px">'
+            +'<div><div style="font-weight:700">'+uxEsc(j.job_name)+'</div>'
+            +(j.client_name?'<div style="font-size:10px;color:var(--muted)">'+uxEsc(j.client_name)+'</div>':'')+'</div>'
+            +'<div style="text-align:right;font-weight:700">'+fmt$(j.contract_price||0)+'</div>'
+            +'<div style="text-align:center">'
+            +'<div style="background:var(--border);border-radius:2px;height:4px;margin:6px 0">'
+            +'<div style="background:var(--teal);height:100%;border-radius:2px;width:'+pct+'%"></div></div>'
+            +'<div style="font-size:10px;color:var(--muted)">'+pct+'%</div></div>'
+            +'<div style="text-align:right"><span style="font-size:11px;font-weight:700;color:var(--teal)">'+uxEsc(j.status||'active')+'</span></div>'
+            +'</div>';
+        }).join('')
+        :'<div style="padding:20px;text-align:center;color:var(--dim);font-size:13px">No active jobs</div>')
+      +'</div>';
+
+    $('content').innerHTML=html;
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
+  }
+}
+
+function printReport(){
+  window.print();
+}
+
+async function aiGenerateExecutiveSummary(){
+  var el=document.getElementById('exec-summary-area');
+  if(el) el.innerHTML='<div class="ai-box" style="margin-bottom:16px"><div class="ai-lbl">🤖 Generating executive summary...</div></div>';
+  try{
+    var briefing = await buildBrainBriefing();
+    if(el) el.innerHTML='<div class="ai-box" style="margin-bottom:16px"><div class="ai-lbl">🤖 Business Brain — Executive Summary</div>'
+      +'<div style="font-size:13px;line-height:1.8;color:var(--text)">'+briefing.briefing+'</div>'
+      +(briefing.risks.length?'<div style="margin-top:10px;font-size:12px;color:var(--amber)">⚠️ '+briefing.risks.join(' · ')+'</div>':'')
+      +'</div>';
+  }catch(e){
+    if(el) el.innerHTML='';
+    toast('Summary failed: '+e.message,'err');
+  }
 }
 
 
-
-
-// ═══════════════════════════════════════════════════════════════
-// PAGE UPGRADES — Every page fully featured
-// ═══════════════════════════════════════════════════════════════
-
-// ── JOBS PAGE — full detail cards with progress, budget, phase, actions ──
-var JOBS_VIEW = 'grid'; // 'grid' or 'list'
 
 async function pgJobsV2(){
   uxLoading('content','Loading jobs...');
@@ -5305,159 +5539,89 @@ async function quickAIJobNote(jobId){
 
 // ── SUBS PAGE — full featured with COI tracking, rating, AI ──
 async function pgSubsV2(){
-  var subs = await dbGet('subcontractors','?order=company_name.asc');
-  var now = Date.now();
-  
-  function daysUntil(dateStr){
-    if(!dateStr)return null;
-    return Math.floor((new Date(dateStr)-now)/86400000);
-  }
-  function certStatus(expiry){
-    var d = daysUntil(expiry);
-    if(d===null)return {color:'var(--muted)',bg:'#f0f2f5',label:'Not uploaded'};
-    if(d<0)return {color:'var(--red)',bg:'var(--red-bg)',label:'EXPIRED'};
-    if(d<30)return {color:'var(--amber)',bg:'var(--amber-bg)',label:'Expires in '+d+'d'};
-    return {color:'var(--green)',bg:'var(--green-bg)',label:'Valid · '+fmtD(expiry)};
-  }
-  function certBadge(label,status){
-    return '<span style="font-size:10px;font-weight:700;background:'+status.bg+';color:'+status.color+';padding:2px 8px;border-radius:10px">'+label+': '+status.label+'</span>';
-  }
+  uxLoading('content','Loading subcontractors...');
+  try{
+    var subs = await dbGet('subcontractors','?order=company_name.asc') || [];
+    var state = uxGetState('subs');
+    var now = Date.now();
 
-  var expiring = subs.filter(function(s){
-    var d = daysUntil(s.coi_expiry);
-    return d!==null && d<30;
-  });
-  var missingDocs = subs.filter(function(s){
-    return !s.coi_url||!s.w9_url;
-  });
+    function certStatus(dateStr){
+      if(!dateStr) return {label:'Not Set',color:'var(--dim)',bg:'#f8fafc',days:null};
+      var days=Math.floor((new Date(dateStr)-now)/86400000);
+      if(days<0) return {label:'EXPIRED',color:'var(--red)',bg:'var(--red-bg)',days:days};
+      if(days<30) return {label:'Expires '+days+'d',color:'var(--amber)',bg:'var(--amber-bg)',days:days};
+      return {label:'Valid '+days+'d',color:'var(--green)',bg:'#f0fdf4',days:days};
+    }
 
-  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Subcontractors & Vendors</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+subs.length+' subs'
-    +(expiring.length?' · <span style="color:var(--red);font-weight:700">'+expiring.length+' COI expiring</span>':'')
-    +(missingDocs.length?' · <span style="color:var(--amber);font-weight:700">'+missingDocs.length+' missing docs</span>':'')
-    +'</div></div>'
-    +'<button class="btn btn-p" onclick="openSubForm(null)">+ Add Sub / Vendor</button></div>';
+    var filtered = subs;
+    if(state.q){
+      var ql=state.q.toLowerCase();
+      filtered=subs.filter(function(s){
+        return (s.company_name||'').toLowerCase().includes(ql)
+          ||(s.trade||'').toLowerCase().includes(ql)
+          ||(s.contact_name||'').toLowerCase().includes(ql);
+      });
+    }
+    if(state.filters&&state.filters.trade){
+      filtered=filtered.filter(function(s){return s.trade===state.filters.trade;});
+    }
 
-  if(expiring.length){
-    html += '<div style="background:var(--red-bg);border:1.5px solid var(--red);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">'
-      +'<div style="font-size:20px">🚨</div>'
-      +'<div><div style="font-weight:800;font-size:13px;color:var(--red)">'+expiring.length+' COI Certificate'+(expiring.length>1?'s':'')+' Expiring Within 30 Days</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+expiring.map(function(s){return s.company_name+'('+daysUntil(s.coi_expiry)+'d)';}).join(', ')+'</div></div></div>';
-  }
+    var trades=['all'].concat([...new Set(subs.map(function(s){return s.trade||'General';}))]);
+    var expiredCount=subs.filter(function(s){
+      var coi=certStatus(s.coi_expiry);
+      var wc=certStatus(s.workers_comp_expiry);
+      return coi.days!==null&&coi.days<0||wc.days!==null&&wc.days<0;
+    }).length;
 
-  if(!subs.length){
-    html += '<div class="card" style="text-align:center;padding:48px">'
-      +'<div style="font-size:48px;margin-bottom:12px">🤝</div>'
-      +'<div style="font-size:16px;font-weight:700;margin-bottom:8px">No subcontractors yet</div>'
-      +'<div style="font-size:13px;color:var(--muted);margin-bottom:20px">Add your subs with their trade, contact info, COI and W9</div>'
-      +'<button class="btn btn-p btn-lg" onclick="openSubForm(null)">+ Add First Sub</button></div>';
-  } else {
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
-    subs.forEach(function(s){
-      var coi = certStatus(s.coi_expiry);
-      var wc = certStatus(s.workers_comp_expiry);
-      var borderColor = coi.color==='var(--red)'||wc.color==='var(--red)'?'var(--red)':coi.color==='var(--amber)'||wc.color==='var(--amber)'?'var(--amber)':'var(--green)';
-      html += '<div class="card" style="border-left:4px solid '+borderColor+';cursor:pointer" onclick="openSubForm(\''+s.id+'\')">'
-        +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
-        +'<div><div style="font-size:15px;font-weight:800">'+s.company_name+'</div>'
-        +'<div style="font-size:12px;color:var(--muted)">'+( s.trade||'General')+'</div></div>'
-        +(s.rating?'<div style="font-size:13px">'+('⭐'.repeat(Math.min(5,Math.round(s.rating))))+'</div>':'')
-        +'</div>'
-        +'<div style="font-size:12px;margin-bottom:10px">'
-        +(s.contact_name?'<div style="margin-bottom:3px">👤 '+s.contact_name+'</div>':'')
-        +(s.phone?'<div style="margin-bottom:3px">📞 <a href="tel:'+s.phone+'" onclick="event.stopPropagation()" style="color:var(--teal);text-decoration:none">'+s.phone+'</a></div>':'')
-        +(s.cell?'<div style="margin-bottom:3px">📱 '+s.cell+'</div>':'')
-        +(s.email?'<div style="margin-bottom:3px">✉️ <a href="mailto:'+s.email+'" onclick="event.stopPropagation()" style="color:var(--teal);text-decoration:none">'+s.email+'</a></div>':'')
-        +'</div>'
-        +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">'
-        +certBadge('COI',coi)
-        +certBadge('W/C',wc)
-        +(s.w9_url?'<span style="font-size:10px;font-weight:700;background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:10px">W9 ✓</span>':'<span style="font-size:10px;font-weight:700;background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:10px">W9 missing</span>')
-        +(s.hold_harmless_expiry?certBadge('HHA',certStatus(s.hold_harmless_expiry)):'')
-        +'</div>'
-        +(s.notes?'<div style="font-size:11px;color:var(--dim);border-top:1px solid var(--border);padding-top:8px">'+s.notes.substring(0,80)+'</div>':'')
-        +'<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px">'+'<button onclick="aiCheckSubCerts(\''+s.id+'\')" style="font-size:11px;padding:4px 10px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:4px;cursor:pointer;font-family:inherit;font-weight:700" onclick="event.stopPropagation()">🤖 Check Certs</button>'+'<button onclick="event.stopPropagation();openSubForm(\''+s.id+'\')" style="font-size:11px;padding:4px 10px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer;font-family:inherit;font-weight:700">✏️ Edit</button>'+'<button onclick="event.stopPropagation();deleteSub(\''+s.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕ Remove</button>'+'</div>'+'</div>';
+    var html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--teal)">'+subs.length+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total Subs</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--red)">'+expiredCount+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Cert Issues</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--blue)">'+trades.length-1+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Trades</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id:'subs', title:'Subcontractors', items:filtered, q:state.q||'',
+      sortKey:state.sortKey, sortDir:state.sortDir||'asc', selected:state.selected||{},
+      newLabel:'Add Sub', onNew:'openSubForm()',
+      onExport:'uxExportCSV(lsAll(\'subcontractors\'),[{key:\'company_name\',label:\'Company\'},{key:\'trade\',label:\'Trade\'},{key:\'contact_name\',label:\'Contact\'},{key:\'phone\",label:\'Phone\'},{key:\'coi_expiry\',label:\'COI Expiry\'},{key:\'workers_comp_expiry\",label:\'WC Expiry\"}],\'subs.csv\')',
+      filters:[{key:'trade',label:'All Trades',
+        options:trades.filter(function(t){return t!=='all';}).map(function(t){return {value:t,label:t};}),
+        selected:state.filters&&state.filters.trade}],
+      emptyIcon:'👷', emptyMsg:subs.length?'No subs match':'No subcontractors yet',
+      emptyAction:{label:'+ Add First Sub',fn:'openSubForm()'},
+      onRowClick:'openSubForm(\'__ID__\')',
+      columns:[
+        {key:'company_name',label:'Company',flex:2,
+          render:function(s){return '<div style="font-weight:700">'+uxEsc(s.company_name)+'</div>'
+            +(s.trade?'<div style="font-size:11px;color:var(--teal)">'+uxEsc(s.trade)+'</div>':'');}},
+        {key:'contact_name',label:'Contact',flex:1,hide_mobile:true,
+          render:function(s){return uxEsc(s.contact_name||'—');}},
+        {key:'coi_expiry',label:'COI',flex:1,
+          render:function(s){
+            var st=certStatus(s.coi_expiry);
+            return '<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+st.bg+';color:'+st.color+'">'+st.label+'</span>';}},
+        {key:'workers_comp_expiry',label:'W.Comp',flex:1,hide_mobile:true,
+          render:function(s){
+            var st=certStatus(s.workers_comp_expiry);
+            return '<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+st.bg+';color:'+st.color+'">'+st.label+'</span>';}},
+        {key:'rating',label:'Rating',flex:1,hide_mobile:true,
+          render:function(s){return s.rating?'⭐'.repeat(Math.min(5,Math.round(s.rating))):'—';}},
+      ],
+      rowActions:function(s){return[
+        {icon:'✏️',label:'Edit',fn:'openSubForm(\''+s.id+'\')'},
+        {icon:'🔍',label:'Check Certs',fn:'aiCheckSubCerts(\''+s.id+'\')'},
+        {icon:'✕',label:'Remove',fn:'deleteSub(\''+s.id+'\')'},
+      ];}
     });
-    html += '</div>';
+
+    $('content').innerHTML=html;
+    uxRegister('subs', pgSubsV2);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
   }
-  try{document.getElementById('content').innerHTML = html;}catch(e){logErr('pgSubsV2',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgSubsV2()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
 
-function openSubForm(id){
-  dbGet('subcontractors', id?'?id=eq.'+id:'?limit=0').then(function(results){
-    var s = id&&results[0] ? results[0] : {};
-    var trades = ['Electrical','Plumbing','HVAC','Framing','Drywall','Painting','Flooring','Tile','Roofing','Excavation','Concrete','Masonry','Insulation','Windows & Doors','Cabinets','Countertops','Landscaping','Cleaning','General Labor','Other'];
-    var el = document.createElement('div');
-    el.className='ov';el.id='sub-form-modal';el.style.zIndex='900';
-    el.style.alignItems='flex-start';el.style.padding='12px';
-    el.innerHTML='<div class="modal" style="max-width:700px;margin:auto;max-height:none">'
-      +'<div class="mh" style="background:var(--navy);border-radius:12px 12px 0 0;padding:16px 22px">'
-      +'<div><div style="font-size:17px;font-weight:800;color:#fff">'+(id?'Edit Subcontractor':'Add Subcontractor / Vendor')+'</div></div>'
-      +'<button class="mc" style="background:rgba(255,255,255,0.2);border:none;color:#fff" onclick="closeOv(this)">x</button></div>'
-      +'<div class="mb" style="padding:20px 22px;max-height:70vh;overflow-y:auto">'
-      
-      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid var(--border)">Contact Information</div>'
-      +'<div class="fr"><label>Company Name *</label><input id="sub-co" value="'+(s.company_name||'')+'" placeholder="Company name"></div>'
-      +'<div class="f2">'
-      +'<div><label>Primary Contact</label><input id="sub-contact" value="'+(s.contact_name||'')+'" placeholder="First & Last name"></div>'
-      +'<div><label>Trade / Division</label><select id="sub-trade">'+trades.map(function(t){return'<option'+(t===(s.trade||'')?' selected':'')+'>'+t+'</option>';}).join('')+'</select></div>'
-      +'</div>'
-      +'<div class="f2">'
-      +'<div><label>Business Phone</label><input id="sub-phone" value="'+(s.phone||'')+'" placeholder="(xxx) xxx-xxxx"></div>'
-      +'<div><label>Cell Phone</label><input id="sub-cell" value="'+(s.cell||'')+'" placeholder="(xxx) xxx-xxxx"></div>'
-      +'</div>'
-      +'<div class="f2">'
-      +'<div><label>Email</label><input id="sub-email" type="email" value="'+(s.email||'')+'" placeholder="email@company.com"></div>'
-      +'<div><label>Rating (1-5)</label><input id="sub-rating" type="number" value="'+(s.rating||'')+'" min="1" max="5" placeholder="1-5"></div>'
-      +'</div>'
-      +'<div class="fr"><label>Street Address</label><input id="sub-addr" value="'+(s.address||'')+'" placeholder="Street address"></div>'
-      +'<div class="f2">'
-      +'<div><label>City</label><input id="sub-city" value="'+(s.city||'')+'" placeholder="City"></div>'
-      +'<div><label>State / Zip</label><input id="sub-zip" value="'+(s.zip||'')+'" placeholder="NY 12401"></div>'
-      +'</div>'
-      
-      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin:18px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--border)">Certificates & Insurance</div>'
-      
-      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
-      +'<div style="background:#f6f8fa;border-radius:var(--radius);padding:12px">'
-      +'<div style="font-size:12px;font-weight:700;margin-bottom:8px">📋 General Liability COI</div>'
-      +'<div class="fr"><label>File URL</label><input id="sub-coi-url" value="'+(s.coi_url||'')+'" placeholder="Google Drive or Dropbox link"></div>'
-      +'<div class="fr"><label>Expiration Date</label><input id="sub-coi-exp" type="date" value="'+(s.coi_expiry?s.coi_expiry.split("T")[0]:"")+'"></div>'
-      +'</div>'
-      +'<div style="background:#f6f8fa;border-radius:var(--radius);padding:12px">'
-      +'<div style="font-size:12px;font-weight:700;margin-bottom:8px">🦺 Workers Comp</div>'
-      +'<div class="fr"><label>File URL</label><input id="sub-wc-url" value="'+(s.workers_comp_url||'')+'" placeholder="Google Drive or Dropbox link"></div>'
-      +'<div class="fr"><label>Expiration Date</label><input id="sub-wc-exp" type="date" value="'+(s.workers_comp_expiry?s.workers_comp_expiry.split("T")[0]:"")+'"></div>'
-      +'</div>'
-      +'<div style="background:#f6f8fa;border-radius:var(--radius);padding:12px">'
-      +'<div style="font-size:12px;font-weight:700;margin-bottom:8px">🤝 Hold Harmless Agreement</div>'
-      +'<div class="fr"><label>File URL</label><input id="sub-hha-url" value="'+(s.hold_harmless_url||'')+'" placeholder="Google Drive or Dropbox link"></div>'
-      +'<div class="fr"><label>Expiration Date</label><input id="sub-hha-exp" type="date" value="'+(s.hold_harmless_expiry?s.hold_harmless_expiry.split("T")[0]:"")+'"></div>'
-      +'</div>'
-      +'<div style="background:#f6f8fa;border-radius:var(--radius);padding:12px">'
-      +'<div style="font-size:12px;font-weight:700;margin-bottom:8px">📄 W-9 Form</div>'
-      +'<div class="fr"><label>File URL</label><input id="sub-w9-url" value="'+(s.w9_url||'')+'" placeholder="Google Drive or Dropbox link"></div>'
-      +'<div style="font-size:11px;color:var(--muted)">Required for payments over $600/year</div>'
-      +'</div>'
-      +'</div>'
-      
-      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin:18px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--border)">Additional</div>'
-      +'<div class="fr"><label>Notes</label><textarea id="sub-notes" placeholder="Work quality, reliability, special skills, payment terms...">'+(s.notes||'')+'</textarea></div>'
-      +'<div class="f2">'
-      +'<div><label>Default Payment Email</label><input id="sub-pay-email" value="'+(s.payment_email||'')+'" placeholder="payment@company.com"></div>'
-      +'<div><label>Activation Status</label><select id="sub-status"><option'+((!s.status||s.status==="active")?" selected":"")+' value="active">Active</option><option'+(s.status==="inactive"?" selected":"")+' value="inactive">Inactive</option><option'+(s.status==="hold"?" selected":"")+' value="hold">On Hold</option></select></div>'
-      +'</div>'
-      
-      +'</div>'
-      +'<div class="mf">'
-      +(id?'<button class="btn btn-red btn-sm" onclick="deleteSub(\''+id+'\')">Delete</button>':'')
-      +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-      +'<button class="btn btn-p" onclick="saveSubProfile('+(id?'\''+id+'\'':'null')+')">Save Subcontractor</button>'
-      +'</div></div>';
-    document.body.appendChild(el);
-  });
-}
+
 
 async function saveSubProfile(id){
   var data = {
@@ -5633,7 +5797,7 @@ async function aiDraftMessage(){
   toast('🤖 AI drafting message...','ok',5000);
   try{
     var context=AJOB?'Job: '+AJOB.job_name+', Client: '+AJOB.client_name+', Phase: '+(AJOB.current_phase||'Unknown')+', Progress: '+(AJOB.percent_complete||0)+'%':'General Corestone Developers message';
-    var r=await ai('Draft a professional construction update message for Feishy Felberbaum, Corestone Developers.\nContext: '+context+'\nWrite a clear, warm, professional 2-3 sentence update message. Can be customized before sending.','Professional construction communicator. Brief, warm, clear.');
+    var r=await aiBrain('Draft a professional construction update message for Feishy Felberbaum, (AJOB?AJOB.id:null), Corestone Developers.\nContext: '+context+'\nWrite a clear, warm, professional 2-3 sentence update message. Can be customized before sending.','Professional construction communicator. Brief, warm, clear.');
     var ta=$('msg-body');
     if(ta)ta.value=r;
     toast('✅ AI draft ready — edit as needed then send','ok');
@@ -5817,7 +5981,7 @@ async function aiGeneratePunchList(){
   try{
     var sched=await dbGet('schedule','?job_id=eq.'+AJOB.id);
     var ctx='Job: '+AJOB.job_name+'\nType: '+(AJOB.job_type||'General')+'\nPhase: '+(AJOB.current_phase||'Unknown')+'\nProgress: '+(AJOB.progress_pct||0)+'%\nSchedule phases: '+(sched.map(function(s){return s.phase_name+' ('+s.percent_complete+'%)';}).join(', ')||'None');
-    var r=await ai('Generate a realistic punch list for this construction job.\n'+ctx+'\nReturn ONLY JSON array: [{"title":"item","priority":"urgent|high|normal|low","description":"detail","assigned_to":"trade"}]\nInclude 8-12 items covering final inspections, touch-ups, cleaning, documentation, and client walkthrough items.','Return ONLY valid JSON array.',1000);
+    var r=await aiBrain('Generate a realistic punch list for this construction job.\n'+ctx+'\nReturn ONLY JSON array: [{"title":"item", (AJOB?AJOB.id:null),"priority":"urgent|high|normal|low","description":"detail","assigned_to":"trade"}]\nInclude 8-12 items covering final inspections, touch-ups, cleaning, documentation, and client walkthrough items.','Return ONLY valid JSON array.',1000);
     var items=safeJSON(r);
     if(!Array.isArray(items)){toast('AI failed — try again','err');return;}
     for(var i=0;i<items.length;i++){
@@ -5977,7 +6141,7 @@ async function aiAnswerRFI(id){
   var rfi=rfis[0];if(!rfi)return;
   toast('🤖 AI drafting answer...','ok',8000);
   try{
-    var r=await ai('Draft a professional answer to this construction RFI.\nProject: '+(AJOB?AJOB.job_name:'Unknown')+'RFI: '+rfi.title+'\nQuestion: '+rfi.question+'\nProvide a clear, technically accurate answer that a licensed GC would give. 2-4 sentences. Be specific.','Construction RFI response expert. Be technically precise.');
+    var r=await aiBrain('Draft a professional answer to this construction RFI.\nProject: '+(AJOB?AJOB.job_name:'Unknown')+'RFI: '+rfi.title+'\nQuestion: '+rfi.question+'\nProvide a clear, technically accurate answer that a licensed GC would give. 2-4 sentences. Be specific.','Construction RFI response expert. Be technically precise.');
     await dbUpd('rfis',id,{answer:r,status:'answered',answered_at:new Date().toISOString(),answered_by:'AI — Review before sending'});
     await auditLog('rfis',id,'rfi_answered','open','answered',true,'AI drafted answer for RFI');
     toast('AI answer drafted — review before sending ✅','ok');
@@ -7513,7 +7677,7 @@ async function aiGenerateSpecs(){
   if(!AJOB){toast('Select a job first','err');return;}
   toast('🤖 AI generating specifications...','ok',10000);
   try{
-    var r=await ai('Generate construction specifications for this project.\nJob: '+AJOB.job_name+'Type: '+(AJOB.job_type||'General Renovation')+'\nBudget: '+fmt$(AJOB.contract_price||AJOB.budget||0)+'\nReturn ONLY JSON array of specs covering key trades:\n[{"title":"spec title","section":"Section Name","description":"detailed requirement","material_standard":"standard if applicable"}]\nInclude 10-15 specs covering the most critical elements for this job type.','Construction specifications expert. Return ONLY valid JSON array.',1500);
+    var r=await aiBrain('Generate construction specifications for this project.\nJob: '+AJOB.job_name+'Type: '+(AJOB.job_type||'General Renovation')+'\nBudget: '+fmt$(AJOB.contract_price||AJOB.budget||0)+'\nReturn ONLY JSON array of specs covering key trades:\n[{"title":"spec title","section":"Section Name","description":"detailed requirement","material_standard":"standard if applicable"}]\nInclude 10-15 specs covering the most critical elements for this job type.','Construction specifications expert. Return ONLY valid JSON array.',1500);
     var items=safeJSON(r);
     if(!Array.isArray(items)){toast('AI failed — try again','err');return;}
     for(var i=0;i<items.length;i++){
@@ -7629,7 +7793,7 @@ async function aiRespond_warranty(id){
   var job=jobs[0]||{};
   toast('🤖 Drafting warranty response...','ok',8000);
   try{
-    var r=await ai('Draft a professional warranty response for this construction claim.\nCompany: Corestone Developers (Feishy Felberbaum)\nJob: '+(job.job_name||'Project')+'Client: '+(claim.client_name||'Client')+'\nIssue: '+claim.issue+'\nDescription: '+(claim.description||'')+'\nWrite a professional, empathetic response that: acknowledges the issue, confirms we take it seriously, states we will investigate within 48 hours, and commits to a resolution timeline. Sign as Feishy Felberbaum, Corestone Developers. 3-4 sentences.','Professional construction warranty response writer. Empathetic and professional.');
+    var r=await aiBrain('Draft a professional warranty response for this construction claim.\nCompany: Corestone Developers (Feishy Felberbaum)\nJob: '+(job.job_name||'Project')+'Client: '+(claim.client_name||'Client')+'\nIssue: '+claim.issue+'\nDescription: '+(claim.description||'')+'\nWrite a professional, (AJOB?AJOB.id:null), empathetic response that: acknowledges the issue, confirms we take it seriously, states we will investigate within 48 hours, and commits to a resolution timeline. Sign as Feishy Felberbaum, Corestone Developers. 3-4 sentences.','Professional construction warranty response writer. Empathetic and professional.');
     await dbUpd('warranty_claims',id,{ai_response:r,response_drafted_at:new Date().toISOString()});
     toast('Response drafted ✅ — review before sending','ok');
     pgWarranty();
@@ -12052,6 +12216,20 @@ function renderNotificationList() {
 // END NOTIFICATION CENTER
 
 
+
+
+// ── ARCHIVE (SOFT DELETE) ─────────────────────────────────────────────────
+async function archiveRecord(table, id, refreshFn){
+  if(!confirm('Archive this record? It will be hidden but not deleted.')) return;
+  try{
+    await dbUpd(table, id, {archived: true, archived_at: new Date().toISOString()});
+    await auditLog(table, id, 'archived', null, 'archived', false, 'Record archived');
+    toast('Archived','ok');
+    if(refreshFn && typeof refreshFn === 'function') refreshFn();
+  }catch(e){
+    toast('Archive failed: '+e.message,'err');
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EXECUTIVE ISSUE MANAGEMENT SYSTEM (EIS) — OS #9
