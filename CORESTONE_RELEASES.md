@@ -264,3 +264,26 @@ Versions are never deleted.
 - Job Settings removed from Jobs list header
 - All CSS transitions removed from job cards
 
+
+---
+
+## CS v2.6 — OS #9 FINAL DIRECTIVE
+**Date:** July 6, 2026
+**Type:** Major System Release
+
+### Core Additions
+- Business Brain: full-job-context AI, 10 AI Employees, risk monitor
+- Job Command Center: money + schedule + attention + messages on one screen  
+- UX Engine: search/sort/filter/export on Sales, Subs, Reports
+- 9 cascade triggers all wired end to end
+- 10 Gatekeeper executor cases operational
+- 74/76 internal QA checks passed
+- archiveRecord() soft delete function
+
+### Directive Compliance
+- Req 9 (AI uses full job context): ✅ Built
+- Req 10 (Business Brain): ✅ Phase 1 built
+- Req 11 (Manual + AI parity): ✅ Both routes through same cascade
+- Req 3 (Enterprise UX): 🟡 6 of 37 pages upgraded (prioritized by usage)
+- Req 5 (Every row opens): ✅ Jobs, Bills, Invoices, POs, Leads, Subs
+
