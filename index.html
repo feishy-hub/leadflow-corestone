@@ -379,7 +379,7 @@ tr:hover td{background:#fafbfc}
 
 <script>
 // ── AUTO VERSION CHECK — clears old data when code updates ──
-var CS_VERSION = '2.6';
+var CS_VERSION = '2.7';
 var stored_version = localStorage.getItem('cs_version');
 if(stored_version !== CS_VERSION) {
   // New version — clear old seed data that may have broken formats
@@ -3660,6 +3660,15 @@ async function gkExecuteAction(item) {
       toast('Change order execution acknowledged — coordinate with trades','ok');
       break;
 
+    case 'co_client_response':
+      // Client responded to CO — update status
+      if(item.reference_id){
+        var coRows = lsAll('change_orders');
+        var theCO = coRows.find(function(c){return c.id===item.reference_id;});
+        if(theCO) toast('Follow up on CO: '+theCO.title+' — client signature still needed','ok',4000);
+      }
+      break;
+
     case 'deposit_invoice_review':
       // Deposit invoice approved — mark as ready to send
       if(item.reference_id){
@@ -4949,42 +4958,166 @@ function showEstimateModal(est){
 
 // ── ENHANCED SCHEDULE WITH AI AUTO-TASKS ─────────────────────
 async function pgSchedV2(){
-  var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=start_date.asc':'?order=start_date.asc';
+  uxLoading('content','Loading schedule...');
   try{
-    var phases=await dbGet('schedule',jf);
+    var jf=AJOB?'?job_id=eq.'+AJOB.id+'&order=sequence_order.asc':'?order=start_date.asc';
+    var phases=await dbGet('schedule',jf)||[];
+    var subs=await dbGet('subcontractors','?order=company_name.asc')||[];
     var job=AJOB;
-    $('content').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+
+    var completedPhases=phases.filter(function(p){return (p.percent_complete||0)>=100;}).length;
+    var avgProgress=phases.length?Math.round(phases.reduce(function(s,p){return s+(p.percent_complete||0);},0)/phases.length):0;
+
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
       +'<div><div style="font-size:18px;font-weight:800">📅 Schedule</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+(job?job.job_name+' · Current phase: '+job.current_phase:'Select a job from the sidebar')+' </div></div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+(job?job.job_name:'All jobs')+' · '+completedPhases+'/'+phases.length+' phases complete · '+avgProgress+'% overall</div></div>'
       +'<div style="display:flex;gap:8px">'
-      +(job?'<button class="btn btn-g btn-sm" onclick="aiGenerateSchedule()">🤖 AI Build Schedule</button>':'')
-      +'<button class="btn btn-p" onclick="showPhaseForm()">+ Add Phase</button></div></div>'
-      +(!AJOB?'<div class="empty"><div class="ei">📅</div><div class="et">Select a job first</div></div>':
-        !phases.length?'<div class="empty"><div class="ei">📅</div><div class="et">No schedule yet</div>'
-          +'<div style="color:var(--dim);font-size:12px;margin:8px 0 16px">Click AI Build Schedule to auto-generate all 13 phases with estimated dates</div>'
-          +'<button class="btn btn-p" onclick="aiGenerateSchedule()">🤖 AI Build Full Schedule</button></div>'
-        :phases.map(function(p){
-          var pct=p.percent_complete||0;
-          var status=pct===100?'Complete':pct>0?'In Progress':'Not Started';
-          var statusColor=pct===100?'var(--green)':pct>0?'var(--amber)':'var(--dim)';
-          return '<div class="card" style="margin-bottom:8px">'
-            +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-            +'<div><div style="font-size:14px;font-weight:800">'+p.phase_name+'</div>'
-            +'<div style="font-size:11px;color:var(--muted)">'+fmtD(p.start_date)+' → '+fmtD(p.end_date)+'</div></div>'
-            +'<div style="display:flex;align-items:center;gap:10px">'
-            +'<span style="font-size:12px;font-weight:700;color:'+statusColor+'">'+status+'</span>'
-            +'<span style="font-size:13px;font-weight:800;color:var(--teal)">'+pct+'%</span>'
-            +'</div></div>'
-            +'<div style="background:var(--border);border-radius:4px;height:5px;margin:10px 0">'
-            +'<div style="background:var(--teal);height:100%;border-radius:4px;width:'+pct+'%;transition:width 0.3s"></div></div>'
-            +(p.notes?'<div style="font-size:12px;color:var(--muted)">'+p.notes+'</div>':'')
-            +'<div style="display:flex;gap:6px;margin-top:8px">'
-            +'<button class="btn btn-g btn-sm" onclick="showUpdatePhase(\''+p.id+'\','+pct+',\'Phase\')">✏️ Update %</button>'+'<button onclick="deletePhase(\''+p.id+'\',\'Phase\')" style="padding:5px 10px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:var(--radius-sm);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✕ Delete</button>'
-            +'</div></div>';
-        }).join('')
-      );
-  }catch(e){$('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';}
+      +(job?'<button onclick="aiGenerateSchedule()" style="padding:8px 14px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Generate</button>':'')
+      +'<button onclick="showAddPhaseForm()" class="btn btn-p">+ Add Phase</button>'
+      +'</div></div>';
+
+    if(phases.length){
+      // Overall progress bar
+      html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px">'
+        +'<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:700;color:var(--muted)">Overall Progress</span><span style="font-size:14px;font-weight:800;color:var(--teal)">'+avgProgress+'%</span></div>'
+        +'<div style="background:var(--border);border-radius:4px;height:8px"><div style="background:var(--teal);height:100%;border-radius:4px;width:'+avgProgress+'%;transition:width 0.4s"></div></div>'
+        +'</div>';
+
+      phases.forEach(function(p,idx){
+        var pct=p.percent_complete||0;
+        var barColor=pct>=100?'var(--green)':pct>=50?'var(--teal)':'var(--blue)';
+        var statusLabel=pct>=100?'Complete':pct>0?'In Progress':'Not Started';
+        var statusColor=pct>=100?'var(--green)':pct>0?'var(--teal)':'var(--muted)';
+        var sub=subs.find(function(s){return s.id===p.sub_id;});
+
+        html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:4px solid '+barColor+'">'
+          +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">'
+          +'<div><div style="font-size:14px;font-weight:800;color:var(--text)">'+uxEsc(p.phase_name||'Phase '+( idx+1))+'</div>'
+          +'<div style="display:flex;gap:8px;margin-top:4px;align-items:center">'
+          +'<span style="font-size:11px;font-weight:800;color:'+statusColor+'">'+statusLabel+'</span>'
+          +(p.start_date?'<span style="font-size:11px;color:var(--dim)">'+fmtD(p.start_date)+' – '+(p.end_date?fmtD(p.end_date):'TBD')+'</span>':'')
+          +(sub?'<span style="font-size:11px;color:var(--blue)">👷 '+uxEsc(sub.company_name)+'</span>':'')
+          +'</div>'
+          +(p.notes?'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+uxEsc(p.notes)+'</div>':'')
+          +'</div>'
+          +'<div style="display:flex;gap:6px">'
+          +'<button data-pid="'+p.id+'" data-pct="'+pct+'" data-pname="'+uxEsc(p.phase_name||'')+'" onclick="showUpdatePhase(this.dataset.pid,parseInt(this.dataset.pct),this.dataset.pname)" class="btn btn-g btn-sm">✏️ Update %</button>'
+          +'<button data-pid="'+p.id+'" onclick="editPhase(this.dataset.pid)" class="btn btn-g btn-sm">⚙️</button>'
+          +'<button data-pid="'+p.id+'" data-pname="'+uxEsc(p.phase_name||'Phase')+'" onclick="deletePhase(this.dataset.pid,this.dataset.pname)" style="padding:5px 10px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:var(--radius-sm);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✕</button>'
+          +'</div></div>'
+          +'<div style="display:flex;align-items:center;gap:10px">'
+          +'<div style="flex:1;background:var(--border);border-radius:4px;height:6px">'
+          +'<div style="background:'+barColor+';height:100%;border-radius:4px;width:'+pct+'%;transition:width 0.3s"></div></div>'
+          +'<span style="font-size:13px;font-weight:800;color:'+barColor+';min-width:36px">'+pct+'%</span>'
+          +'</div></div>';
+      });
+    } else {
+      html+='<div class="empty"><div class="ei">📅</div><div class="et">No schedule yet</div>'
+        +'<div style="color:var(--dim);font-size:12px;margin:8px 0 16px">Add phases manually or let AI generate a complete schedule from job type</div>'
+        +(job?'<button onclick="aiGenerateSchedule()" class="btn btn-p">🤖 AI Generate Schedule</button>':'')
+        +'</div>';
+    }
+
+    $('content').innerHTML=html;
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
+  }
 }
+
+function showAddPhaseForm(){
+  var subs = lsAll('subcontractors') || [];
+  var standardPhases=['Pre-Construction','Demo & Prep','Foundation','Framing','Roofing','Rough Electrical','Rough Plumbing','HVAC Rough','Insulation','Drywall','Tile & Flooring','Finish Carpentry','Cabinetry','Paint','Finish Electrical','Finish Plumbing','Fixtures','Punch List','Final Inspection','Closeout'];
+  var el=document.createElement('div');el.className='ov';el.id='add-phase-ov';
+  el.innerHTML='<div class="modal"><div class="mh"><div class="mt">Add Schedule Phase</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Phase Name *</label>'
+    +'<select id="ap-name" onchange="if(this.value===\'custom\')document.getElementById(\'ap-custom\').style.display=\'block\';else document.getElementById(\'ap-custom\').style.display=\'none\'">'
+    +standardPhases.map(function(p){return '<option>'+p+'</option>';}).join('')
+    +'<option value="custom">Custom Phase...</option>'
+    +'</select>'
+    +'<input id="ap-custom" placeholder="Custom phase name..." style="display:none;margin-top:6px"></div>'
+    +'<div class="f2"><div class="fr"><label>Start Date</label><input id="ap-start" type="date" value="'+new Date().toISOString().split('T')[0]+'"></div>'
+    +'<div class="fr"><label>Est. End Date</label><input id="ap-end" type="date"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Assign Sub</label>'
+    +'<select id="ap-sub"><option value="">-- No sub assigned --</option>'
+    +subs.map(function(s){return '<option value="'+s.id+'">'+uxEsc(s.company_name)+(s.trade?' ('+s.trade+')':'')+'</option>';}).join('')
+    +'</select></div>'
+    +'<div class="fr"><label>Est. Duration (days)</label><input id="ap-dur" type="number" placeholder="7"></div></div>'
+    +'<div class="fr"><label>Notes</label><textarea id="ap-notes" style="min-height:60px" placeholder="Crew requirements, dependencies, permit needed..."></textarea></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
+    +'<button class="btn btn-p" onclick="saveNewPhase()">Add Phase</button></div></div>';
+  document.body.appendChild(el);
+}
+
+async function saveNewPhase(){
+  var nameEl = document.getElementById('ap-name');
+  var customEl = document.getElementById('ap-custom');
+  var phaseName = nameEl&&nameEl.value==='custom' ? (customEl?customEl.value.trim():'') : (nameEl?nameEl.value:'');
+  if(!phaseName){toast('Phase name required','err');return;}
+  if(!AJOB){toast('Select a job first','err');return;}
+
+  var existingPhases = await dbGet('schedule','?job_id=eq.'+AJOB.id+'&order=sequence_order.asc') || [];
+  var seqOrder = existingPhases.length + 1;
+
+  var phase = {
+    job_id: AJOB.id,
+    phase_name: phaseName,
+    start_date: (document.getElementById('ap-start')||{}).value || null,
+    end_date: (document.getElementById('ap-end')||{}).value || null,
+    sub_id: (document.getElementById('ap-sub')||{}).value || null,
+    estimated_days: parseInt((document.getElementById('ap-dur')||{}).value) || null,
+    notes: (document.getElementById('ap-notes')||{}).value || '',
+    percent_complete: 0,
+    sequence_order: seqOrder,
+    status: 'not_started'
+  };
+
+  await dbIns('schedule', phase);
+  await auditLog('schedule', null, 'phase_added', null, phaseName, false, 'Phase added to schedule: '+phaseName);
+  toast('Phase added ✅','ok');
+  var ov = document.getElementById('add-phase-ov');
+  if(ov) ov.remove();
+  pgSchedV2();
+}
+
+async function editPhase(phaseId){
+  var phases = await dbGet('schedule','?id=eq.'+phaseId);
+  var phase = phases[0]; if(!phase){toast('Phase not found','err');return;}
+  var subs = lsAll('subcontractors')||[];
+
+  var el=document.createElement('div');el.className='ov';el.id='edit-phase-ov';
+  el.innerHTML='<div class="modal"><div class="mh"><div class="mt">Edit Phase</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Phase Name</label><input id="ep-name" value="'+uxEsc(phase.phase_name||'')+'"></div>'
+    +'<div class="f2"><div class="fr"><label>Start Date</label><input id="ep-start" type="date" value="'+(phase.start_date||'')+'"></div>'
+    +'<div class="fr"><label>End Date</label><input id="ep-end" type="date" value="'+(phase.end_date||'')+'"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Assigned Sub</label>'
+    +'<select id="ep-sub"><option value="">-- None --</option>'
+    +subs.map(function(s){return '<option value="'+s.id+'"'+(s.id===phase.sub_id?' selected':'')+'>'+uxEsc(s.company_name)+'</option>';}).join('')
+    +'</select></div>'
+    +'<div class="fr"><label>Progress %</label><input id="ep-pct" type="number" min="0" max="100" value="'+(phase.percent_complete||0)+'"></div></div>'
+    +'<div class="fr"><label>Notes</label><textarea id="ep-notes" style="min-height:60px">'+uxEsc(phase.notes||'')+'</textarea></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
+    +'<button class="btn btn-p" onclick="saveEditPhase(\''+phaseId+'\')">Save Changes</button></div></div>';
+  document.body.appendChild(el);
+}
+
+async function saveEditPhase(phaseId){
+  var upd={
+    phase_name:(document.getElementById('ep-name')||{}).value||'',
+    start_date:(document.getElementById('ep-start')||{}).value||null,
+    end_date:(document.getElementById('ep-end')||{}).value||null,
+    sub_id:(document.getElementById('ep-sub')||{}).value||null,
+    percent_complete:Math.min(100,Math.max(0,parseInt((document.getElementById('ep-pct')||{}).value)||0)),
+    notes:(document.getElementById('ep-notes')||{}).value||'',
+    updated_at:new Date().toISOString()
+  };
+  await dbUpd('schedule',phaseId,upd);
+  await auditLog('schedule',phaseId,'phase_edited',null,upd.percent_complete+'%',false,'Phase edited: '+upd.phase_name);
+  toast('Phase saved ✅','ok');
+  var ov=document.getElementById('edit-phase-ov');if(ov)ov.remove();
+  pgSchedV2();
+}
+
+
 
 async function aiGenerateSchedule(){
   if(!AJOB){toast('Select a job first','err');return;}
@@ -7190,41 +7323,104 @@ setTimeout(async function(){
   }catch(e){console.warn('Startup AI check:',e);}
 },3000);
 async function pgProposals(){
-  // REQ-041 — proposals now live in proposals table (not estimates)
-  var props=await dbGet('proposals','?order=created_at.desc');
-  var jobs=await dbGet('jobs','?order=job_name.asc');
-  var leads=await dbGet('leads','?order=created_at.desc');
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Proposals & Contracts</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+props.length+' proposals sent</div></div>'
-    +'<button onclick="goTab(\'estimates\')" style="padding:8px 16px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New Proposal from Estimate</button></div>'
-    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">'
-    +['Sent','Viewed','Signed','Approved'].map(function(s){
-      var cnt=props.filter(function(p){return p.status===s;}).length;
-      var colors={'Sent':'var(--muted)','Viewed':'var(--blue)','Signed':'var(--amber)','Approved':'var(--green)'};
-      return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:22px;font-weight:800;color:'+colors[s]+'">'+cnt+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;text-transform:uppercase">'+s+'</div></div>';
-    }).join('')+'</div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
-    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:1fr 150px 120px 100px 100px">CLIENT / JOB<span>AMOUNT</span><span>SENT</span><span>STATUS</span><span></span></div>';
-  if(!props.length){
-    html+='<div style="padding:40px;text-align:center"><div style="font-size:40px;margin-bottom:12px">📄</div>'
-      +'<div style="font-weight:700;color:var(--muted);margin-bottom:6px">No proposals sent yet</div>'
-      +'<div style="color:var(--dim);font-size:13px;margin-bottom:16px">Build an estimate, then click Send as Proposal</div>'
-      +'<button onclick="goTab(\'estimates\')" style="padding:10px 20px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Go to Estimates →</button></div>';
-  } else {
-    props.forEach(function(p,i){
-      var job=jobs.find(function(j){return j.id===p.job_id;})||{job_name:'—'};
-      var sColors={'Sent':'var(--muted)','Viewed':'var(--blue)','Signed':'var(--amber)','Approved':'var(--green)'};
-      // A-4 FIX: use proposal total_price, open openProposal(), show correct status colors
-      var tot = p.total_price || 0;
-      var statusMap = {'draft':'#6b7280','sent':'#1d4ed8','viewed':'#d97706','signed':'#16a34a','recalled':'#dc2626','expired':'#9ca3af'};
-      var sc = statusMap[(p.status||'draft').toLowerCase()] || '#6b7280';
-      html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 150px 120px 120px 130px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+';cursor:pointer" onclick="openProposal(\''+p.id+'\')" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\''+(i%2===0?'var(--card)':'var(--bg)')+'\'">'        +'<div><div style="font-weight:700;font-size:13px">'+p.client_name+'</div><div style="font-size:11px;color:var(--muted)">'+(p.address||job.job_name||'—')+' · v'+(p.version||1)+'</div></div>'        +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(tot)+'</div>'        +'<div style="font-size:12px;color:var(--muted)">'+(p.sent_at?new Date(p.sent_at).toLocaleDateString():'Draft')+'</div>'        +'<div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:'+sc+'20;color:'+sc+';border:1px solid '+sc+'">'+(p.status||'draft').toUpperCase()+'</span></div>'        +'<div style="display:flex;gap:4px" onclick="event.stopPropagation()">'        +'<button onclick="openProposal(\''+p.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--teal);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit">Open</button>'        +'<button onclick="sendProposalToClient(\''+p.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer;font-family:inherit">Send</button>'        +'<button onclick="previewProposal(\''+p.id+'\')" style="font-size:11px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-family:inherit">Preview</button>'        +'</div></div>';
+  uxLoading('content','Loading proposals...');
+  try{
+    var props=await dbGet('proposals','?order=created_at.desc')||[];
+    var jobs=await dbGet('jobs','?order=job_name.asc')||[];
+    var leads=await dbGet('leads','?order=created_at.desc')||[];
+    var state=uxGetState('proposals');
+
+    var filtered=props;
+    if(state.q){
+      var ql=state.q.toLowerCase();
+      filtered=props.filter(function(p){
+        var j=jobs.find(function(j){return j.id===p.job_id;})||{};
+        return (p.client_name||'').toLowerCase().includes(ql)
+          ||(p.title||'').toLowerCase().includes(ql)
+          ||(p.status||'').toLowerCase().includes(ql)
+          ||(j.job_name||'').toLowerCase().includes(ql);
+      });
+    }
+    if(state.filters&&state.filters.status){
+      filtered=filtered.filter(function(p){return p.status===state.filters.status;});
+    }
+
+    var totalValue=props.reduce(function(s,p){return s+(parseFloat(p.total_price)||0);},0);
+    var sentCount=props.filter(function(p){return p.status==='sent';}).length;
+    var signedCount=props.filter(function(p){return p.status==='signed';}).length;
+
+    var propStatusOpts={
+      draft:   {label:'Draft',   color:'var(--muted)', bg:'#f8fafc'},
+      sent:    {label:'Sent',    color:'var(--blue)',  bg:'var(--blue-bg)'},
+      viewed:  {label:'Viewed',  color:'var(--teal)',  bg:'#e8f5f3'},
+      signed:  {label:'Signed ✓',color:'var(--green)', bg:'#f0fdf4'},
+      expired: {label:'Expired', color:'var(--dim)',   bg:'#f8fafc'},
+      rejected:{label:'Rejected',color:'var(--red)',   bg:'var(--red-bg)'},
+    };
+
+    var html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--text)">'+fmt$(totalValue)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total Value</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--blue)">'+sentCount+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Awaiting Signature</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+signedCount+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Signed</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id:'proposals', title:'Proposals', items:filtered, q:state.q||'',
+      sortKey:state.sortKey, sortDir:state.sortDir||'asc', selected:state.selected||{},
+      newLabel:'New Proposal', onNew:'goTab(\'estimates\')',
+      onExport:'uxExportCSV(lsAll(\'proposals\'),[{key:\'client_name\',label:\'Client\'},{key:\'title\',label:\'Title\'},{key:\'total_price\',label:\'Value\'},{key:\'status\',label:\'Status\'},{key:\'created_at\',label:\'Date\'}],\'proposals.csv\')',
+      filters:[{key:'status',label:'All Statuses',
+        options:Object.keys(propStatusOpts).map(function(k){return {value:k,label:propStatusOpts[k].label};}),
+        selected:state.filters&&state.filters.status}],
+      emptyIcon:'📄', emptyMsg:props.length?'No proposals match':'No proposals yet',
+      emptyAction:{label:'Create from Estimate →',fn:'goTab(\'estimates\')'},
+      onRowClick:'openProposal(\'__ID__\')',
+      columns:[
+        {key:'client_name',label:'Client',flex:2,
+          render:function(p){
+            var j=jobs.find(function(j){return j.id===p.job_id;})||{};
+            return '<div style="font-weight:700">'+uxEsc(p.client_name||'Client')+'</div>'
+              +(j.job_name?'<div style="font-size:11px;color:var(--muted)">'+uxEsc(j.job_name)+'</div>':'');}},
+        {key:'total_price',label:'Value',flex:1,right:true,
+          render:function(p){return '<div style="font-weight:800">'+fmt$(p.total_price||0)+'</div>';}},
+        {key:'status',label:'Status',flex:1,
+          render:function(p){
+            var cfg=propStatusOpts[p.status]||{label:p.status||'draft',color:'var(--muted)',bg:'#f8fafc'};
+            return '<span style="font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px;background:'+cfg.bg+';color:'+cfg.color+'">'+cfg.label+'</span>';}},
+        {key:'created_at',label:'Date',flex:1,hide_mobile:true,
+          render:function(p){return fmtD(p.created_at);}},
+      ],
+      rowActions:function(p){return[
+        {icon:'👁️',label:'Open',fn:'openProposal(\''+p.id+'\')'},
+        {icon:'📤',label:'Send',fn:'sendProposalToClient(\''+p.id+'\')'},
+        {icon:'📋',label:'Duplicate',fn:'duplicateProposal(\''+p.id+'\')'},
+        {icon:'✕',label:'Delete',fn:'delRecord(\''+p.id+'\',\'proposals\',pgProposals)'},
+      ];}
     });
+
+    $('content').innerHTML=html;
+    uxRegister('proposals', pgProposals);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
   }
-  html+='</div>';
-  try{$('content').innerHTML=html;}catch(e){logErr('pgProposals',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgProposals()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
 }
+
+async function duplicateProposal(id){
+  var props=await dbGet('proposals','?id=eq.'+id);
+  var prop=props[0]; if(!prop){toast('Not found','err');return;}
+  var newProp=Object.assign({},prop);
+  delete newProp.id; delete newProp.created_at; delete newProp.updated_at;
+  delete newProp.signed_at; delete newProp.magic_link; delete newProp.signature_data;
+  newProp.status='draft';
+  newProp.title=(prop.title||'Proposal')+' (Copy)';
+  await dbIns('proposals',newProp);
+  await auditLog('proposals',null,'proposal_duplicated',null,'draft',false,'Proposal duplicated');
+  toast('Proposal duplicated ✅','ok');
+  pgProposals();
+}
+
+
+
 async function pgBids(){
   var bids=await dbGet('bids','?order=created_at.desc');
   var jobs=await dbGet('jobs','?order=job_name.asc');
@@ -7845,111 +8041,114 @@ async function aiWarrantyAnalysis(){
 // ═══════════════════════════════════════════════════════
 
 async function pgEstimates(){
-  var jobs = await dbGet('jobs','?order=created_at.desc');
-  var ests = await dbGet('estimates','?order=created_at.desc');
-  
-  var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">'
-    + '<div><div style="font-size:20px;font-weight:800">Estimates</div>'
-    + '<div style="font-size:12px;color:var(--muted)">'+ests.length+' estimates · Click to open</div></div>'
-    + '<button class="btn btn-p" onclick="newEstimate()">+ New Estimate</button></div>';
+  uxLoading('content','Loading estimates...');
+  try{
+    var ests = await dbGet('estimates','?order=created_at.desc') || [];
+    var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+    var state = uxGetState('estimates');
 
-  if(ests.length === 0){
-    html += '<div class="card" style="text-align:center;padding:48px">'
-      + '<div style="font-size:48px;margin-bottom:12px">📋</div>'
-      + '<div style="font-size:16px;font-weight:700;margin-bottom:8px">No estimates yet</div>'
-      + '<div style="font-size:13px;color:var(--muted);margin-bottom:20px">Create your first estimate — add line items, set markup, preview and send to client</div>'
-      + '<button class="btn btn-p btn-lg" onclick="newEstimate()">+ Create First Estimate</button></div>';
-  } else {
-    html += '<div style="display:flex;flex-direction:column;gap:10px">';
-    ests.forEach(function(est){
-      var job = jobs.find(function(j){return j.id===est.job_id;});
-      var estLines = est.line_items||[]; if(typeof estLines==='string'){try{estLines=JSON.parse(estLines);}catch(e){estLines=[];}} var total = calcEstTotal(estLines);
-      var statusColor = est.status==='sent'?'var(--blue)':est.status==='approved'?'var(--green)':est.status==='draft'?'var(--amber)':'var(--muted)';
-      var statusBg = est.status==='sent'?'var(--blue-bg)':est.status==='approved'?'var(--green-bg)':est.status==='draft'?'var(--amber-bg)':'#f6f8fa';
-      html += '<div class="card" style="cursor:pointer" onclick="openEstimate(\''+est.id+'\')">'
-        + '<div style="display:flex;align-items:center;justify-content:space-between">'
-        + '<div style="flex:1">'
-        + '<div style="font-size:15px;font-weight:800;margin-bottom:3px">'+est.title+'</div>'
-        + '<div style="font-size:12px;color:var(--muted)">'+(job?job.job_name:'No job linked')+' · '+fmtD(est.created_at)+'</div>'
-        + '</div>'
-        + '<div style="display:flex;align-items:center;gap:14px">'
-        + '<div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--teal)">'+fmt$(total.grand_total)+'</div>'
-        + '<div style="font-size:10px;color:var(--muted)">'+lineCount(est.line_items)+' line items</div></div>'
-        + '<span style="background:'+statusBg+';color:'+statusColor+';padding:4px 10px;border-radius:20px;font-size:10px;font-weight:800;text-transform:uppercase">'+( est.status||'draft')+'</span>'
-        + '</div></div></div>';
+    var filtered = ests;
+    if(state.q){
+      var ql=state.q.toLowerCase();
+      filtered=ests.filter(function(e){
+        var j=jobs.find(function(j){return j.id===e.job_id;})||{};
+        return (e.title||'').toLowerCase().includes(ql)
+          ||(e.client_name||'').toLowerCase().includes(ql)
+          ||(j.job_name||'').toLowerCase().includes(ql);
+      });
+    }
+    if(state.filters&&state.filters.status){
+      filtered=filtered.filter(function(e){return (e.status||'draft')===state.filters.status;});
+    }
+    if(state.sortKey){
+      filtered=filtered.slice().sort(function(a,b){
+        var av=state.sortKey==='total'?(parseFloat(a.total)||0):String(a[state.sortKey]||'').toLowerCase();
+        var bv=state.sortKey==='total'?(parseFloat(b.total)||0):String(b[state.sortKey]||'').toLowerCase();
+        if(typeof av==='number') return state.sortDir==='asc'?av-bv:bv-av;
+        return state.sortDir==='asc'?av.localeCompare(bv):bv.localeCompare(av);
+      });
+    }
+
+    var totalValue = ests.reduce(function(s,e){return s+(parseFloat(e.total)||0);},0);
+    var sentCount = ests.filter(function(e){return e.status==='sent';}).length;
+    var approvedCount = ests.filter(function(e){return e.status==='approved'||e.status==='signed';}).length;
+
+    var estStatusOpts = {
+      draft:    {label:'Draft',    color:'var(--muted)', bg:'#f8fafc'},
+      sent:     {label:'Sent',     color:'var(--blue)',  bg:'var(--blue-bg)'},
+      approved: {label:'Approved', color:'var(--green)', bg:'#f0fdf4'},
+      signed:   {label:'Signed',   color:'var(--green)', bg:'#f0fdf4'},
+      rejected: {label:'Rejected', color:'var(--red)',   bg:'var(--red-bg)'},
+      expired:  {label:'Expired',  color:'var(--dim)',   bg:'#f8fafc'},
+    };
+
+    var html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--text)">'+fmt$(totalValue)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total Value</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--blue)">'+sentCount+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Sent to Clients</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+approvedCount+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Approved</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id:'estimates', title:'Estimates', items:filtered, q:state.q||'',
+      sortKey:state.sortKey, sortDir:state.sortDir||'asc', selected:state.selected||{},
+      newLabel:'New Estimate', onNew:'newEstimate()',
+      onExport:'uxExportCSV(lsAll(\'estimates\'),[{key:\'title\',label:\'Title\'},{key:\'client_name\',label:\'Client\'},{key:\'total\',label:\'Total\'},{key:\'status\',label:\'Status\'},{key:\'created_at\',label:\'Date\'}],\'estimates.csv\')',
+      filters:[{key:'status',label:'All Statuses',
+        options:Object.entries(estStatusOpts).map(function(e){return {value:e[0],label:e[1].label};}),
+        selected:state.filters&&state.filters.status}],
+      emptyIcon:'📐', emptyMsg:ests.length?'No estimates match':'No estimates yet',
+      emptyAction:{label:'+ Create First Estimate',fn:'newEstimate()'},
+      bulkActions:[{label:'Export',fn:'uxExportCSV(lsAll(\'estimates\'),[{key:\'title\',label:\'Title\'},{key:\'total\',label:\'Total\'},{key:\'status\',label:\'Status\'}],\'estimates.csv\')'}],
+      onRowClick:'openEstimate(\'__ID__\')',
+      columns:[
+        {key:'title',label:'Estimate',flex:3,
+          render:function(e){
+            var j=jobs.find(function(j){return j.id===e.job_id;})||{};
+            return '<div style="font-weight:700">'+uxEsc(e.title||'Untitled')+'</div>'
+              +'<div style="font-size:11px;color:var(--muted)">'+uxEsc(e.client_name||j.job_name||'—')+'</div>';}},
+        {key:'total',label:'Total',flex:1,right:true,
+          render:function(e){return '<div style="font-weight:800">'+fmt$(e.total||0)+'</div>';}},
+        {key:'status',label:'Status',flex:1,
+          render:function(e){return uxStatusBadge(e.status||'draft',estStatusOpts,'updateEstimateStatus',e.id);}},
+        {key:'created_at',label:'Created',flex:1,hide_mobile:true,
+          render:function(e){return fmtD(e.created_at);}},
+      ],
+      rowActions:function(e){return[
+        {icon:'✏️',label:'Open',fn:'openEstimate(\''+e.id+'\')'},
+        {icon:'📋',label:'Duplicate',fn:'duplicateEstimate(\''+e.id+'\')'},
+        {icon:'📄',label:'→ Proposal',fn:'createProposalFromEstimate(\''+e.id+'\')'},
+        {icon:'✕',label:'Delete',fn:'delRecord(\''+e.id+'\',\'estimates\',pgEstimates)'},
+      ];}
     });
-    html += '</div>';
+
+    $('content').innerHTML=html;
+    uxRegister('estimates', pgEstimates);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
   }
-
-  document.getElementById('content').innerHTML = html;
 }
 
-// REQ-003 | REQ-036 | DEC-011 — NY law: tax on materials ONLY
-// Labor: 0% | Subs: 0% | Permits: 0% | Materials: 8%
-// LOCKED — do not change without Owner approval
-function calcEstTotal(lines, jobId) {
-  var subtotal_materials = 0, subtotal_labor = 0, subtotal_subs = 0,
-      subtotal_permits = 0, subtotal_other = 0;
-  lines.forEach(function(l) {
-    var cost = (l.qty || 0) * (l.unit_cost || 0);
-    var markup = cost * ((l.markup_pct || 0) / 100);
-    var line_total = cost + markup;
-    var type = (l.cost_type || l.type || l.category || 'other').toLowerCase(); // cost_type is the saved field from addLine form
-    if (type === 'material' || type === 'materials') subtotal_materials += line_total;
-    else if (type === 'labor') subtotal_labor += line_total;
-    else if (type === 'sub' || type === 'subcontractor' || type === 'subs') subtotal_subs += line_total;
-    else if (type === 'permit' || type === 'permits') subtotal_permits += line_total;
-    else subtotal_other += line_total;
-  });
-  var subtotal = subtotal_materials + subtotal_labor + subtotal_subs + subtotal_permits + subtotal_other;
-  var taxRate = (typeof getTaxRate === 'function') ? getTaxRate(jobId) : 0.08; // NY law: materials only (job override aware)
-  var feeRate = (typeof getContractorFee === 'function') ? getContractorFee(jobId) : 0.20;
-  var tax = subtotal_materials * taxRate;
-  var contractor_fee = subtotal * feeRate;
-  var grand_total = subtotal + tax + contractor_fee;
-  return {
-    subtotal: subtotal,
-    subtotal_materials: subtotal_materials,
-    subtotal_labor: subtotal_labor,
-    subtotal_subs: subtotal_subs,
-    subtotal_permits: subtotal_permits,
-    subtotal_other: subtotal_other,
-    tax: tax,
-    tax_rate: 0.08,
-    tax_basis: 'materials_only',
-    contractor_fee: contractor_fee,
-    contractor_fee_pct: 0.20,
-    grand_total: grand_total
-  };
+async function updateEstimateStatus(estId, newStatus){
+  await dbUpd('estimates',estId,{status:newStatus,updated_at:new Date().toISOString()});
+  await auditLog('estimates',estId,'status_changed',null,newStatus,false,'Estimate status: '+newStatus);
+  toast('Estimate marked '+newStatus,'ok');
+  pgEstimates();
 }
 
-function newEstimate(){
-  var jobs_promise = dbGet('jobs','?order=job_name.asc');
-  jobs_promise.then(function(jobs){
-    var jobOpts = '<option value="">No job — standalone estimate</option>'
-      + jobs.map(function(j){return '<option value="'+j.id+'">'+j.job_name+' — '+j.client_name+'</option>';}).join('');
-    
-    var el = document.createElement('div');
-    el.className = 'ov';el.id = 'new-est-modal';el.style.zIndex='900';
-    el.innerHTML = '<div class="modal">'
-      + '<div class="mh"><div><div class="mt">New Estimate</div><div class="ms">Fill in basics — then add line items</div></div>'
-      + '<button class="mc" onclick="closeOv(this)">x</button></div>'
-      + '<div class="mb">'
-      + '<div class="fr"><label>Estimate Title *</label><input id="est-title" placeholder="e.g. Kitchen Remodel — Full Scope"></div>'
-      + '<div class="fr"><label>Link to Job</label><select id="est-job">'+jobOpts+'</select></div>'
-      + '<div class="f2">'
-      + '<div><label>Client Name *</label><input id="est-client" placeholder="Full name"></div>'
-      + '<div><label>Client Email</label><input id="est-email" type="email" placeholder="email@example.com"></div>'
-      + '</div>'
-      + '<div class="fr"><label>Notes / Scope Summary</label><textarea id="est-notes" placeholder="Brief description of work scope..."></textarea></div>'
-      + '<div class="fr"><label>Default Markup %</label><input id="est-markup" type="number" value="20" min="0" max="100" style="width:120px"></div>'
-      + '</div>'
-      + '<div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
-      + '<button class="btn btn-p" onclick="createEstimate()">Create + Add Line Items →</button></div>'
-      + '</div>';
-    document.body.appendChild(el);
-  });
+async function duplicateEstimate(id){
+  var ests=await dbGet('estimates','?id=eq.'+id);
+  var est=ests[0]; if(!est){toast('Not found','err');return;}
+  var newEst=Object.assign({},est);
+  delete newEst.id; delete newEst.created_at; delete newEst.updated_at;
+  newEst.title=est.title+' (Copy)';
+  newEst.status='draft';
+  await dbIns('estimates',newEst);
+  await auditLog('estimates',null,'estimate_duplicated',null,'draft',false,'Estimate duplicated: '+est.title);
+  toast('Estimate duplicated ✅','ok');
+  pgEstimates();
 }
+
+
 
 async function createEstimate(){
   var title = document.getElementById('est-title').value.trim();
@@ -9081,73 +9280,134 @@ async function voicePO(){
   if($('po-form-wrap'))$('po-form-wrap').style.display='block';
 }
 async function pgCOs(){
-  var cos=await dbGet('change_orders','?order=created_at.desc');
-  var jobs=await dbGet('jobs','?order=job_name.asc');
-  var approved=cos.filter(function(c){return c.status==='Approved';});
-  var pending=cos.filter(function(c){return c.status==='Pending Client'||c.status==='Pending Internal';});
-  var totalApproved=approved.reduce(function(s,c){return s+parseFloat(c.cost_impact||0);},0);
-  var statuses=['Draft','Pending Internal','Pending Client','Approved','Rejected'];
-  var sColors={'Draft':'var(--muted)','Pending Internal':'var(--amber)','Pending Client':'var(--blue)','Approved':'var(--green)','Rejected':'var(--red)'};
-  var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:20px;font-weight:800">Change Orders</div>'
-    +'<div style="font-size:12px;color:var(--muted)">'+cos.length+' total &nbsp;·&nbsp; '+pending.length+' pending &nbsp;·&nbsp; '+fmt$(totalApproved)+' approved</div></div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="voiceCO()" style="padding:8px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🎙️ Voice CO</button>'
-    +'<button onclick="showNewCOForm()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">+ New CO</button></div></div>'
-    +'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">'
-    +statuses.map(function(s){var n=cos.filter(function(c){return c.status===s;}).length;return '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center"><div style="font-size:20px;font-weight:800;color:'+sColors[s]+'">'+n+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-top:2px">'+s+'</div></div>';}).join('')+'</div>'
-    +'<div id="co-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Change Order<button onclick="$(\'co-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Job</div>'
-    +'<select id="nco-job" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
-    +'<option value="">Select job...</option>'+jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('')+'</select></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Reason</div>'
-    +'<select id="nco-reason" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)">'
-    +'<option>Client Request</option><option>Unforeseen Condition</option><option>Design Change</option><option>Owner Directed</option><option>Error & Omission</option></select></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">CO Title</div>'
-    +'<div style="display:flex;gap:6px"><input id="nco-title" placeholder="e.g. Island extension from 8ft to 10ft" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
-    +'<button onclick="micFillField(\'nco-title\',\'Describe this change order in one line\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer">🎙️</button></div></div>'
-    +'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Description</div>'
-    +'<div style="display:flex;gap:6px"><textarea id="nco-desc" rows="2" placeholder="Full scope of change..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;resize:none"></textarea>'
-    +'<button onclick="micFillField(\'nco-desc\',\'Describe the full scope of this change order\')" style="padding:8px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;align-self:flex-start">🎙️</button></div></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Labor $</div><input id="nco-labor" type="number" placeholder="0" oninput="calcCOTotal()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Materials $</div><input id="nco-mat" type="number" placeholder="0" oninput="calcCOTotal()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Markup %</div><input id="nco-markup" type="number" value="20" oninput="calcCOTotal()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Sched. Days</div><input id="nco-sched" type="number" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"></div></div>'
-    +'<div id="nco-total" style="padding:10px;background:var(--teal-light);border-radius:var(--radius-sm);font-weight:800;color:var(--teal);margin-bottom:14px">Total Client Price: $0.00</div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="saveNewCO(\'Draft\')" style="padding:9px 18px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Save Draft</button>'
-    +'<button onclick="saveNewCO(\'Pending Internal\')" style="padding:9px 18px;background:var(--amber);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">Submit for Approval</button>'
-    +'<button onclick="aiDraftCO()" style="padding:9px 18px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit">🤖 AI Draft</button>'
-    +'</div></div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">'
-    +'<div style="padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:grid;grid-template-columns:80px 1fr 140px 120px 120px 100px">CO# &nbsp; JOB<span>TITLE / REASON</span><span>BREAKDOWN</span><span>TOTAL</span><span>STATUS</span><span>ACTIONS</span></div>';
-  if(!cos.length){html+='<div style="padding:40px;text-align:center;color:var(--dim);font-size:14px">No change orders yet. Create your first one above.</div>';}
-  else{cos.forEach(function(co,i){
-    var job=jobs.find(function(j){return j.id===co.job_id;})||{job_name:'—'};
-    var labor=parseFloat(co.labor_cost||0),mat=parseFloat(co.material_cost||0),mk=parseFloat(co.markup_pct||20)/100;
-    var total=(labor+mat)*(1+mk);
-    html+='<div onclick="openCODetail(\''+co.id+'\')" style="cursor:pointer;padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:80px 1fr 140px 120px 120px 100px;align-items:center;background:'+(i%2===0?'var(--card)':'var(--bg)')+'" onmouseover="this.style.background=\'var(--teal-bg)\'" onmouseout="this.style.background=\''+(i%2===0?'var(--card)':'var(--bg)')+'\'">'
-      +'<div style="font-size:11px;font-weight:800;color:var(--muted)">CO-'+String(i+1).padStart(3,'0')+'<br><span style="font-weight:400;font-size:10px">'+job.job_name.substring(0,14)+'</span></div>'
-      +'<div><div style="font-weight:700;font-size:13px;margin-bottom:2px">'+co.title+'</div><div style="font-size:11px;color:var(--muted)">'+co.reason+'</div></div>'
-      +'<div style="font-size:11px;color:var(--muted)">Labor: '+fmt$(labor)+'<br>Mat: '+fmt$(mat)+'<br>Markup: '+(mk*100).toFixed(0)+'%</div>'
-      +'<div style="font-weight:800;font-size:14px;color:var(--teal)">'+fmt$(total)+'<br><span style="font-size:10px;color:var(--muted);font-weight:400">'+co.schedule_impact_days+' days</span></div>'
-      +'<div><span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:'+(sColors[co.status]||'var(--muted)')+';color:#fff">'+co.status+'</span></div>'
-      +'<div style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">'
-      +(co.status!=='Approved'&&co.status!=='Rejected'?'<button onclick="approveCOItem(\''+co.id+'\')" style="font-size:10px;padding:3px 7px;background:var(--green-bg);color:var(--green);border:1px solid var(--green);border-radius:4px;cursor:pointer;font-family:inherit">✓</button>':'')
-      +'<button onclick="delRecord(\''+co.id+'\',\'change_orders\',pgCOs)" style="font-size:10px;padding:3px 7px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit">✕</button>'
-      +'</div></div>';
-  });}
-  html+='</div>';
-  try{$('content').innerHTML=html;}catch(e){logErr('pgCOs',e);document.getElementById('content').innerHTML='<div style=\"padding:40px;text-align:center\"><div style=\"font-size:28px\">&#9888;</div><div style=\"font-size:13px;color:#c0392b;font-weight:700;margin-top:8px\">'+e.message+'</div><button onclick=\"pgCOs()\" style=\"margin-top:12px;padding:6px 14px;background:#0d7a70;color:#fff;border:none;border-radius:5px;cursor:pointer\">Retry</button></div>';}
+  uxLoading('content','Loading change orders...');
+  try{
+    var cos=await dbGet('change_orders','?order=created_at.desc')||[];
+    var jobs=await dbGet('jobs','?order=job_name.asc')||[];
+    var state=uxGetState('cos');
+
+    var filtered=cos;
+    if(state.q){
+      var ql=state.q.toLowerCase();
+      filtered=cos.filter(function(c){
+        var j=jobs.find(function(j){return j.id===c.job_id;})||{};
+        return (c.title||'').toLowerCase().includes(ql)
+          ||(c.status||'').toLowerCase().includes(ql)
+          ||(j.job_name||'').toLowerCase().includes(ql);
+      });
+    }
+    if(state.filters&&state.filters.status){
+      filtered=filtered.filter(function(c){return c.status===state.filters.status;});
+    }
+    if(state.sortKey){
+      filtered=filtered.slice().sort(function(a,b){
+        var av=state.sortKey==='cost_impact'?(parseFloat(a.cost_impact)||0):String(a[state.sortKey]||'').toLowerCase();
+        var bv=state.sortKey==='cost_impact'?(parseFloat(b.cost_impact)||0):String(b[state.sortKey]||'').toLowerCase();
+        if(typeof av==='number') return state.sortDir==='asc'?av-bv:bv-av;
+        return state.sortDir==='asc'?av.localeCompare(bv):bv.localeCompare(av);
+      });
+    }
+
+    var totalValue=cos.reduce(function(s,c){return s+(parseFloat(c.cost_impact)||0);},0);
+    var pending=cos.filter(function(c){return c.status==='Pending'||c.status==='Pending Client';}).length;
+    var approved=cos.filter(function(c){return c.status==='Approved';}).length;
+
+    var coStatusOpts={
+      Draft:          {label:'Draft',           color:'var(--muted)', bg:'#f8fafc'},
+      Pending:        {label:'Pending Approval', color:'var(--amber)', bg:'var(--amber-bg)'},
+      'Pending Client':{label:'Sent to Client',  color:'var(--blue)',  bg:'var(--blue-bg)'},
+      Approved:       {label:'Approved',         color:'var(--green)', bg:'#f0fdf4'},
+      Rejected:       {label:'Rejected',         color:'var(--red)',   bg:'var(--red-bg)'},
+      Closed:         {label:'Closed',           color:'var(--dim)',   bg:'#f8fafc'},
+    };
+
+    var html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+      +'<div class="card" style="text-align:center"><div style="font-size:18px;font-weight:800;color:var(--text)">'+fmt$(totalValue)+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Total CO Value</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--amber)">'+pending+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pending</div></div>'
+      +'<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">'+approved+'</div><div style="font-size:11px;color:var(--muted);text-transform:uppercase">Approved</div></div>'
+      +'</div>';
+
+    html += uxList({
+      id:'cos', title:'Change Orders', items:filtered, q:state.q||'',
+      sortKey:state.sortKey, sortDir:state.sortDir||'asc', selected:state.selected||{},
+      newLabel:'New CO', onNew:'showNewCOForm()',
+      onExport:'uxExportCSV(lsAll(\'change_orders\'),[{key:\'title\',label:\'Title\'},{key:\'cost_impact\',label:\'Amount\'},{key:\'status\',label:\'Status\'},{key:\'created_at\',label:\'Date\'}],\'change-orders.csv\')',
+      filters:[{key:'status',label:'All Statuses',
+        options:Object.keys(coStatusOpts).map(function(k){return {value:k,label:coStatusOpts[k].label};}),
+        selected:state.filters&&state.filters.status}],
+      emptyIcon:'📝', emptyMsg:cos.length?'No COs match':'No change orders yet',
+      emptyAction:{label:'+ New Change Order',fn:'showNewCOForm()'},
+      onRowClick:'openCODetail(\'__ID__\')',
+      columns:[
+        {key:'title',label:'Change Order',flex:3,
+          render:function(c){
+            var j=jobs.find(function(j){return j.id===c.job_id;})||{};
+            return '<div style="font-weight:700">'+uxEsc(c.title||'Untitled CO')+'</div>'
+              +'<div style="font-size:11px;color:var(--muted)">'+uxEsc(j.job_name||'—')+'</div>';}},
+        {key:'cost_impact',label:'Amount',flex:1,right:true,
+          render:function(c){
+            var v=parseFloat(c.cost_impact)||0;
+            return '<div style="font-weight:800;color:'+(v>0?'var(--amber)':'var(--green)')+'">'+fmt$(v)+'</div>';}},
+        {key:'status',label:'Status',flex:1,
+          render:function(c){return uxStatusBadge(c.status||'Draft',coStatusOpts,'updateCOStatus',c.id);}},
+        {key:'created_at',label:'Date',flex:1,hide_mobile:true,
+          render:function(c){return fmtD(c.created_at);}},
+      ],
+      rowActions:function(c){return[
+        {icon:'✏️',label:'Open',fn:'openCODetail(\''+c.id+'\')'},
+        {icon:'📤',label:'Send to Client',fn:'sendCOToClient(\''+c.id+'\')'},
+        {icon:'✓',label:'Approve',fn:'approveCOItem(\''+c.id+'\')'},
+        {icon:'✕',label:'Delete',fn:'delRecord(\''+c.id+'\',\'change_orders\',pgCOs)'},
+      ];}
+    });
+
+    $('content').innerHTML=html;
+    uxRegister('cos', pgCOs);
+  }catch(e){
+    $('content').innerHTML='<div class="empty"><div class="et">Error: '+e.message+'</div></div>';
+  }
 }
-function showNewCOForm(){var w=$('co-form-wrap');if(w)w.style.display=w.style.display==='none'?'block':'none';}
-function calcCOTotal(){
-  var l=parseFloat($('nco-labor').value||0),m=parseFloat($('nco-mat').value||0),mk=parseFloat($('nco-markup').value||20)/100;
-  var el=$('nco-total');if(el)el.textContent='Total Client Price: '+fmt$((l+m)*(1+mk));
+
+async function updateCOStatus(coId, newStatus){
+  await dbUpd('change_orders',coId,{status:newStatus,updated_at:new Date().toISOString()});
+  if(newStatus==='Approved'){
+    await runBusinessCascade('co.approved','change_order',coId,{}).catch(function(){});
+  }
+  await auditLog('change_orders',coId,'co_status_changed',null,newStatus,false,'CO status: '+newStatus);
+  toast('CO status updated to '+newStatus,'ok');
+  pgCOs();
 }
+
+async function sendCOToClient(coId){
+  var cos=await dbGet('change_orders','?id=eq.'+coId);
+  var co=cos[0]; if(!co){toast('CO not found','err');return;}
+  var jobs=await dbGet('jobs','?id=eq.'+(co.job_id||''));
+  var job=jobs[0]||{};
+
+  // AI drafts the client message
+  toast('🤖 Preparing CO for client...','ok',5000);
+  var amount=parseFloat(co.cost_impact||co.total||0);
+  var msg=await aiBrain(
+    'Draft a professional change order notification for the client.\nCO Title: '+co.title+'\nAmount: '+fmt$(amount)+'\nDescription: '+(co.description||'')+'\n2-3 sentences. Professional. Explain why. Request signature. Mention timeline impact if any.',
+    co.job_id,
+    'AI Customer Service. Professional construction communications.',400
+  ).catch(function(){return 'Please review the attached change order for '+co.title+' ('+fmt$(amount)+'). Your signature authorizes Corestone to proceed.';});
+
+  await dbUpd('change_orders',coId,{status:'Pending Client',sent_at:new Date().toISOString(),client_message:msg});
+  await addToGatekeeper('co_client_response','CO Sent: Awaiting client approval — '+co.title,
+    'Change order sent to client for '+job.job_name+'.\nAmount: '+fmt$(amount)+'\nMessage: '+msg+'\n\nFollow up in 48 hours if no response.',
+    'high','Chase client signature if not received in 2 days.','co_client_response',coId);
+  await auditLog('change_orders',coId,'co_sent_to_client',null,'Pending Client',false,'CO sent to client');
+  toast('CO sent to client ✅ — follow-up queued in Gatekeeper','ok');
+  pgCOs();
+}
+
+async function approveCOItem(coId){
+  await updateCOStatus(coId,'Approved');
+}
+
+
+
 async function saveNewCO(status){
   try{
   var title=($('nco-title')||{}).value||'';
@@ -12230,6 +12490,58 @@ async function archiveRecord(table, id, refreshFn){
     toast('Archive failed: '+e.message,'err');
   }
 }
+
+
+function showNewEstimateForm(){ newEstimate(); }
+
+
+async function sendInvoiceToClient(invId){
+  var invs = await dbGet('invoices','?id=eq.'+invId);
+  var inv = invs[0]; if(!inv){toast('Invoice not found','err');return;}
+  var jobs = await dbGet('jobs','?id=eq.'+(inv.job_id||''));
+  var job = jobs[0]||{};
+  toast('🤖 Preparing invoice for client...','ok',4000);
+  var msg = await aiBrain(
+    'Draft a professional invoice notification for the client.\nJob: '+(job.job_name||'Project')+'\nAmount: '+fmt$(inv.amount||0)+'\nDescription: '+(inv.description||'')+'\n2 sentences. Professional. Include due date reminder if applicable.',
+    inv.job_id, 'AI Customer Service. Professional.', 300
+  ).catch(function(){return 'Please find attached invoice for '+fmt$(inv.amount||0)+'. Payment is appreciated within the agreed terms.';});
+  await dbUpd('invoices', invId, {status:'Sent', sent_at:new Date().toISOString(), client_message:msg});
+  await runBusinessCascade('invoice.sent','invoice',invId,{invoice:{amount:inv.amount}}).catch(function(){});
+  await auditLog('invoices',invId,'invoice_sent',null,'Sent',false,'Invoice sent to client');
+  toast('Invoice marked Sent ✅ — follow-up queued','ok');
+  pgInvoices();
+}
+
+
+function startLiveCall(leadId){ openLead(leadId); }
+
+
+async function exportEstimatePDF(estId){
+  var ests = await dbGet('estimates','?id=eq.'+(estId||''));
+  var est = ests[0];
+  if(!est){ toast('Open an estimate first','err'); return; }
+  // Open estimate detail then trigger print
+  await openEstimate(estId);
+  setTimeout(function(){
+    toast('Use Cmd+P or browser Print to save as PDF','ok',5000);
+    window.print();
+  }, 800);
+}
+
+
+async function downloadProposalPDF(propId){
+  await openProposal(propId);
+  setTimeout(function(){
+    toast('Use Cmd+P or browser Print to save as PDF','ok',5000);
+    window.print();
+  }, 800);
+}
+
+
+// Estimate line item aliases (functions exist as addLine/editLine/deleteLine)
+function addEstimateLine(){ addLine(); }
+function editEstimateLine(id){ editLine(id); }
+function deleteEstimateLine(id){ deleteLine(id); }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EXECUTIVE ISSUE MANAGEMENT SYSTEM (EIS) — OS #9
