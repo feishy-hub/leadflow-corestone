@@ -1493,7 +1493,8 @@ async function buildJobContext(jobId) {
   if(!jobId) return null;
   try {
     var [job, estimates, proposals, cos, invoices, bills, pos, schedule,
-         logs, punch, rfis, lienWaivers, sels, specs, messages, subs] = await Promise.all([
+         logs, punch, rfis, lienWaivers, sels, specs, messages, subs,
+         warrantyClaims, photos, bids] = await Promise.all([
       dbGet('jobs','?id=eq.'+jobId).then(function(r){return r[0]||null;}),
       dbGet('estimates','?job_id=eq.'+jobId+'&order=created_at.desc'),
       dbGet('proposals','?job_id=eq.'+jobId+'&order=created_at.desc'),
@@ -1510,6 +1511,9 @@ async function buildJobContext(jobId) {
       dbGet('specifications','?job_id=eq.'+jobId),
       dbGet('messages','?job_id=eq.'+jobId+'&order=created_at.desc&limit=20'),
       dbGet('subcontractors','?order=company_name.asc'),
+      dbGet('warranty_claims','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('photos','?job_id=eq.'+jobId+'&order=created_at.desc'),
+      dbGet('bids','?job_id=eq.'+jobId+'&order=created_at.desc'),
     ]);
 
     if(!job) return null;
@@ -1548,6 +1552,8 @@ async function buildJobContext(jobId) {
     var pendingPOs = pos.filter(function(p){return p.status==='Pending Authorization';}).length;
     var missingLiens = lienWaivers.filter(function(l){return l.status==='pending';}).length;
     var pendingSels  = sels.filter(function(s){return !s.client_approved;}).length;
+    var openWarrantyClaims = warrantyClaims.filter(function(w){return w.status!=='resolved'&&w.status!=='closed';}).length;
+    var draftBidPackages = bids.filter(function(b){return (b.status||'').indexOf('Draft')===0;}).length;
 
     // Risk assessment
     var risks = [];
@@ -1558,6 +1564,8 @@ async function buildJobContext(jobId) {
     if(pendingPOs > 0) risks.push(pendingPOs+' PO'+(pendingPOs>1?'s':'')+' awaiting authorization');
     if(missingLiens > 0) risks.push(missingLiens+' lien waiver'+(missingLiens>1?'s':'')+' not received');
     if(pendingSels > 0) risks.push(pendingSels+' client selection'+(pendingSels>1?'s':'')+' awaiting approval');
+    if(openWarrantyClaims > 0) risks.push(openWarrantyClaims+' open warranty claim'+(openWarrantyClaims>1?'s':''));
+    if(draftBidPackages > 0) risks.push(draftBidPackages+' bid package'+(draftBidPackages>1?'s':'')+' drafted but not yet sent to subs');
     if(avgProgress < 50 && billsTotal > contractPrice * 0.6) risks.push('spending ahead of progress pace');
 
     // Build the context string every AI Employee reads
@@ -1585,6 +1593,9 @@ async function buildJobContext(jobId) {
       '  POs awaiting auth: '+pendingPOs,
       '  Lien waivers missing: '+missingLiens,
       '  Client selections pending: '+pendingSels,
+      '  Warranty claims open: '+openWarrantyClaims+' (of '+warrantyClaims.length+' total)',
+      '  Bid packages: '+bids.length+' total, '+draftBidPackages+' drafted awaiting review/send',
+      '  Site photos on file: '+photos.length,
       '',
       recentLogSummary ? 'RECENT FIELD ACTIVITY:\n  '+recentLogSummary : '',
       '',
@@ -1599,7 +1610,7 @@ async function buildJobContext(jobId) {
       contextString: ctx,
       financial: {contractPrice,invoicedTotal,collectedTotal,billsTotal,billsPaid,poTotal,coValue,outstanding,billsDue,approxMargin},
       schedule: {phases:schedule,completed:completedPhases,avgProgress},
-      openItems: {openPunch,openRFIs,openCOs,pendingPOs,missingLiens,pendingSels},
+      openItems: {openPunch,openRFIs,openCOs,pendingPOs,missingLiens,pendingSels,openWarrantyClaims,draftBidPackages,photoCount:photos.length},
       risks: risks,
       recentLogs: logs.slice(0,5),
       messages: messages.slice(0,10),
