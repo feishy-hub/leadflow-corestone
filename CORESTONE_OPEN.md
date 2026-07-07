@@ -186,3 +186,41 @@ This document is reviewed at the start of every session.
 - **Status:** Open — Phase 2
 - **Priority:** Critical (highest architectural impact)
 
+
+---
+
+## OQ-030 — Remaining Missing Form Builders (found via full-file sweep, Emergency Session)
+- **Date Opened:** Emergency Live-QA Session — July 6-7, 2026
+- **Type:** Implementation Gap
+- **Title:** ~10 "show___Form" functions are called by buttons across the app but do not exist
+- **Detail:** A full sweep of every onclick/fn call site against every function definition in
+  index.html found the following still missing after this session's fixes: showLienForm,
+  showPunchForm, showRFIForm, showSelForm, showSpecForm, showWarrantyForm, openSubForm,
+  clearJob, openGlobalSearch, openNotifCenter, renderPage, toggleJobPicker, uxSortDelegated,
+  uxStatusOptClick, eisBulkExportJobs, micFillField. The underlying save handlers for most of
+  these (saveLienWaiver, savePunchItem, saveRFI, saveSelection, saveSpec, saveWarrantyClaim,
+  saveSub) DO exist and appear complete — only the modal/UI builder functions are missing,
+  following the same pattern as showNewLeadForm and showNewBillForm which were rebuilt this
+  session.
+- **Impact:** Punch List, RFIs, Selections, Specifications, Warranty, and Lien Waivers cannot
+  currently create new records through the UI, even though their list views, save logic, and
+  cascades are otherwise built.
+- **Owner:** Engineering
+- **Status:** Open — next session priority
+- **Priority:** High
+
+---
+
+## OQ-031 — Full-File Missing-Function Sweep Methodology
+- **Date Opened:** Emergency Live-QA Session — July 6-7, 2026
+- **Type:** Process / Tooling
+- **Title:** Adopt a standing "called but never defined" sweep before claiming any readiness number
+- **Detail:** A Python script comparing every onclick=/fn:/onNew:/onRowClick: call site against
+  every `function X(...)` and `X = function` declaration in index.html found 30 broken
+  references in one pass — including the entire navigation layer. This check takes seconds
+  and should run before every session's Phase Impact Report and before any Executive Testing
+  Package is delivered.
+- **Owner:** Engineering
+- **Status:** Open — recommend adding to CORESTONE_TESTING_STANDARD.md as a mandatory pre-check
+- **Priority:** Critical
+
