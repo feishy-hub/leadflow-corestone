@@ -11176,6 +11176,8 @@ async function runBusinessCascade(action, objectType, objectId, context) {
         var jobId = inv.job_id;
         var amount = parseFloat(context.amount || inv.amount || 0);
         var method = context.method || 'unspecified';
+        var jobForCloseoutCheck = null;
+        var newReceivedForCloseoutCheck = 0;
 
         // 1. Update job costing — record actual revenue received
         if(jobId) {
@@ -11185,14 +11187,24 @@ async function runBusinessCascade(action, objectType, objectId, context) {
             var newReceived = (parseFloat(job.amount_received||0)) + amount;
             await dbUpd('jobs', jobId, { amount_received: newReceived, last_payment_at: new Date().toISOString() });
             triggered.push('Job costing updated — received: '+fmt$(newReceived));
+            jobForCloseoutCheck = job;
+            newReceivedForCloseoutCheck = newReceived;
           }
         }
 
-        // 2. Check if this is the final invoice — trigger warranty if so
+        // 2. Check if this is the FINAL invoice AND the full contract has been paid — trigger warranty if so
+        // FIX (found via live Executive Testing): this previously fired the moment the FIRST invoice
+        // (e.g. the deposit) was paid, because it only checked "are there other unpaid invoices right
+        // now" — on a brand-new job there aren't any yet, so every deposit payment incorrectly closed
+        // out the job and started the 1-year warranty clock on day one. Now also requires that total
+        // amount received has actually reached the job's contract price (which already reflects any
+        // approved Change Orders — see co.approved cascade).
         if(jobId) {
           var allInvs = await dbGet('invoices','?job_id=eq.'+jobId);
           var unpaid = (allInvs||[]).filter(function(i){ return i.status !== 'paid' && i.id !== objectId; });
-          if(unpaid.length === 0) {
+          var contractPriceForCheck = parseFloat((jobForCloseoutCheck||{}).contract_price || 0);
+          var fullyPaid = contractPriceForCheck > 0 && newReceivedForCloseoutCheck >= contractPriceForCheck;
+          if(unpaid.length === 0 && fullyPaid) {
             // Final payment received!
             var warrantyStart = new Date().toISOString();
             var warrantyEnd = new Date(Date.now() + 365*86400000).toISOString();
@@ -13775,6 +13787,96 @@ async function showNewBillForm(){
     +'<div class="f2"><div class="fr"><label>Due Date</label><input id="nbill-due" type="date"></div><div class="fr"><label>Job</label><select id="nbill-job">'+jobOptions+'</select></div></div>'
     +'<div class="fr"><label>Linked Purchase Order</label><select id="nbill-po">'+poOptions+'</select></div>'
     +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveNewBill();closeOv(document.getElementById(&quot;nbf&quot;))">Create Bill</button></div></div></div>');
+}
+
+
+// ── ALIAS — openSubForm → showSubForm already existed under a different name ──
+function openSubForm(id){ if(typeof showSubForm==='function') showSubForm(); }
+
+// ── NEW PUNCH LIST ITEM FORM — was never built; savePunchItem() already
+// existed expecting pf-title/pf-desc/pf-sub/pf-due/pf-pri/pf-status/pf-photo. ──
+function showPunchForm(existing){
+  var e = existing || {};
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="punch-form"><div class="modal"><div class="mh"><div class="mt">'+(e.id?'Edit':'New')+' Punch List Item</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Title *</label><input id="pf-title" value="'+(e.title||'')+'" placeholder="Touch up paint — hallway"></div>'
+    +'<div class="fr"><label>Description</label><textarea id="pf-desc" style="min-height:60px">'+(e.description||'')+'</textarea></div>'
+    +'<div class="f2"><div class="fr"><label>Assigned To</label><input id="pf-sub" value="'+(e.assigned_to||'')+'" placeholder="Sub or trade"></div><div class="fr"><label>Due Date</label><input id="pf-due" type="date" value="'+(e.due_date||'')+'"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Priority</label><select id="pf-pri"><option>Low</option><option selected>Normal</option><option>High</option><option>Urgent</option></select></div><div class="fr"><label>Status</label><select id="pf-status"><option selected>Open</option><option>In Progress</option><option>Complete</option></select></div></div>'
+    +'<div class="fr"><label>Photo (optional)</label><input id="pf-photo" type="file" accept="image/*"></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="savePunchItem('+(e.id?"'"+e.id+"'":'null')+')">'+(e.id?'Save':'Add Item')+'</button></div></div></div>');
+}
+
+// ── NEW RFI FORM — was never built; saveRFI() already existed expecting
+// rfi-num/rfi-sub/rfi-desc/rfi-by/rfi-to/rfi-due/rfi-pri/rfi-date. ──
+function showRFIForm(){
+  var today = new Date().toISOString().split('T')[0];
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="rfi-form"><div class="modal"><div class="mh"><div class="mt">New RFI</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="f2"><div class="fr"><label>RFI #</label><input id="rfi-num" type="number" value="1"></div><div class="fr"><label>Date Submitted</label><input id="rfi-date" type="date" value="'+today+'"></div></div>'
+    +'<div class="fr"><label>Subject *</label><input id="rfi-sub" placeholder="Beam size clarification — Sheet S-2"></div>'
+    +'<div class="fr"><label>Description *</label><textarea id="rfi-desc" style="min-height:70px"></textarea></div>'
+    +'<div class="f2"><div class="fr"><label>Submitted By</label><input id="rfi-by" value="Corestone Developers"></div><div class="fr"><label>Assigned To</label><input id="rfi-to" placeholder="Architect / Engineer"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Due Date</label><input id="rfi-due" type="date"></div><div class="fr"><label>Priority</label><select id="rfi-pri"><option>Low</option><option selected>Normal</option><option>High</option><option>Urgent</option></select></div></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveRFI()">Submit RFI</button></div></div></div>');
+}
+
+// ── NEW SELECTION FORM — was never built; saveSelection() already existed
+// expecting nsel-job/nsel-cat/nsel-item/nsel-supplier/nsel-cost/nsel-lead/nsel-status. ──
+async function showSelForm(){
+  var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+  var jobOptions = '<option value="">No job</option>' + jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('');
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="sel-form"><div class="modal"><div class="mh"><div class="mt">New Selection</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Job</label><select id="nsel-job">'+jobOptions+'</select></div>'
+    +'<div class="f2"><div class="fr"><label>Category</label><select id="nsel-cat"><option>Plumbing Fixtures</option><option>Lighting</option><option>Flooring</option><option>Cabinets</option><option>Countertops</option><option>Paint</option><option>Hardware</option><option>Appliances</option><option>General</option></select></div><div class="fr"><label>Status</label><select id="nsel-status"><option selected>Pending Client</option><option>Client Selected</option><option>Ordered</option><option>Delivered</option><option>Installed</option></select></div></div>'
+    +'<div class="fr"><label>Item Description *</label><input id="nsel-item" placeholder="Kohler Artifacts kitchen faucet, brushed brass"></div>'
+    +'<div class="f2"><div class="fr"><label>Supplier</label><input id="nsel-supplier"></div><div class="fr"><label>Unit Cost ($)</label><input id="nsel-cost" type="number"></div></div>'
+    +'<div class="fr"><label>Lead Time</label><input id="nsel-lead" placeholder="2-3 weeks"></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveSelection()">Add Selection</button></div></div></div>');
+}
+
+// ── NEW SPECIFICATION FORM — was never built; saveSpec() already existed
+// expecting nspec-job/nspec-section/nspec-title/nspec-content. ──
+async function showSpecForm(){
+  var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+  var jobOptions = '<option value="">No job</option>' + jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('');
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="spec-form"><div class="modal"><div class="mh"><div class="mt">New Specification</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Job</label><select id="nspec-job">'+jobOptions+'</select></div>'
+    +'<div class="f2"><div class="fr"><label>Section</label><input id="nspec-section" placeholder="Finishes"></div><div class="fr"><label>Title *</label><input id="nspec-title" placeholder="Tile Installation Standards"></div></div>'
+    +'<div class="fr"><label>Content *</label><textarea id="nspec-content" style="min-height:100px"></textarea></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveSpec()">Add Spec</button></div></div></div>');
+}
+
+// ── NEW WARRANTY CLAIM FORM — was never built; saveWarrantyClaim() already
+// existed expecting nwc-job/nwc-type/nwc-desc. ──
+async function showWarrantyForm(){
+  var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+  var jobOptions = '<option value="">No job</option>' + jobs.map(function(j){return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';}).join('');
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="warranty-form"><div class="modal"><div class="mh"><div class="mt">New Warranty Claim</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Job</label><select id="nwc-job">'+jobOptions+'</select></div>'
+    +'<div class="fr"><label>Warranty Type</label><select id="nwc-type"><option>Workmanship</option><option>Waterproofing</option><option>Manufacturer</option></select></div>'
+    +'<div class="fr"><label>Description *</label><textarea id="nwc-desc" style="min-height:80px" placeholder="What is the issue?"></textarea></div>'
+    +'<button class="btn btn-g btn-sm" onclick="aiWarrantyAnalysis()" type="button">🤖 AI Analyze Claim</button>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveWarrantyClaim()">Log Claim</button></div></div></div>');
+}
+
+// ── NEW LIEN WAIVER FORM — was never built; saveLienWaiver() already
+// existed expecting lf-sub/lf-type/lf-amt/lf-date/lf-thru. ──
+function showLienForm(){
+  var today = new Date().toISOString().split('T')[0];
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="lien-form"><div class="modal"><div class="mh"><div class="mt">New Lien Waiver</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="f2"><div class="fr"><label>Subcontractor *</label><input id="lf-sub" placeholder="Mikes Tile Co."></div><div class="fr"><label>Waiver Type</label><select id="lf-type"><option>Conditional Progress</option><option>Unconditional Progress</option><option>Conditional Final</option><option>Unconditional Final</option></select></div></div>'
+    +'<div class="f2"><div class="fr"><label>Amount ($) *</label><input id="lf-amt" type="number"></div><div class="fr"><label>Payment Date</label><input id="lf-date" type="date" value="'+today+'"></div></div>'
+    +'<div class="fr"><label>Through Date</label><input id="lf-thru" type="date"></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveLienWaiver()">Create Waiver</button></div></div></div>');
+}
+
+// ── PHOTO UPLOAD FORM — was never built; savePhotos() already existed
+// expecting ph-files/ph-phase/ph-cap. ──
+function showPhotoForm(){
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="photo-up"><div class="modal"><div class="mh"><div class="mt">Add Photos</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Photos *</label><input id="ph-files" type="file" accept="image/*" multiple></div>'
+    +'<div class="fr"><label>Phase</label><select id="ph-phase"><option>Pre-Construction</option><option>Demolition</option><option>Framing</option><option>Rough-In</option><option>Insulation</option><option>Drywall</option><option>Finishes</option><option>Punch List</option><option>Complete</option></select></div>'
+    +'<div class="fr"><label>Caption</label><input id="ph-cap" placeholder="Kitchen — after demo"></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="savePhotos()">Upload</button></div></div></div>');
 }
 
 </script>
