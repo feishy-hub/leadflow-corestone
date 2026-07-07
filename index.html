@@ -4776,7 +4776,8 @@ function showTakeoffResults(t,docId){
 
     +'</div>'
     +'<div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Close</button>'
-    +'<button class="btn btn-p" onclick="takeoffToEstimate(\''+docId+'\')">💰 Create Estimate from Takeoff</button></div></div>';
+    +'<button class="btn btn-p" onclick="takeoffToEstimate(\''+docId+'\')">💰 Create Estimate from Takeoff</button>'
+    +'<button class="btn btn-g" onclick="takeoffToBids(\''+docId+'\')">📦 Draft Bid Packages from Takeoff</button></div></div>';
   document.body.appendChild(overlay);
 }
 
@@ -13877,6 +13878,79 @@ function showPhotoForm(){
     +'<div class="fr"><label>Phase</label><select id="ph-phase"><option>Pre-Construction</option><option>Demolition</option><option>Framing</option><option>Rough-In</option><option>Insulation</option><option>Drywall</option><option>Finishes</option><option>Punch List</option><option>Complete</option></select></div>'
     +'<div class="fr"><label>Caption</label><input id="ph-cap" placeholder="Kitchen — after demo"></div>'
     +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="savePhotos()">Upload</button></div></div></div>');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// TAKEOFF → BID PACKAGES + LEAD DATA AUTO-FLOW
+// Requested directly by Feishy: plan takeoff quantities (bathrooms, sqft,
+// framing, etc.) and lead-gathered info (client, address, timeline) should
+// automatically flow into draft bid packages for subs — not just into the
+// Estimate. Did not exist before this. Follows the Gatekeeper principle:
+// AI drafts every bid package, Feishy approves before anything is sent to
+// a subcontractor — nothing goes out to a sub automatically.
+// ═══════════════════════════════════════════════════════════════════════
+async function takeoffToBids(docId){
+  var docs = await dbGet('documents','?id=eq.'+docId);
+  var doc = docs[0]; if(!doc){toast('Plan not found','err');return;}
+  var t; try{ t = JSON.parse(doc.description); }catch(e){ toast('No takeoff data on this plan','err'); return; }
+
+  var jobId = doc.job_id || (AJOB ? AJOB.id : null);
+  var job = jobId ? (await dbGet('jobs','?id=eq.'+jobId))[0] : null;
+  // Pull whatever lead-gathered info is available (client, address, timeline, budget)
+  var lead = null;
+  if(job && job.lead_id){ var leads = await dbGet('leads','?id=eq.'+job.lead_id); lead = leads[0]; }
+  else if(job && job.client_name){ var leadsByName = await dbGet('leads','?client_name=eq.'+encodeURIComponent(job.client_name)); lead = leadsByName[0]; }
+
+  var context = {
+    client_name: (job&&job.client_name) || (lead&&lead.client_name) || 'Client',
+    address: (job&&job.address) || (lead&&lead.address) || '',
+    timeline: (lead&&lead.timeline) || '',
+    job_type: (job&&job.job_type) || (lead&&lead.job_type) || ''
+  };
+
+  toast('🤖 AI drafting bid packages from plan + lead data...','ok',12000);
+
+  var r = await ai(
+    'Corestone Developers, Hudson Valley NY. Based on this plan takeoff and client/job info, '
+    +'determine which subcontractor trades need bid packages and draft a scope of work for each, '
+    +'referencing REAL quantities from the takeoff (bathroom count, sqft, framing type, roof, etc.) '
+    +'so subs can bid accurately without guessing.\n'
+    +'TAKEOFF DATA: '+JSON.stringify(t)+'\n'
+    +'CLIENT/JOB INFO: '+JSON.stringify(context)+'\n'
+    +'Return ONLY valid JSON: {"packages":[{"trade":"Plumbing","scope_of_work":"2-3 sentences citing actual quantities and the client/address/timeline"}]}. '
+    +'Only include trades genuinely implied by the takeoff data (e.g. no Roofing package if roof data is unknown/absent). Max 8 trades.',
+    'Return ONLY valid JSON. No markdown.', 1500
+  );
+  var parsed = safeJSON(r);
+  var packages = (parsed && Array.isArray(parsed.packages)) ? parsed.packages : [];
+  if(!packages.length){ toast('AI could not determine trades from this takeoff — add packages manually','err'); return; }
+
+  var createdIds = [];
+  for(var i=0;i<packages.length;i++){
+    var p = packages[i];
+    var saved = await dbIns('bids', {
+      job_id: jobId, trade: p.trade || 'General',
+      scope_of_work: p.scope_of_work || '',
+      invited_sub_ids: '[]', bids_received: 0,
+      due_date: null, status: 'Draft — Needs Review',
+      created_from: 'takeoff', source_doc_id: docId
+    });
+    if(saved[0]) createdIds.push(saved[0].id);
+  }
+
+  await addToGatekeeper(
+    'bid_packages_drafted',
+    'AI drafted ' + packages.length + ' bid package(s) from plan takeoff — ' + context.client_name,
+    packages.map(function(p){return p.trade;}).join(', ') + '. Drafted from plan takeoff and lead/job data. Review scope of work, select subs to invite, and set due dates before sending — nothing has been sent to any subcontractor yet.',
+    'normal',
+    'Review each draft bid package in Bidding, select subs to invite per trade, and send.',
+    'bid_packages_review',
+    jobId
+  );
+
+  toast('✅ ' + packages.length + ' draft bid package(s) created — review in Bidding before sending','ok',6000);
+  if(typeof pgBids==='function') pgBids();
 }
 
 </script>
