@@ -5277,22 +5277,35 @@ function showQuickLog(){
     +'<div class="fr"><label>Phase</label><input id="ql-phase" value="'+(AJOB&&AJOB.current_phase||'')+'" placeholder="Current phase"></div></div>'
     +'<div class="fr"><label>What happened today — speak naturally or type</label>'
     +'<textarea id="ql-notes" style="min-height:120px" placeholder="E.g.: Today we finished the second floor framing, plumber came in and roughed in the main bathroom and master bath, delivered the lumber for the roof trusses, slight delay because the beam supplier sent wrong size LVL beams, I sent them back..."></textarea></div>'
-    +'<div style="display:flex;gap:8px;margin-top:8px">'
-    +'<button type="button" id="ql-rec-btn" onclick="qlToggleVoiceRecord()" style="flex:1;padding:10px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit">🎙️ Record Voice (English)</button>'
-    +'<button type="button" onclick="document.getElementById(\'ql-photo-file\').click()" style="flex:1;padding:10px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit">📸 Add Photo</button>'
-    +'<button type="button" onclick="document.getElementById(\'ql-video-file\').click()" style="flex:1;padding:10px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit">🎥 Add Video</button>'
+    +'<div style="font-size:11px;font-weight:700;color:var(--muted);margin-top:12px;margin-bottom:4px;text-transform:uppercase">Voice</div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button type="button" id="ql-rec-btn" onclick="qlToggleVoiceRecord()" style="flex:2;padding:16px;font-size:15px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">🎙️ Record Voice (English)</button>'
+    +'<button type="button" onclick="document.getElementById(\'ql-audio-file\').click()" style="flex:1;padding:16px;font-size:15px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">📎 Attach Recording</button>'
     +'</div>'
-    +'<input type="file" id="ql-photo-file" accept="image/*" capture="environment" style="display:none" onchange="qlAttachPhoto(this)">'
-    +'<input type="file" id="ql-video-file" accept="video/*" capture="environment" style="display:none" onchange="qlAttachVideo(this)">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--muted);margin-top:12px;margin-bottom:4px;text-transform:uppercase">Photo</div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button type="button" onclick="document.getElementById(\'ql-photo-camera\').click()" style="flex:1;padding:16px;font-size:15px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">📸 Take Photo</button>'
+    +'<button type="button" onclick="document.getElementById(\'ql-photo-file\').click()" style="flex:1;padding:16px;font-size:15px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">🖼️ Upload Photo</button>'
+    +'</div>'
+    +'<div style="font-size:11px;font-weight:700;color:var(--muted);margin-top:12px;margin-bottom:4px;text-transform:uppercase">Video</div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button type="button" onclick="document.getElementById(\'ql-video-camera\').click()" style="flex:1;padding:16px;font-size:15px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">🎥 Record Video</button>'
+    +'<button type="button" onclick="document.getElementById(\'ql-video-file\').click()" style="flex:1;padding:16px;font-size:15px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">🖼️ Upload Video</button>'
+    +'</div>'
+    +'<input type="file" id="ql-photo-camera" accept="image/*" capture="environment" style="display:none" onchange="qlAttachPhoto(this)">'
+    +'<input type="file" id="ql-photo-file" accept="image/*" style="display:none" onchange="qlAttachPhoto(this)">'
+    +'<input type="file" id="ql-video-camera" accept="video/*" capture="environment" style="display:none" onchange="qlAttachVideo(this)">'
+    +'<input type="file" id="ql-video-file" accept="video/*" style="display:none" onchange="qlAttachVideo(this)">'
+    +'<input type="file" id="ql-audio-file" accept="audio/*" style="display:none" onchange="qlAttachAudio(this)">'
     +'<div id="ql-attachments" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>'
     +'<div id="ql-result"></div>'
     +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
     +'<button class="btn btn-p" onclick="saveQuickLog()">🤖 Save + AI Format</button></div></div>';
   document.body.appendChild(el);
-  QL_ATTACHMENTS = {photos:[], videos:[]};
+  QL_ATTACHMENTS = {photos:[], videos:[], audio:[]};
 }
 
-var QL_ATTACHMENTS = {photos:[], videos:[]};
+var QL_ATTACHMENTS = {photos:[], videos:[], audio:[]};
 var qlRecog = null, qlRecording = false;
 
 function qlToggleVoiceRecord(){
@@ -5346,18 +5359,28 @@ function qlAttachVideo(input){
   QL_ATTACHMENTS.videos.push(input.files[0]);
   qlRenderAttachments();
 }
+function qlAttachAudio(input){
+  if(!input.files.length) return;
+  // Honest limitation: this saves the audio file as an attachment on the log,
+  // it does not transcribe it — there is no file-based transcription service
+  // connected here, only live browser speech-to-text via the Record button.
+  QL_ATTACHMENTS.audio.push(input.files[0]);
+  qlRenderAttachments();
+  toast('Audio attached — note: it will be saved but not auto-transcribed','ok',5000);
+}
 function qlRenderAttachments(){
   var el = document.getElementById('ql-attachments');
   if(!el) return;
   var chips = [];
   QL_ATTACHMENTS.photos.forEach(function(p){ chips.push('<span class="badge" style="background:#eef2ff;color:#4338ca">📸 '+p.filename+'</span>'); });
   QL_ATTACHMENTS.videos.forEach(function(v){ chips.push('<span class="badge" style="background:#eef2ff;color:#4338ca">🎥 '+v.name+'</span>'); });
+  QL_ATTACHMENTS.audio.forEach(function(a){ chips.push('<span class="badge" style="background:#fef3c7;color:#92400e">🎧 '+a.name+' (not transcribed)</span>'); });
   el.innerHTML = chips.join('');
 }
 
 async function saveQuickLog(){
   var notes=$('ql-notes').value.trim();
-  var hasAttachments = QL_ATTACHMENTS && ((QL_ATTACHMENTS.photos&&QL_ATTACHMENTS.photos.length) || (QL_ATTACHMENTS.videos&&QL_ATTACHMENTS.videos.length));
+  var hasAttachments = QL_ATTACHMENTS && ((QL_ATTACHMENTS.photos&&QL_ATTACHMENTS.photos.length) || (QL_ATTACHMENTS.videos&&QL_ATTACHMENTS.videos.length) || (QL_ATTACHMENTS.audio&&QL_ATTACHMENTS.audio.length));
   if(!notes && !hasAttachments){toast('Add some notes, or record/attach a photo or video first','err');return;}
   var date=$('ql-date').value;
   var weather=$('ql-weather').value;
@@ -5400,7 +5423,16 @@ async function saveQuickLog(){
         catch(vErr){console.warn('[saveQuickLog] video analysis failed',vErr);}
       }
     }
-    QL_ATTACHMENTS = {photos:[], videos:[]};
+    // Save any attached audio files — stored as a document for the record,
+    // NOT transcribed (no file-based transcription service is connected)
+    if(QL_ATTACHMENTS && QL_ATTACHMENTS.audio && QL_ATTACHMENTS.audio.length){
+      for(var ai_i=0; ai_i<QL_ATTACHMENTS.audio.length; ai_i++){
+        try{
+          await dbIns('documents',{name:'Audio — Daily Log '+date+' — '+QL_ATTACHMENTS.audio[ai_i].name,category:'Audio Recording',job_id:AJOB?AJOB.id:null,file_url:'local:'+QL_ATTACHMENTS.audio[ai_i].name,visible_to_client:false,created_at:new Date().toISOString()});
+        }catch(aErr){console.warn('[saveQuickLog] audio save failed',aErr);}
+      }
+    }
+    QL_ATTACHMENTS = {photos:[], videos:[], audio:[]};
 
     // CASCADE: AI scope change detection on every daily log
     if(AJOB && notes.length > 20){
