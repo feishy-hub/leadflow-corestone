@@ -786,13 +786,15 @@ async function aiDetectScope(text, jobId){
     +'Return ONLY raw JSON: {"scope_changes_detected":true,"changes":[{"description":"what changed","estimated_impact":"$X","recommended_action":"create_co|monitor|no_action"}],"co_recommended":true,"complaint_detected":true,"complaint_summary":"summary if any, else empty string","urgency":"immediate|soon|low"}',
     'You are a construction scope-change and complaint detector fluent in English and Yiddish. Return ONLY raw JSON.',700);
   var d=safeJSON(r);
+  var findings=[];
   if(d&&d.co_recommended&&d.changes&&d.changes.length){
-    toast('\u26a0\ufe0f AI detected '+d.changes.length+' potential scope change(s) \u2014 check Gatekeeper','err');
-    await dbIns('gatekeeper_queue',{type:'Scope Change Detected',title:'AI: Potential CO detected',description:d.changes.map(function(c){return c.description+' (~'+c.estimated_impact+')';}).join('\n'),status:'pending',priority:'high',auto_action:'Review and create change order if confirmed'});
+    d.changes.forEach(function(c){ findings.push({text:c.description+' (~'+c.estimated_impact+')', category:'Possible Change Order'}); });
   }
   if(d&&d.complaint_detected&&d.complaint_summary){
-    toast('\u26a0\ufe0f AI detected a possible client complaint \u2014 check Gatekeeper','err');
-    await addToGatekeeper('client_complaint','AI: Possible client complaint detected',d.complaint_summary,'high','Review and respond to the client directly.','client_complaint',jobId||null);
+    findings.push({text:d.complaint_summary, category:'Possible Complaint'});
+  }
+  if(findings.length){
+    showAIFindingsReview('message_ai_flag', jobId||'', findings, AJOB?AJOB.job_name:'This message', null);
   }
   return d;
 }
@@ -6599,14 +6601,19 @@ async function aiAnalyzePhoto(id){
     if(!r.ok) throw new Error(data.error||'API error');
     var d=safeJSON(data.content[0].text);
     if(d){
-      await dbUpd('photos',id,{ai_quality:d.quality,ai_flag:d.flag||'none',ai_notes:d.description,ai_issues:JSON.stringify(d.issues||[])});
-      if(d.flag==='issue' || (d.safety_concerns&&d.safety_concerns.length)){
-        await addToGatekeeper('photo_issue','Photo issue flagged'+(photo.caption?': '+photo.caption:''),(d.issues||[]).concat(d.safety_concerns||[]).join('. '),'high','Review photo and determine corrective action.','photo_issue',id);
-        toast('⚠️ Issue flagged — queued in Gatekeeper','err');
-      } else {
-        toast('Photo analyzed: '+(d.quality||'ok'),'ok');
-      }
+      // Always persist everything the AI found — permanently, on the record —
+      // regardless of what Feishy chooses to act on. This is what makes it
+      // possible to ask "what happened here" a year from now and get a real
+      // answer, not just whatever happened to get escalated at the time.
+      await dbUpd('photos',id,{ai_quality:d.quality,ai_flag:d.flag||'none',ai_notes:d.description,ai_issues:JSON.stringify(d.issues||[]),ai_safety_concerns:JSON.stringify(d.safety_concerns||[]),ai_analyzed_at:new Date().toISOString()});
       pgPhotoLog();
+      var findings = (d.issues||[]).map(function(t){return {text:t, category:'Issue'};})
+        .concat((d.safety_concerns||[]).map(function(t){return {text:t, category:'Safety Concern'};}));
+      if(findings.length){
+        showAIFindingsReview('photo_issue', id, findings, photo.caption||'Photo', d.description);
+      } else {
+        toast('Photo analyzed — nothing flagged ('+(d.quality||'ok')+')','ok');
+      }
     }
   }catch(e){toast('Analysis failed: '+e.message,'err');}
 }
@@ -14581,14 +14588,62 @@ async function processVideoFile(file, phase, cap, jobId){
     ai_safety_concerns: JSON.stringify(allSafety)
   });
 
-  if(allIssues.length || allSafety.length){
-    await addToGatekeeper('video_issue', 'Video analysis flagged issue(s)'+(cap?': '+cap:''),
-      allIssues.concat(allSafety).join('. '), 'high',
-      'Review the video and determine corrective action.', 'video_issue', videoId);
-    toast('⚠️ AI flagged '+(allIssues.length+allSafety.length)+' issue(s) from the video — check Gatekeeper','err',6000);
+  var videoFindings = allIssues.map(function(t){return {text:t, category:'Issue'};})
+    .concat(allSafety.map(function(t){return {text:t, category:'Safety Concern'};}));
+  if(videoFindings.length){
+    showAIFindingsReview('video_issue', videoId, videoFindings, cap||'Video', summary);
   } else {
-    toast('✅ Video analyzed — no issues flagged','ok');
+    toast('✅ Video analyzed — nothing flagged','ok');
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI FINDINGS REVIEW — shows exactly what the AI detected in a photo,
+// video, or message as a checklist. Feishy picks what actually matters;
+// only checked items get sent to Gatekeeper. Nothing goes to Gatekeeper
+// silently or automatically anymore. Full findings are always saved on
+// the source record regardless, so the history is never lost even if
+// nothing is escalated — that's what makes "ask me in a year" possible.
+// ═══════════════════════════════════════════════════════════════════════
+function showAIFindingsReview(sourceType, sourceId, findings, contextLabel, description){
+  var existing = document.getElementById('ai-findings-review'); if(existing) existing.remove();
+  var el = document.createElement('div');
+  el.className = 'ov'; el.id = 'ai-findings-review';
+  el.innerHTML = '<div class="modal"><div class="mh"><div><div class="mt">🤖 AI Analysis — '+uxEsc(contextLabel||'')+'</div>'
+    +'<div class="ms">Pick what should go to Gatekeeper for follow-up. Everything found is saved either way.</div></div>'
+    +'<button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +(description?'<div style="font-size:13px;color:var(--muted);margin-bottom:12px;padding:10px;background:var(--card-2,#f8fafc);border-radius:6px">'+uxEsc(description)+'</div>':'')
+    + findings.map(function(f,i){
+        return '<label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer">'
+          +'<input type="checkbox" class="aifr-check" data-idx="'+i+'" checked style="margin-top:3px">'
+          +'<div><span class="badge" style="background:'+(f.category==='Safety Concern'?'#fee2e2':'#fef3c7')+';color:'+(f.category==='Safety Concern'?'#b91c1c':'#92400e')+'">'+f.category+'</span>'
+          +'<div style="font-size:13px;margin-top:4px">'+uxEsc(f.text)+'</div></div></label>';
+      }).join('')
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Dismiss — Don\'t Escalate Anything</button>'
+    +'<button class="btn btn-p" onclick=\'aifrSendSelected("'+sourceType+'","'+sourceId+'")\'>Send Checked to Gatekeeper</button></div></div>';
+  document.body.appendChild(el);
+  el.dataset.findings = JSON.stringify(findings);
+}
+
+async function aifrSendSelected(sourceType, sourceId){
+  var el = document.getElementById('ai-findings-review');
+  var findings = JSON.parse(el.dataset.findings || '[]');
+  var checked = [];
+  el.querySelectorAll('.aifr-check:checked').forEach(function(cb){ checked.push(findings[parseInt(cb.dataset.idx)]); });
+  if(!checked.length){ toast('Nothing selected — dismiss instead if there\'s nothing to escalate','err'); return; }
+  var titleMap = {photo_issue:'Photo flagged for review', video_issue:'Video flagged for review', client_complaint:'Client complaint flagged'};
+  await addToGatekeeper(
+    sourceType,
+    (titleMap[sourceType]||'AI finding flagged'),
+    checked.map(function(f){return '['+f.category+'] '+f.text;}).join('\n'),
+    'high',
+    'Review and determine corrective action.',
+    sourceType,
+    sourceId
+  );
+  toast('✅ '+checked.length+' item(s) sent to Gatekeeper','ok');
+  closeOv(el.querySelector('.mc'));
 }
 
 </script>
