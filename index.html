@@ -13714,6 +13714,46 @@ async function newEstimate(){
     +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="createEstimate()">Create Estimate</button></div></div></div>');
 }
 
+
+// ── ESTIMATE TOTALS CALCULATOR — calcEstTotal() was called in 5 places
+// (openEstimate, AI-estimate-from-takeoff, proposal builder) but never
+// defined anywhere — every estimate showed $0 and threw on open.
+// RECONSTRUCTED from field names in addLine/saveNewLine and from the
+// business rules in CORESTONE governing docs: materials-only 8% NY tax,
+// 20% contractor fee applied to subtotal excluding permits.
+// ⚠️ FLAG FOR REVIEW: this is a reconstruction, not a restoration of
+// verified original logic — confirm the tax/fee math against your
+// actual bidding practice before using it on a real client quote.
+function calcEstTotal(lines, jobId){
+  lines = lines || [];
+  var subtotal_labor = 0, subtotal_materials = 0, subtotal_subs = 0,
+      subtotal_permits = 0, subtotal_other = 0;
+  lines.forEach(function(l){
+    var raw = (parseFloat(l.qty)||0) * (parseFloat(l.unit_cost)||0);
+    var type = (l.cost_type||'').toLowerCase();
+    if(type==='labor') subtotal_labor += raw;
+    else if(type==='materials') subtotal_materials += raw;
+    else if(type==='subcontractor') subtotal_subs += raw;
+    else if(type==='permit') subtotal_permits += raw;
+    else subtotal_other += raw; // Equipment, Other
+  });
+  var subtotal = subtotal_labor + subtotal_materials + subtotal_subs + subtotal_permits + subtotal_other;
+  var tax = subtotal_materials * 0.08; // NY law — materials only, 8% (Ulster County)
+  var contractor_fee = (subtotal - subtotal_permits) * 0.20; // 20% fee, excludes permits
+  var grand_total = subtotal + tax + contractor_fee;
+  return {
+    subtotal: subtotal,
+    subtotal_labor: subtotal_labor,
+    subtotal_materials: subtotal_materials,
+    subtotal_subs: subtotal_subs,
+    subtotal_permits: subtotal_permits,
+    subtotal_other: subtotal_other,
+    tax: tax,
+    contractor_fee: contractor_fee,
+    grand_total: grand_total
+  };
+}
+
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
