@@ -13801,7 +13801,7 @@ function showPunchForm(existing){
     +'<div class="fr"><label>Title *</label><input id="pf-title" value="'+(e.title||'')+'" placeholder="Touch up paint — hallway"></div>'
     +'<div class="fr"><label>Description</label><textarea id="pf-desc" style="min-height:60px">'+(e.description||'')+'</textarea></div>'
     +'<div class="f2"><div class="fr"><label>Assigned To</label><input id="pf-sub" value="'+(e.assigned_to||'')+'" placeholder="Sub or trade"></div><div class="fr"><label>Due Date</label><input id="pf-due" type="date" value="'+(e.due_date||'')+'"></div></div>'
-    +'<div class="f2"><div class="fr"><label>Priority</label><select id="pf-pri"><option>Low</option><option selected>Normal</option><option>High</option><option>Urgent</option></select></div><div class="fr"><label>Status</label><select id="pf-status"><option selected>Open</option><option>In Progress</option><option>Complete</option></select></div></div>'
+    +'<div class="f2"><div class="fr"><label>Priority</label><select id="pf-pri"><option>Low</option><option selected>Normal</option><option>High</option><option>Urgent</option></select></div><div class="fr"><label>Status</label><select id="pf-status"><option value="open" selected>Open</option><option value="in_progress">In Progress</option><option value="complete">Complete</option></select></div></div>'
     +'<div class="fr"><label>Photo (optional)</label><input id="pf-photo" type="file" accept="image/*"></div>'
     +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="savePunchItem('+(e.id?"'"+e.id+"'":'null')+')">'+(e.id?'Save':'Add Item')+'</button></div></div></div>');
 }
