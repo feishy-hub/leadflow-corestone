@@ -13552,6 +13552,151 @@ async function clearTestData(){
 
 // Initialize Executive Feedback and Notifications on load
 document.addEventListener('DOMContentLoaded', function(){ setTimeout(function(){ initExecFeedback(); updateNotifBadge(); }, 800); });
+
+// ═══════════════════════════════════════════════════════════════════════
+// EMERGENCY PATCH — OS #10 Live QA — restores core navigation + entry points
+// found completely missing during live Executive Testing (goTab/toggleGroup/
+// showQuickAdd/openLead and 25 other called-but-never-defined functions).
+// See CORESTONE_DECISIONS.md DEC-027 and CORESTONE_OPEN.md for full context.
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── TAB ROUTER (was completely missing — 143 call sites pointed at nothing) ──
+var CS_TAB_MAP = {
+  'dashboard': function(){ if(typeof pgDashV2==='function') pgDashV2(); },
+  'sales': pgSales, 'proposals': pgProposals, 'bids': pgBids,
+  'requirements': pgRequirements, 'survey': pgSurveyMgr,
+  'jobs': pgJobsV2, 'schedule': pgSchedV2, 'daily': pgDailyV2, 'todos': pgTodos,
+  'punchlist': pgPunchList, 'selections': pgSelections, 'specs': pgSpecs,
+  'rfis': pgRFIs, 'warranty': pgWarranty,
+  'estimates': pgEstimates, 'budget': pgBudget,
+  'financial': pgFinV2, 'fin': pgFinV2, 'bills': pgBills, 'pos': pgPOs,
+  'cos': pgCOs, 'liens': pgLienWaivers,
+  'files': pgFiles, 'photos': pgPhotoLog, 'plans': pgPlans,
+  'messages': pgMsgsV2, 'emails': pgEmails, 'comments': pgComments,
+  'subs': pgSubsV2, 'reports': pgReportsV2,
+  'gatekeeper': pgGK, 'gk': pgGK, 'settings': pgSettings
+};
+var CS_TAB_LABELS = {
+  dashboard:'Dashboard', sales:'Leads', proposals:'Proposals', bids:'Bid Requests',
+  requirements:'Requirements', survey:'Surveys', jobs:'Jobs', schedule:'Schedule',
+  daily:'Daily Logs', todos:'To-Dos', punchlist:'Punch List', selections:'Selections',
+  specs:'Specifications', rfis:'RFIs', warranty:'Warranty', estimates:'Estimates',
+  budget:'Job Costing Budget', financial:'Invoices', fin:'Invoices', bills:'Bills',
+  pos:'Purchase Orders', cos:'Change Orders', liens:'Lien Waivers', files:'Documents',
+  photos:'Photos & Videos', plans:'Plans & Takeoff', messages:'Messages',
+  emails:'Emails', comments:'Comments', subs:'Subcontractors', reports:'Reports',
+  gatekeeper:'Gatekeeper', gk:'Gatekeeper', settings:'Settings'
+};
+function goTab(tab){
+  try{
+    CUR = tab;
+    document.querySelectorAll('.bt-nav-item, .bt-nav-sub-item').forEach(function(el){ el.classList.remove('active'); });
+    var btn = document.getElementById('btn-'+tab);
+    if(btn) btn.classList.add('active');
+    var bc = document.getElementById('bt-breadcrumb');
+    if(bc) bc.textContent = CS_TAB_LABELS[tab] || tab;
+    var fn = CS_TAB_MAP[tab];
+    var c = document.getElementById('content');
+    if(typeof fn === 'function'){
+      fn();
+    } else if(c){
+      c.innerHTML = '<div class="empty"><div class="ei">🚧</div><div class="et">Page not found: '+tab+'</div></div>';
+    }
+  }catch(e){
+    console.error('[goTab] failed for tab', tab, e);
+    var c2 = document.getElementById('content');
+    if(c2) c2.innerHTML = '<div class="empty"><div class="ei">⚠️</div><div class="et">Error loading '+tab+'</div><div style="font-size:12px;color:var(--muted);margin-top:8px">'+((e&&e.message)||e)+'</div></div>';
+  }
+}
+
+// ── SIDEBAR GROUP TOGGLE (was completely missing — 5 call sites) ──
+function toggleGroup(groupId){
+  var sub = document.getElementById(groupId);
+  if(!sub) return;
+  var hd = sub.previousElementSibling;
+  var willOpen = !sub.classList.contains('open');
+  sub.classList.toggle('open', willOpen);
+  if(hd && hd.classList.contains('bt-nav-group-hd')) hd.classList.toggle('open', willOpen);
+  var arr = document.getElementById('arr-' + groupId.replace('grp-',''));
+  if(arr){
+    arr.classList.toggle('open', willOpen);
+    arr.textContent = willOpen ? '▾' : '▸';
+  }
+}
+
+// ── SIDEBAR SHOW/HIDE (was completely missing — 1 call site) ──
+function toggleSidebar(){
+  var sb = document.querySelector('.bt-sidebar') || document.getElementById('bt-sidebar');
+  if(sb) sb.classList.toggle('collapsed');
+  document.body.classList.toggle('sidebar-collapsed');
+}
+
+// ── NOTIFICATION BADGE (was completely missing — referenced on every page load) ──
+function updateNotifBadge(){
+  try{
+    var badge = document.getElementById('notif-badge');
+    if(!badge) return;
+    var unread = 0;
+    if(typeof NC !== 'undefined' && NC && Array.isArray(NC.items)){
+      unread = NC.items.filter(function(i){ return !i.read; }).length;
+    }
+    if(unread > 0){ badge.style.display='block'; badge.textContent = unread>99?'99+':String(unread); }
+    else { badge.style.display='none'; }
+  }catch(e){ console.error('[updateNotifBadge]', e); }
+}
+
+// ── QUICK ADD MENU (was completely missing — top-right "+ Quick Add" button did nothing) ──
+function closeQuickAddMenu(){ var m=document.getElementById('quick-add-menu'); if(m) m.remove(); }
+function showQuickAdd(){
+  var existing = document.getElementById('quick-add-menu');
+  if(existing){ existing.remove(); return; }
+  var items = [
+    {label:'📞 New Lead', tab:'sales', open:'showNewLeadForm'},
+    {label:'💰 New Estimate', tab:'estimates', open:'showNewEstimateForm'},
+    {label:'🏗️ New Job', tab:'jobs', open:'showNewJobForm'},
+    {label:'📦 New Purchase Order', tab:'pos', open:'showNewPOForm'},
+    {label:'🧾 New Bill', tab:'bills', open:'showNewBillForm'},
+    {label:'📋 New Daily Log', tab:'daily', open:null}
+  ];
+  var menu = document.createElement('div');
+  menu.id = 'quick-add-menu';
+  menu.style.cssText = 'position:fixed;top:52px;right:170px;background:#fff;border:1px solid var(--border,#e2e8f0);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:9999;min-width:210px;overflow:hidden;font-family:inherit';
+  menu.innerHTML = items.map(function(it){
+    var action = "closeQuickAddMenu();goTab('"+it.tab+"');" + (it.open ? "setTimeout(function(){ if(typeof "+it.open+"==='function') "+it.open+"(); },200);" : "");
+    return '<div onclick="'+action.replace(/"/g,'&quot;')+'" style="padding:11px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:1px solid #f0f2f6" onmouseover="this.style.background=\'#f8fbff\'" onmouseout="this.style.background=\'#fff\'">'+it.label+'</div>';
+  }).join('');
+  document.body.appendChild(menu);
+  setTimeout(function(){
+    document.addEventListener('click', function closeOnce(e){
+      if(!menu.contains(e.target)){ menu.remove(); document.removeEventListener('click', closeOnce); }
+    });
+  }, 50);
+}
+
+// ── ALIASES — real modal builders already existed under different names
+// than what buttons across the app were calling. Wiring them up rather
+// than duplicating working code. ──
+function showNewJobForm(){ if(typeof showJobForm==='function') showJobForm(); }
+function showNewPOForm(){ if(typeof showPOForm==='function') showPOForm(); }
+function showNewCOForm(){ if(typeof showCOForm==='function') showCOForm(); }
+function showInvoiceForm(){ if(typeof showInvForm==='function') showInvForm(); }
+function openLead(id){ if(typeof leadDetail==='function') leadDetail(id); }
+
+// ── NEW LEAD FORM — did not exist anywhere in the app; built to match
+// the fields saveLead() already expects (l-name, l-phone, l-email, l-addr,
+// l-type, l-val, l-tl, l-src, l-owns, l-fin, l-bids, l-notes). ──
+function showNewLeadForm(){
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="ldf"><div class="modal"><div class="mh"><div class="mt">New Lead</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="f2"><div class="fr"><label>Client Name *</label><input id="l-name" placeholder="John Smith"></div><div class="fr"><label>Phone</label><input id="l-phone" type="tel" placeholder="(845) 555-0100"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Email</label><input id="l-email" type="email"></div><div class="fr"><label>Job Type</label><input id="l-type" placeholder="Kitchen Remodel"></div></div>'
+    +'<div class="fr"><label>Address</label><input id="l-addr" placeholder="123 Main St, Kingston NY"></div>'
+    +'<div class="f2"><div class="fr"><label>Estimated Value ($)</label><input id="l-val" type="number"></div><div class="fr"><label>Timeline</label><input id="l-tl" placeholder="3-6 months"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Lead Source</label><select id="l-src"><option>Angi</option><option>Google</option><option>Houzz</option><option>Referral</option><option>Website</option><option>Phone</option><option>Manual</option></select></div><div class="fr"><label>Owns Property</label><select id="l-owns"><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Unknown</option></select></div></div>'
+    +'<div class="f2"><div class="fr"><label>Financing</label><select id="l-fin"><option value="cash">Cash</option><option value="financing">Needs Financing</option><option value="unknown">Unknown</option></select></div><div class="fr"><label>Competing Bids</label><select id="l-bids"><option value="no">No</option><option value="yes">Yes</option><option value="unknown">Unknown</option></select></div></div>'
+    +'<div class="fr"><label>Notes</label><textarea id="l-notes" style="min-height:60px"></textarea></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveLead()">Create Lead</button></div></div></div>');
+}
+
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
