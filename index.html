@@ -13697,6 +13697,23 @@ function showNewLeadForm(){
     +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveLead()">Create Lead</button></div></div></div>');
 }
 
+
+// ── NEW ESTIMATE FORM — newEstimate() was called by showNewEstimateForm()
+// but never defined; createEstimate() (the save handler) already existed
+// expecting est-title/est-client/est-email/est-job/est-notes/est-markup
+// and a modal with id="new-est-modal". Built to match exactly. ──
+async function newEstimate(){
+  var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+  var jobOptions = '<option value="">No job yet (pre-sale estimate)</option>'
+    + jobs.map(function(j){ return '<option value="'+j.id+'">'+j.job_name+'</option>'; }).join('');
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="new-est-modal"><div class="modal"><div class="mh"><div class="mt">New Estimate</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="f2"><div class="fr"><label>Estimate Title *</label><input id="est-title" placeholder="Kitchen Remodel — 45 Birch Lane"></div><div class="fr"><label>Client Name *</label><input id="est-client" placeholder="Robert & Linda Chen"></div></div>'
+    +'<div class="f2"><div class="fr"><label>Client Email</label><input id="est-email" type="email"></div><div class="fr"><label>Link to Job (optional)</label><select id="est-job">'+jobOptions+'</select></div></div>'
+    +'<div class="fr"><label>Default Markup %</label><input id="est-markup" type="number" value="20"></div>'
+    +'<div class="fr"><label>Notes</label><textarea id="est-notes" style="min-height:60px"></textarea></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="createEstimate()">Create Estimate</button></div></div></div>');
+}
+
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
