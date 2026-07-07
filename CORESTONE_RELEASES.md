@@ -347,3 +347,62 @@ See DEC-027/028 and OQ-031: Operational Readiness percentages based on code-pres
 are retired. Readiness claims must be backed by a live Executive Testing pass with zero
 console errors.
 
+
+---
+
+## ADDENDUM — Two concurrent live-QA sessions ran on this repo at the same time
+**Date:** July 6-7, 2026
+
+This repo received commits from two independent Claude sessions overlapping in the same
+~90-minute window (01:29-02:57 UTC), both responding to the same Executive directive to
+prove readiness via live testing rather than code inspection. Both independently:
+- Ran the same "called but never defined" full-file sweep and found the same ~30 broken references
+- Found and fixed the missing navigation layer, missing New Lead / New Estimate forms, and
+  the broken `calcEstTotal()` pricing engine
+- One session additionally fixed `showNewBillForm()` (built from scratch), a `sign-name-`/
+  `sig-name-` id mismatch blocking e-signature, and wired `calcEstTotal()` to Settings-level
+  `getTaxRate()`/`getContractorFee()` instead of hardcoded rates
+- The other session (this one) additionally fixed the premature-closeout bug (job moved to
+  Closeout + started the warranty clock after only the deposit was paid — now correctly
+  checks amount received against contract price) and built the 7 remaining missing form
+  modals (Punch List, RFI, Selection, Specification, Warranty Claim, Lien Waiver, Photo Upload)
+
+**Verified as of this addendum: both sets of changes are present in the current live app,
+with zero console errors across Dashboard, Sales, Estimates, Jobs, and Gatekeeper.** No data
+appears to have been lost from either session in the final merged state.
+
+**Recommendation:** avoid running two active development sessions against this repo at the
+same time going forward — this time everything reconciled cleanly by luck of timing and
+non-overlapping edits, but a future overlap could silently overwrite one session's fixes
+with the other's stale copy, since this project pushes via full-file overwrite (GET SHA →
+PUT whole file) rather than patch-based commits.
+
+### This session's additional fixes not covered above
+- **v2.7.4** (this session) — Fixed the premature-closeout bug: paying the first invoice on
+  a job (e.g. the deposit) was unconditionally moving the job to `status: closeout` and
+  starting the 1-year warranty clock, regardless of how much of the contract price had
+  actually been paid. Root cause: the check only asked "are there other unpaid invoices right
+  now" — trivially true on a new job with a single invoice. Fixed to also require
+  `amount_received >= contract_price`. Verified with a 3-invoice test: job correctly stayed
+  `active` at $23,040/$25,040 received, only moved to `closeout` once the true final invoice
+  was paid. Also built the 7 missing form modals listed in OQ-030 (Punch List, RFI, Selection,
+  Specification, Warranty Claim, Lien Waiver, Photo Upload) — all verified live with real
+  saves to their respective tables.
+- **v2.7.5** (this session) — Fixed a casing bug introduced in the punch-item form above:
+  status dropdown used `'Complete'` (capitalized) while the punch.completed cascade's
+  100%-check expects lowercase `'complete'` — found via live cascade testing immediately
+  after building the form.
+
+### All 9 documented cascade triggers — tested live, individually, this session
+lead.created, proposal.sent, invoice.paid, co.approved, bill.approved, punch.completed,
+rfi.closed, lien_waiver.signed — all fire correctly with correct job context and produce the
+right side effects (Gatekeeper items, contract price updates, budget updates, client message
+drafts). Business Brain / AI Job Briefing tested live via `renderJobCommandCenter()` — real
+API call to `/api/claude`, real contextual financial analysis referencing actual job numbers,
+not a stub or placeholder.
+
+### Still open (matches OQ-030's list, not yet touched)
+- Purchase Orders still bypass the 3-stage Gatekeeper entirely (DEC-022 violation) — confirmed
+  live, not a new regression, matches the existing Subsystem Status entry
+- clearJob, openGlobalSearch, openNotifCenter, renderPage, toggleJobPicker,
+  uxSortDelegated, uxStatusOptClick, eisBulkExportJobs, micFillField — not yet investigated
