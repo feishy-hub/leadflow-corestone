@@ -287,3 +287,63 @@ Versions are never deleted.
 - Req 3 (Enterprise UX): 🟡 6 of 37 pages upgraded (prioritized by usage)
 - Req 5 (Every row opens): ✅ Jobs, Bills, Invoices, POs, Leads, Subs
 
+
+---
+
+## CS v2.7.1 – v2.7.5 — EMERGENCY LIVE-QA SESSION
+**Date:** July 6-7, 2026
+**Type:** Critical Bug-Fix Session — triggered by Executive demand for live browser testing over code-inspection claims
+
+### Context
+The previous session (CS v2.7, undocumented until this session) claimed "Operational Readiness
+81%→97%" and "All 11 departments ≥90%" based on code-presence checks. President directed Claude
+to prove readiness via an actual live browser walkthrough rather than trust the percentage.
+Live testing found the app's entire navigation layer non-functional on the very first click.
+
+### Fixes (each verified live in the browser after deploy, except where noted)
+- **v2.7.1** — Restored `goTab()` (143 call sites, was completely undefined — no page in the
+  app could be navigated to by click), `toggleGroup()` (5 sites — Sales/Financial/Files/
+  Communication sidebar sections could not be expanded), `showQuickAdd()`, `updateNotifBadge()`,
+  `toggleSidebar()`. Aliased `showNewJobForm→showJobForm`, `showNewPOForm→showPOForm`,
+  `showNewCOForm→showCOForm`, `showInvoiceForm→showInvForm`, `openLead→leadDetail` (real modal
+  builders existed under different names than what buttons called). Built `showNewLeadForm()`
+  from scratch (did not exist under any name) matching saveLead()'s expected fields.
+- **v2.7.2** — Built `newEstimate()` from scratch (did not exist under any name) — this had
+  blocked all estimate creation.
+- **v2.7.3** — Reconstructed `calcEstTotal()` (called in 5 places, never defined — every
+  estimate showed $0 and `openEstimate()` threw a ReferenceError on open). ⚠️ Reconstructed
+  from field names and the tax/fee business rules in this doc set, not a restoration of
+  verified original logic — flagged for Executive review of the actual math before use on a
+  real client quote.
+- **v2.7.4** — Built `showNewBillForm()` from scratch (did not exist under any name). Wired
+  `calcEstTotal()` to the existing but previously-bypassed `getTaxRate()`/`getContractorFee()`
+  Settings functions instead of hardcoded 8%/20%, so Settings overrides now actually apply.
+- **v2.7.5** — Fixed an id mismatch (`sign-name-` vs `sig-name-`) between the "Sign Now" list-
+  shortcut modal and `executeSignature()` — this silently blocked e-signature → job creation
+  for any proposal signed via that entry point (found via code trace, not yet live-verified).
+
+### Live-Verified This Session (real browser, real data, not code inspection)
+1. Navigation — every sidebar section and tab now opens on click, zero console errors
+2. Lead creation — created "Robert & Linda Chen," $95,000 — confirmed pipeline total updated correctly
+3. Opening a lead detail — confirmed
+4. Estimate creation — created, added a Materials line item ($18,000)
+5. Estimate tax/fee math — $18,000 materials → $1,440 tax (8%) + $3,600 fee (20%) = $23,040 — correct
+6. Proposal generation from estimate — correct $23,040 total, full 9-section document rendered
+
+### Known Issue Found, Not Yet Fixed
+- Proposal scope-of-work section renders "at :" with a blank address when the estimate has no
+  linked job/address — minor, lower priority
+
+### Not Yet Live-Tested This Session
+- E-signature → Job/Budget/Deposit Invoice creation cascade (code-traced and looks complete;
+  the id-mismatch fix above has not yet been re-verified live)
+- PO 3-stage authorization, Bill creation (code fixed, not yet live-verified)
+- Invoice creation, Record Payment (code-traced and looks complete, not yet live-verified)
+- Punch List, RFIs, Selections, Specifications, Warranty, Lien Waivers new-record creation —
+  confirmed still broken, see OQ-030
+
+### Methodology Change
+See DEC-027/028 and OQ-031: Operational Readiness percentages based on code-presence checks
+are retired. Readiness claims must be backed by a live Executive Testing pass with zero
+console errors.
+
