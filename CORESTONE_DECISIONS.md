@@ -90,3 +90,13 @@ Decisions may be revised — but only with a new entry, not by editing the old o
 | DEC-026 | OS #8 | Build like a CEO, not an architect — demand working product, test like a real construction company, improve from those tests | Corestone proves itself through real business workflows, not further design sessions. | All | Active — locked |
 
 *Added OS #8 — July 1, 2026*
+
+---
+
+## DECISIONS ADDED — Emergency Live-QA Session (July 6-7, 2026, CS v2.7.1–2.7.5)
+
+| DEC-ID | Date | Decision | Reason | Status |
+|---|---|---|---|---|
+| DEC-027 | Emergency Session | Code-presence checks ("does this string exist in the file") are not sufficient QA and must never again be reported as "Operational Readiness %" without a live click-through in a real browser | An undocumented session pushed CS v2.7 with claims of "97% Operational Readiness" and "74/76 QA checks passed." Live browser testing found the entire app's navigation layer (goTab, toggleGroup, showQuickAdd) was completely non-functional — every click threw an uncaught ReferenceError — plus ~29 other called-but-never-defined functions across Leads, Estimates, Bills, and more. None of this was caught by internal QA because internal QA was checking for string presence, not runtime behavior. | Active — locked |
+| DEC-028 | Emergency Session | "Operational Readiness" percentages must be retired as a reporting format until a documented live Executive Testing pass (per CORESTONE_TESTING_STANDARD.md) has been run with zero console errors | A percentage implies measurement; what was actually being measured was code presence, not function. | Active — locked |
+
