@@ -14127,6 +14127,7 @@ function pmtCanvasClick(e){
       }
       PMT.clickPoints = [];
       PMT.tool = null;
+      document.querySelectorAll('[data-pmt-tool]').forEach(function(b){ b.style.outline='none'; });
       pmtRedraw();
     }
     return;
@@ -14175,10 +14176,14 @@ function pmtCanvasClick(e){
 }
 
 function pmtCanvasDblClick(e){
-  if(!PMT || PMT.tool!=='poly' || PMT.clickPoints.length<3) return;
+  if(!PMT || PMT.tool!=='poly') return;
   e.preventDefault();
+  // A dblclick always fires after two preceding click events, each of which
+  // added a phantom point at the double-click location via the 'poly' branch
+  // of pmtCanvasClick. Remove those two duplicates before closing the shape.
+  var pts = PMT.clickPoints.slice(0, -2);
+  if(pts.length < 3){ PMT.clickPoints = []; pmtRedraw(); return; }
   // Shoelace formula for polygon area in px^2, converted to sqft
-  var pts = PMT.clickPoints;
   var areaPx = 0;
   for(var i=0;i<pts.length;i++){
     var j=(i+1)%pts.length;
