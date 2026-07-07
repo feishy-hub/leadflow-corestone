@@ -780,12 +780,19 @@ function safeJSON(str){
 
 // ── AI SCOPE CHANGE DETECTOR ──
 async function aiDetectScope(text, jobId){
-  var r=await aiBrain('Analyze this message/transcript for scope changes that should become change orders:\n"'+text+'"\nJob: '+(AJOB?AJOB.job_name:'current job')+'\nReturn JSON: {"scope_changes_detected":true, (AJOB?AJOB.id:null),"changes":[{"description":"what changed","estimated_impact":"$X","recommended_action":"create_co|monitor|no_action"}],"co_recommended":true,"urgency":"immediate|soon|low"}',
-    'You are a construction scope change detector. Return ONLY raw JSON.',600);
+  var r=await aiBrain('Analyze this message/transcript for scope changes that should become change orders, and separately for anything that reads as a client complaint or urgent issue needing attention.\n'
+    +'The text may be in English, Yiddish, or a mix of both \u2014 read and understand it in whatever language it is written, then respond only in English.\n'
+    +'TEXT: "'+text+'"\nJob: '+(AJOB?AJOB.job_name:'current job')+'\n'
+    +'Return ONLY raw JSON: {"scope_changes_detected":true,"changes":[{"description":"what changed","estimated_impact":"$X","recommended_action":"create_co|monitor|no_action"}],"co_recommended":true,"complaint_detected":true,"complaint_summary":"summary if any, else empty string","urgency":"immediate|soon|low"}',
+    'You are a construction scope-change and complaint detector fluent in English and Yiddish. Return ONLY raw JSON.',700);
   var d=safeJSON(r);
   if(d&&d.co_recommended&&d.changes&&d.changes.length){
-    toast('⚠️ AI detected '+d.changes.length+' potential scope change(s) — check Gatekeeper','err');
+    toast('\u26a0\ufe0f AI detected '+d.changes.length+' potential scope change(s) \u2014 check Gatekeeper','err');
     await dbIns('gatekeeper_queue',{type:'Scope Change Detected',title:'AI: Potential CO detected',description:d.changes.map(function(c){return c.description+' (~'+c.estimated_impact+')';}).join('\n'),status:'pending',priority:'high',auto_action:'Review and create change order if confirmed'});
+  }
+  if(d&&d.complaint_detected&&d.complaint_summary){
+    toast('\u26a0\ufe0f AI detected a possible client complaint \u2014 check Gatekeeper','err');
+    await addToGatekeeper('client_complaint','AI: Possible client complaint detected',d.complaint_summary,'high','Review and respond to the client directly.','client_complaint',jobId||null);
   }
   return d;
 }
@@ -6394,7 +6401,8 @@ async function pgPhotoLog(){
     var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
       +'<div><div style="font-size:18px;font-weight:800">📸 Photo Log</div>'
       +'<div style="font-size:12px;color:var(--muted)">'+(AJOB?AJOB.job_name:'All jobs')+' · '+photos.length+' photos</div></div>'
-      +'<button onclick="showPhotoForm()" class="btn btn-p">+ Add Photo</button></div>';
+      +'<button onclick="showPhotoForm()" class="btn btn-p">+ Add Photo</button>'
+      +'<button onclick="showVideoUpload()" class="btn btn-g" style="margin-left:8px">🎥 Add Video</button></div>';
     if(!photos.length){
       html+='<div class="empty"><div class="ei">📸</div><div class="et">No photos yet</div>'
         +'<button onclick="showPhotoForm()" class="btn btn-p" style="margin-top:12px">+ Add First Photo</button></div>';
@@ -14353,6 +14361,108 @@ async function pmtPushToEstimate(){
   if(saved[0]) openEstimate(saved[0].id);
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// VIDEO UPLOAD + AI ANALYSIS — requested by Feishy.
+// HONEST LIMITATION: this is frame-by-frame visual analysis (extracts
+// several still frames from the video and runs the same vision AI used
+// for photos), NOT audio transcription. There is no audio-to-text
+// transcription of video/voice recordings built here — Chrome's built-in
+// speech engine (used for live call transcription) has no Yiddish model,
+// and there is no other transcription service connected to this app. If
+// a site manager narrates in Yiddish over video, the words will not be
+// captured — only what's visually in the frames.
+// ═══════════════════════════════════════════════════════════════════════
+function showVideoUpload(){
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="video-up"><div class="modal"><div class="mh"><div class="mt">Add Video</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="fr"><label>Video File *</label><input id="vid-file" type="file" accept="video/*"></div>'
+    +'<div class="fr"><label>Phase</label><select id="vid-phase"><option>Pre-Construction</option><option>Demolition</option><option>Framing</option><option>Rough-In</option><option>Insulation</option><option>Drywall</option><option>Finishes</option><option>Punch List</option><option>Complete</option></select></div>'
+    +'<div class="fr"><label>Caption</label><input id="vid-cap" placeholder="Walkthrough — 2nd floor framing"></div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-top:8px">AI will visually analyze several frames from this video for progress, quality, and safety issues. It does not transcribe spoken narration.</div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveVideo()">Upload & Analyze</button></div></div></div>');
+}
+
+async function extractVideoFrames(file, count){
+  return new Promise(function(resolve, reject){
+    var video = document.createElement('video');
+    video.preload = 'auto';
+    video.src = URL.createObjectURL(file);
+    video.muted = true;
+    video.onloadedmetadata = function(){
+      var duration = video.duration;
+      var frames = [];
+      var canvas = document.createElement('canvas');
+      var times = [];
+      for(var i=1;i<=count;i++){ times.push(duration * (i/(count+1))); }
+      var idx = 0;
+      function grabNext(){
+        if(idx >= times.length){ resolve(frames); return; }
+        video.currentTime = times[idx];
+      }
+      video.onseeked = function(){
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+        idx++;
+        grabNext();
+      };
+      grabNext();
+    };
+    video.onerror = function(e){ reject(e); };
+  });
+}
+
+async function saveVideo(){
+  var fileInput = document.getElementById('vid-file');
+  if(!fileInput.files.length){ toast('Select a video file','err'); return; }
+  var file = fileInput.files[0];
+  var phase = document.getElementById('vid-phase').value;
+  var cap = document.getElementById('vid-cap').value;
+  closeOv(document.querySelector('#video-up .mc'));
+  toast('🎥 Extracting frames and analyzing — this may take a moment...','ok',10000);
+
+  var frames;
+  try{ frames = await extractVideoFrames(file, 4); }
+  catch(e){ toast('Could not read this video file: '+e.message,'err'); return; }
+
+  var jobId = AJOB ? AJOB.id : null;
+  var saved = await dbIns('videos', {job_id:jobId, phase:phase, caption:cap, filename:file.name, frame_count:frames.length, created_at:new Date().toISOString()});
+  var videoId = saved[0].id;
+
+  var frameAnalyses = [];
+  for(var i=0;i<frames.length;i++){
+    try{
+      var r = await fetch('/api/claude', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:500,
+          messages:[{role:'user', content:[
+            {type:'image', source:{type:'base64', media_type:'image/jpeg', data: frames[i]}},
+            {type:'text', text:'Frame '+(i+1)+' of '+frames.length+' from a construction site walkthrough video. Caption: '+(cap||'none')+' | Phase: '+(phase||'unknown')+'.\nReturn JSON: {"description":"what you see","issues":["problems, if any"],"safety_concerns":["if any"]}'}
+          ]}]})});
+      var data = await r.json();
+      if(r.ok){ frameAnalyses.push(safeJSON(data.content[0].text)); }
+    }catch(frameErr){ console.warn('[saveVideo] frame analysis failed', frameErr); }
+  }
+
+  var allIssues = [], allSafety = [];
+  frameAnalyses.forEach(function(a){ if(a){ (a.issues||[]).forEach(function(i){allIssues.push(i);}); (a.safety_concerns||[]).forEach(function(s){allSafety.push(s);}); } });
+  var summary = frameAnalyses.filter(Boolean).map(function(a,i){ return 'Frame '+(i+1)+': '+a.description; }).join(' | ');
+
+  await dbUpd('videos', videoId, {
+    ai_summary: summary,
+    ai_issues: JSON.stringify(allIssues),
+    ai_safety_concerns: JSON.stringify(allSafety)
+  });
+
+  if(allIssues.length || allSafety.length){
+    await addToGatekeeper('video_issue', 'Video analysis flagged issue(s)'+(cap?': '+cap:''),
+      allIssues.concat(allSafety).join('. '), 'high',
+      'Review the video and determine corrective action.', 'video_issue', videoId);
+    toast('⚠️ AI flagged '+(allIssues.length+allSafety.length)+' issue(s) from the video — check Gatekeeper','err',6000);
+  } else {
+    toast('✅ Video analyzed — no issues flagged','ok');
+  }
+}
+
 </script>
 
 <div id="call-overlay" style="position:fixed;inset:0;background:rgba(5,15,25,0.97);z-index:800;display:none;flex-direction:column;">
@@ -14388,7 +14498,7 @@ async function pmtPushToEstimate(){
       </div>
       <div id="co-script" style="flex:1;overflow-y:auto;padding:18px;font-size:15px;line-height:2.2;color:rgba(255,255,255,0.92);"><em style="color:rgba(255,255,255,0.3);font-size:13px">Preparing your script...</em></div>
       <div style="padding:7px 14px;border-top:1px solid rgba(255,255,255,0.07);background:rgba(0,0,0,0.2);flex-shrink:0;">
-        <div style="font-size:9px;font-weight:800;color:rgba(255,255,255,0.3);text-transform:uppercase;margin-bottom:4px">Live Transcript</div>
+        <div style="font-size:9px;font-weight:800;color:rgba(255,255,255,0.3);text-transform:uppercase;margin-bottom:4px">Live Transcript <span style="text-transform:none;font-weight:400;color:rgba(255,255,255,0.25)">(English speech only — Yiddish is not supported by the browser's speech engine)</span></div>
         <div id="co-transcript" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:5px;padding:7px;font-size:11px;color:rgba(255,255,255,0.5);height:60px;overflow-y:auto;line-height:1.6;"></div>
       </div>
     </div>
