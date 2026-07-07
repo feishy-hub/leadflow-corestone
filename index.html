@@ -776,21 +776,7 @@ function safeJSON(str){
 }
 
 
-// ── AI PHOTO ANALYZER ──
-async function aiAnalyzePhoto(imageBase64, context){
-  if(!imageBase64){toast('No image to analyze','err');return null;}
-  try{
-    var r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,
-        messages:[{role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:imageBase64}},
-          {type:'text',text:'Analyze this construction site photo for Corestone Developers.\nContext: '+(context||'General site photo')+'\nReturn JSON: {"description":"what you see","issues":["any problems spotted"],"quality":"excellent|good|fair|poor","recommendations":["action items"],"safety_concerns":["any safety issues"],"progress_estimate":"percentage if estimable","tags":["keyword tags"]}'}
-        ]}]})});
-    var data=await r.json();
-    if(!r.ok) throw new Error(data.error||'API error');
-    return safeJSON(data.content[0].text);
-  }catch(e){toast('Photo AI error: '+e.message,'err');return null;}
-}
+// (aiAnalyzePhoto consolidated below — see AI PHOTO ANALYZER v2)
 
 // ── AI SCOPE CHANGE DETECTOR ──
 async function aiDetectScope(text, jobId){
@@ -2754,6 +2740,12 @@ async function sendMsg(){
     toast('Message sent to '+recipientLabel+' ✅','ok');
     if($('msg-body'))$('msg-body').value='';
     await auditLog('messages',null,'message_sent',null,'sent',false,'Message sent to '+recipientLabel+' ('+typeLabel+')');
+    // AI classification — was only running on Daily Log notes before; now also
+    // scans every logged message for potential change orders or complaints,
+    // per Feishy's request that anything coming in should be read and routed.
+    if(AJOB && body.length > 15){
+      try{ await aiDetectScope(body, AJOB.id); }catch(scopeErr){ console.warn('[sendMsg] scope detection failed silently', scopeErr); }
+    }
     pgMsgs();
   }catch(e){toast(e.message,'err');}
 }
@@ -3000,13 +2992,16 @@ async function aiLogTransaction(type, description, priority){
     var needsGK=type.includes('CO')||type.includes('Invoice')||type.includes('Budget')||priority==='high';
     if(needsGK){
       await dbIns('gatekeeper_queue',{
-        type:type,
+        item_type: type.toLowerCase().replace(/\s+/g,'_'),
+        action_type: type.toLowerCase().replace(/\s+/g,'_'),
         title:type+': '+description.substring(0,60),
         description:description,
         status:'pending',
         priority:priority,
-        auto_action:'AI logged — review and confirm'
+        ai_recommendation:'AI logged — review and confirm',
+        created_at:new Date().toISOString()
       });
+      try{ updateNotifBadge(); }catch(nbErr){}
     }
     // Always log to daily activity
     var today=new Date().toISOString().split('T')[0];
@@ -6372,18 +6367,12 @@ async function uploadPhoto(input){
       var jobId=AJOB?AJOB.id:null;
       await dbIns('photos',{job_id:jobId,file_name:file.name,data:base64,created_at:new Date().toISOString(),notes:'',ai_analysis:null});
       toast('Photo saved','ok');
-      // Auto AI analysis
+      // Auto AI analysis — real vision analysis of the actual photo, by id (fixed:
+      // this used to pass the raw base64 string into a function whose signature
+      // had since changed to expect a photo id, so it silently did nothing)
       if(base64){
-        toast('🤖 AI analyzing photo...','ok',5000);
-        var analysis=await aiAnalyzePhoto(base64,'Job site photo');
-        if(analysis){
-          var photos=await dbGet('photos','?order=created_at.desc&limit=1');
-          if(photos&&photos[0]) await dbUpd('photos',photos[0].id,{ai_analysis:JSON.stringify(analysis)});
-          if(analysis.issues&&analysis.issues.length){
-            toast('AI found '+analysis.issues.length+' issue(s) — check Gatekeeper','err');
-            await dbIns('gatekeeper_queue',{type:'Photo Issue',title:'AI detected issue in photo',description:analysis.issues.join(', '),status:'pending',priority:'high'});
-          }
-        }
+        var justSaved=await dbGet('photos','?order=created_at.desc&limit=1');
+        if(justSaved&&justSaved[0]) await aiAnalyzePhoto(justSaved[0].id);
       }
       pgPhotoLog();
       nextStep('Photo Uploaded! 📸', 'Photo is saved. What next?', [
@@ -6457,20 +6446,34 @@ async function savePhoto(){
   pgPhotoLog();
 }
 
+// ── AI PHOTO ANALYZER v2 (consolidated) — analyzes the actual photo pixels via
+// vision, not just its caption text. Supports both storage shapes used across
+// the app: photo.data (raw base64) and photo.url (full data: URL). ──
 async function aiAnalyzePhoto(id){
   var photos=await dbGet('photos','?id=eq.'+id);
   var photo=photos[0];if(!photo)return;
+  var base64=null;
+  if(photo.data) base64=photo.data;
+  else if(photo.url && photo.url.indexOf('base64,')>-1) base64=photo.url.split('base64,')[1];
+  if(!base64){ toast('No image data available to analyze for this photo','err'); return; }
   toast('🤖 Analyzing photo...','ok',8000);
   try{
-    var r=await ai('Analyze this construction photo description and provide quality assessment.\nCaption: '+(photo.caption||'Unknown')+'\nPhase: '+(photo.phase||'Unknown')+'\nNotes: '+(photo.notes||'None')+'\nJob: '+(AJOB?AJOB.job_name:'Unknown')+'\nReturn JSON: {"quality":"good|acceptable|issue","flag":"none|review|issue","notes":"brief quality observation","action_needed":"what to do if issue"}','Construction photo analyst. Return ONLY JSON.',400);
-    var d=safeJSON(r);
+    var r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:base64}},
+          {type:'text',text:'Analyze this construction site photo for Corestone Developers.\nCaption: '+(photo.caption||'none')+' | Phase: '+(photo.phase||'unknown')+'\nReturn JSON: {"description":"what you see","issues":["problems spotted, if any"],"quality":"excellent|good|fair|poor","safety_concerns":["safety issues, if any"],"flag":"none|review|issue"}'}
+        ]}]})});
+    var data=await r.json();
+    if(!r.ok) throw new Error(data.error||'API error');
+    var d=safeJSON(data.content[0].text);
     if(d){
-      await dbUpd('photos',id,{ai_quality:d.quality,ai_flag:d.flag||'none',ai_notes:d.notes,ai_action:d.action_needed});
-      if(d.flag==='issue'){
-        await addToGatekeeper('photo_issue','Photo issue flagged: '+(photo.caption||'Photo'),'AI flagged a quality issue in photo. Phase: '+photo.phase+'. '+d.notes+'. Action: '+d.action_needed,'high','Review photo and determine corrective action.','photo_issue',id);
+      await dbUpd('photos',id,{ai_quality:d.quality,ai_flag:d.flag||'none',ai_notes:d.description,ai_issues:JSON.stringify(d.issues||[])});
+      if(d.flag==='issue' || (d.safety_concerns&&d.safety_concerns.length)){
+        await addToGatekeeper('photo_issue','Photo issue flagged'+(photo.caption?': '+photo.caption:''),(d.issues||[]).concat(d.safety_concerns||[]).join('. '),'high','Review photo and determine corrective action.','photo_issue',id);
         toast('⚠️ Issue flagged — queued in Gatekeeper','err');
       } else {
-        toast('Photo analyzed: '+d.quality,'ok');
+        toast('Photo analyzed: '+(d.quality||'ok'),'ok');
       }
       pgPhotoLog();
     }
@@ -6485,13 +6488,19 @@ async function savePhotos(){
   var cap=$('ph-cap').value;
   if(!files.length){toast('Select at least one photo','err');return;}
   toast('Saving '+files.length+' photos...','ok');
+  var savedIds=[];
   for(var i=0;i<files.length;i++){
     var b64=await new Promise(function(res,rej){var fr=new FileReader();fr.onload=function(){res(fr.result);};fr.onerror=rej;fr.readAsDataURL(files[i]);});
-    await dbIns('photos',{url:b64,phase:phase,caption:cap,job_id:AJOB?AJOB.id:null,filename:files[i].name});
+    var saved=await dbIns('photos',{url:b64,phase:phase,caption:cap,job_id:AJOB?AJOB.id:null,filename:files[i].name});
+    if(saved[0]) savedIds.push(saved[0].id);
   }
   toast('✅ '+files.length+' photos saved','ok');
   closeOv(document.querySelector('#photo-up .mc'));
   pgPhotoLog();
+  // AI vision analysis on every photo, automatically, no extra click needed
+  for(var j=0;j<savedIds.length;j++){
+    try{ await aiAnalyzePhoto(savedIds[j]); }catch(analyzeErr){ console.warn('[savePhotos] AI analysis failed for',savedIds[j],analyzeErr); }
+  }
 }
 
 function viewPhoto(id){
