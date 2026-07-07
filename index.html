@@ -13738,8 +13738,10 @@ function calcEstTotal(lines, jobId){
     else subtotal_other += raw; // Equipment, Other
   });
   var subtotal = subtotal_labor + subtotal_materials + subtotal_subs + subtotal_permits + subtotal_other;
-  var tax = subtotal_materials * 0.08; // NY law — materials only, 8% (Ulster County)
-  var contractor_fee = (subtotal - subtotal_permits) * 0.20; // 20% fee, excludes permits
+  var taxRate = (typeof getTaxRate==='function') ? getTaxRate(jobId) : 0.08; // NY law — materials only (Ulster County); configurable in Settings
+  var feeRate = (typeof getContractorFee==='function') ? getContractorFee(jobId) : 0.20; // configurable in Settings
+  var tax = subtotal_materials * taxRate;
+  var contractor_fee = (subtotal - subtotal_permits) * feeRate; // fee excludes permits
   var grand_total = subtotal + tax + contractor_fee;
   return {
     subtotal: subtotal,
@@ -13752,6 +13754,27 @@ function calcEstTotal(lines, jobId){
     contractor_fee: contractor_fee,
     grand_total: grand_total
   };
+}
+
+
+// ── NEW BILL FORM — showNewBillForm() was called but never defined;
+// saveNewBill() (the save handler) already existed expecting
+// nbill-vendor/nbill-amount/nbill-desc/nbill-due/nbill-po/nbill-job. ──
+async function showNewBillForm(){
+  var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+  var pos = await dbGet('purchase_orders','?order=created_at.desc') || [];
+  var jobOptions = '<option value="">No job</option>' + jobs.map(function(j){
+    return '<option value="'+j.id+'"'+(AJOB&&AJOB.id===j.id?' selected':'')+'>'+j.job_name+'</option>';
+  }).join('');
+  var poOptions = '<option value="">No linked PO</option>' + pos.map(function(p){
+    return '<option value="'+p.id+'">'+(p.po_number||p.id)+' — '+(p.supplier_name||'')+' ('+fmt$(p.amount||0)+')</option>';
+  }).join('');
+  document.body.insertAdjacentHTML('beforeend', '<div class="ov" id="nbf"><div class="modal"><div class="mh"><div class="mt">New Bill</div><button class="mc" onclick="closeOv(this)">×</button></div><div class="mb">'
+    +'<div class="f2"><div class="fr"><label>Vendor *</label><input id="nbill-vendor" placeholder="ABC Lumber Supply"></div><div class="fr"><label>Amount *</label><input id="nbill-amount" type="number"></div></div>'
+    +'<div class="fr"><label>Description</label><textarea id="nbill-desc" style="min-height:60px"></textarea></div>'
+    +'<div class="f2"><div class="fr"><label>Due Date</label><input id="nbill-due" type="date"></div><div class="fr"><label>Job</label><select id="nbill-job">'+jobOptions+'</select></div></div>'
+    +'<div class="fr"><label>Linked Purchase Order</label><select id="nbill-po">'+poOptions+'</select></div>'
+    +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button><button class="btn btn-p" onclick="saveNewBill();closeOv(document.getElementById(&quot;nbf&quot;))">Create Bill</button></div></div></div>');
 }
 
 </script>
