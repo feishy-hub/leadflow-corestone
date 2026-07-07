@@ -5277,15 +5277,88 @@ function showQuickLog(){
     +'<div class="fr"><label>Phase</label><input id="ql-phase" value="'+(AJOB&&AJOB.current_phase||'')+'" placeholder="Current phase"></div></div>'
     +'<div class="fr"><label>What happened today — speak naturally or type</label>'
     +'<textarea id="ql-notes" style="min-height:120px" placeholder="E.g.: Today we finished the second floor framing, plumber came in and roughed in the main bathroom and master bath, delivered the lumber for the roof trusses, slight delay because the beam supplier sent wrong size LVL beams, I sent them back..."></textarea></div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px">'
+    +'<button type="button" id="ql-rec-btn" onclick="qlToggleVoiceRecord()" style="flex:1;padding:10px;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit">🎙️ Record Voice (English)</button>'
+    +'<button type="button" onclick="document.getElementById(\'ql-photo-file\').click()" style="flex:1;padding:10px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit">📸 Add Photo</button>'
+    +'<button type="button" onclick="document.getElementById(\'ql-video-file\').click()" style="flex:1;padding:10px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit">🎥 Add Video</button>'
+    +'</div>'
+    +'<input type="file" id="ql-photo-file" accept="image/*" capture="environment" style="display:none" onchange="qlAttachPhoto(this)">'
+    +'<input type="file" id="ql-video-file" accept="video/*" capture="environment" style="display:none" onchange="qlAttachVideo(this)">'
+    +'<div id="ql-attachments" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>'
     +'<div id="ql-result"></div>'
     +'</div><div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Cancel</button>'
     +'<button class="btn btn-p" onclick="saveQuickLog()">🤖 Save + AI Format</button></div></div>';
   document.body.appendChild(el);
+  QL_ATTACHMENTS = {photos:[], videos:[]};
+}
+
+var QL_ATTACHMENTS = {photos:[], videos:[]};
+var qlRecog = null, qlRecording = false;
+
+function qlToggleVoiceRecord(){
+  var btn = document.getElementById('ql-rec-btn');
+  if(qlRecording){
+    if(qlRecog) qlRecog.stop();
+    qlRecording = false;
+    btn.textContent = '🎙️ Record Voice (English)';
+    btn.style.background = 'var(--red-bg)';
+    return;
+  }
+  if(!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)){
+    toast('Voice recording is not supported in this browser — use Chrome','err');
+    return;
+  }
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  qlRecog = new SR();
+  qlRecog.continuous = true; qlRecog.interimResults = true; qlRecog.lang = 'en-US';
+  var baseText = document.getElementById('ql-notes').value;
+  if(baseText && !baseText.endsWith(' ')) baseText += ' ';
+  qlRecog.onresult = function(e){
+    var finalText = '';
+    for(var i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+    }
+    if(finalText){
+      baseText += finalText;
+      document.getElementById('ql-notes').value = baseText;
+    }
+  };
+  qlRecog.onerror = function(e){ console.warn('[qlRecog] error', e); };
+  qlRecog.start();
+  qlRecording = true;
+  btn.textContent = '⏹️ Stop Recording';
+  btn.style.background = '#dc2626'; btn.style.color = '#fff';
+  toast('🎙️ Listening — speak naturally, English only','ok',3000);
+}
+
+function qlAttachPhoto(input){
+  if(!input.files.length) return;
+  var file = input.files[0];
+  var reader = new FileReader();
+  reader.onload = function(e){
+    QL_ATTACHMENTS.photos.push({dataUrl:e.target.result, filename:file.name});
+    qlRenderAttachments();
+  };
+  reader.readAsDataURL(file);
+}
+function qlAttachVideo(input){
+  if(!input.files.length) return;
+  QL_ATTACHMENTS.videos.push(input.files[0]);
+  qlRenderAttachments();
+}
+function qlRenderAttachments(){
+  var el = document.getElementById('ql-attachments');
+  if(!el) return;
+  var chips = [];
+  QL_ATTACHMENTS.photos.forEach(function(p){ chips.push('<span class="badge" style="background:#eef2ff;color:#4338ca">📸 '+p.filename+'</span>'); });
+  QL_ATTACHMENTS.videos.forEach(function(v){ chips.push('<span class="badge" style="background:#eef2ff;color:#4338ca">🎥 '+v.name+'</span>'); });
+  el.innerHTML = chips.join('');
 }
 
 async function saveQuickLog(){
   var notes=$('ql-notes').value.trim();
-  if(!notes){toast('Add some notes first','err');return;}
+  var hasAttachments = QL_ATTACHMENTS && ((QL_ATTACHMENTS.photos&&QL_ATTACHMENTS.photos.length) || (QL_ATTACHMENTS.videos&&QL_ATTACHMENTS.videos.length));
+  if(!notes && !hasAttachments){toast('Add some notes, or record/attach a photo or video first','err');return;}
   var date=$('ql-date').value;
   var weather=$('ql-weather').value;
   var crew=parseInt($('ql-crew').value)||0;
@@ -5293,13 +5366,13 @@ async function saveQuickLog(){
   $('ql-result').innerHTML='<div class="loading-row"><div class="spin"></div>AI formatting log...</div>';
   
   try{
-    var aiSummary=await ai(
+    var aiSummary = notes ? await ai(
       'Format this raw construction site log into a clean professional daily log entry. Keep all facts, add structure.\n'
       +'Date: '+date+' | Weather: '+weather+' | Crew: '+crew+' | Phase: '+phase+'\n'
       +'Raw notes: '+notes+'\n\n'
       +'Return a clean formatted summary in 3-5 sentences covering: work completed, materials/deliveries, issues/delays, next day plan. Be specific, keep numbers and names.',
       'Professional construction daily log formatter. Clear, factual, structured.'
-    );
+    ) : '';
     
     await dbIns('daily_logs',{
       job_id:AJOB?AJOB.id:null,
@@ -5308,9 +5381,27 @@ async function saveQuickLog(){
       phase:phase,created_at:new Date().toISOString()
     });
     
-    toast('✅ Log saved','ok');
+    toast('✅ Log saved'+(hasAttachments?' — analyzing attachments...':''),'ok');
     closeOv(document.querySelector('#qlog .mc'));
     pgDailyV2();
+
+    // Save + analyze any photos recorded/attached from the Daily Log
+    if(QL_ATTACHMENTS && QL_ATTACHMENTS.photos && QL_ATTACHMENTS.photos.length){
+      for(var pi=0; pi<QL_ATTACHMENTS.photos.length; pi++){
+        var p = QL_ATTACHMENTS.photos[pi];
+        var savedPhoto = await dbIns('photos',{url:p.dataUrl, phase:phase, caption:'From Daily Log — '+date, job_id:AJOB?AJOB.id:null, filename:p.filename});
+        if(savedPhoto[0]){ try{ await aiAnalyzePhoto(savedPhoto[0].id); }catch(pErr){console.warn('[saveQuickLog] photo analysis failed',pErr);} }
+      }
+    }
+    // Save + analyze any videos recorded/attached from the Daily Log
+    if(QL_ATTACHMENTS && QL_ATTACHMENTS.videos && QL_ATTACHMENTS.videos.length){
+      for(var vi=0; vi<QL_ATTACHMENTS.videos.length; vi++){
+        try{ await processVideoFile(QL_ATTACHMENTS.videos[vi], phase, 'From Daily Log — '+date, AJOB?AJOB.id:null); }
+        catch(vErr){console.warn('[saveQuickLog] video analysis failed',vErr);}
+      }
+    }
+    QL_ATTACHMENTS = {photos:[], videos:[]};
+
     // CASCADE: AI scope change detection on every daily log
     if(AJOB && notes.length > 20){
       try{
@@ -14419,13 +14510,18 @@ async function saveVideo(){
   var phase = document.getElementById('vid-phase').value;
   var cap = document.getElementById('vid-cap').value;
   closeOv(document.querySelector('#video-up .mc'));
+  await processVideoFile(file, phase, cap, AJOB ? AJOB.id : null);
+}
+
+// Reusable core so both the standalone Video Upload modal and the Daily Log
+// record-video button share the same save + frame-extraction + AI analysis.
+async function processVideoFile(file, phase, cap, jobId){
   toast('🎥 Extracting frames and analyzing — this may take a moment...','ok',10000);
 
   var frames;
   try{ frames = await extractVideoFrames(file, 4); }
   catch(e){ toast('Could not read this video file: '+e.message,'err'); return; }
 
-  var jobId = AJOB ? AJOB.id : null;
   var saved = await dbIns('videos', {job_id:jobId, phase:phase, caption:cap, filename:file.name, frame_count:frames.length, created_at:new Date().toISOString()});
   var videoId = saved[0].id;
 
@@ -14440,7 +14536,7 @@ async function saveVideo(){
           ]}]})});
       var data = await r.json();
       if(r.ok){ frameAnalyses.push(safeJSON(data.content[0].text)); }
-    }catch(frameErr){ console.warn('[saveVideo] frame analysis failed', frameErr); }
+    }catch(frameErr){ console.warn('[processVideoFile] frame analysis failed', frameErr); }
   }
 
   var allIssues = [], allSafety = [];
