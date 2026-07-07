@@ -14564,23 +14564,25 @@ async function processVideoFile(file, phase, cap, jobId){
   var saved = await dbIns('videos', {job_id:jobId, phase:phase, caption:cap, filename:file.name, frame_count:frames.length, created_at:new Date().toISOString()});
   var videoId = saved[0].id;
 
-  var frameAnalyses = [];
-  for(var i=0;i<frames.length;i++){
-    try{
-      var r = await fetch('/api/claude', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:500,
-          messages:[{role:'user', content:[
-            {type:'image', source:{type:'base64', media_type:'image/jpeg', data: frames[i]}},
-            {type:'text', text:'Frame '+(i+1)+' of '+frames.length+' from a construction site walkthrough video. Caption: '+(cap||'none')+' | Phase: '+(phase||'unknown')+'.\nReturn JSON: {"description":"what you see","issues":["problems, if any"],"safety_concerns":["if any"]}'}
-          ]}]})});
-      var data = await r.json();
-      if(r.ok){ frameAnalyses.push(safeJSON(data.content[0].text)); }
-    }catch(frameErr){ console.warn('[processVideoFile] frame analysis failed', frameErr); }
-  }
+  // Send all frames in ONE call so the AI sees them together and gives one
+  // combined analysis — sending them one-by-one (as before) meant each frame
+  // was analyzed with zero awareness of the others, so the same issue in the
+  // same room got independently re-described up to once per frame, which
+  // looked like the same finding repeated many times over.
+  var content = frames.map(function(f, i){ return {type:'image', source:{type:'base64', media_type:'image/jpeg', data:f}}; });
+  content.push({type:'text', text:'These are '+frames.length+' frames from ONE construction site walkthrough video, in order. Caption: '+(cap||'none')+' | Phase: '+(phase||'unknown')+'.\nGive ONE combined analysis across all frames together — do not repeat the same observation once per frame; describe the space and any issue only once, even if it appears in multiple frames.\nReturn JSON: {"description":"what you see overall, 2-3 sentences","issues":["each distinct problem once, not per-frame"],"safety_concerns":["each distinct safety issue once, not per-frame"]}'});
 
-  var allIssues = [], allSafety = [];
-  frameAnalyses.forEach(function(a){ if(a){ (a.issues||[]).forEach(function(i){allIssues.push(i);}); (a.safety_concerns||[]).forEach(function(s){allSafety.push(s);}); } });
-  var summary = frameAnalyses.filter(Boolean).map(function(a,i){ return 'Frame '+(i+1)+': '+a.description; }).join(' | ');
+  var d = null;
+  try{
+    var r = await fetch('/api/claude', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:700, messages:[{role:'user', content:content}]})});
+    var data = await r.json();
+    if(r.ok) d = safeJSON(data.content[0].text);
+  }catch(callErr){ console.warn('[processVideoFile] combined analysis failed', callErr); }
+
+  var allIssues = (d&&d.issues) || [];
+  var allSafety = (d&&d.safety_concerns) || [];
+  var summary = (d&&d.description) || '';
 
   await dbUpd('videos', videoId, {
     ai_summary: summary,
@@ -14606,7 +14608,21 @@ async function processVideoFile(file, phase, cap, jobId){
 // the source record regardless, so the history is never lost even if
 // nothing is escalated — that's what makes "ask me in a year" possible.
 // ═══════════════════════════════════════════════════════════════════════
+function aifrDedupe(findings){
+  var seen = [];
+  var out = [];
+  findings.forEach(function(f){
+    var norm = (f.text||'').toLowerCase().trim().replace(/[^a-z0-9 ]/g,'').slice(0,60);
+    if(!norm) return;
+    var isDupe = seen.some(function(s){ return s===norm || (norm.length>15 && (s.indexOf(norm)>-1 || norm.indexOf(s)>-1)); });
+    if(!isDupe){ seen.push(norm); out.push(f); }
+  });
+  return out;
+}
+
 function showAIFindingsReview(sourceType, sourceId, findings, contextLabel, description){
+  findings = aifrDedupe(findings);
+  if(!findings.length) return;
   var existing = document.getElementById('ai-findings-review'); if(existing) existing.remove();
   var el = document.createElement('div');
   el.className = 'ov'; el.id = 'ai-findings-review';
