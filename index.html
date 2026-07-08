@@ -9796,9 +9796,10 @@ async function classifyAndProcessEmail() {
 
     var resp = await fetch('/api/claude', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ prompt: prompt })
+      body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:900, messages:[{role:'user', content:prompt}]})
     });
     var data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||('API error '+resp.status));
     var raw = (data.content||[]).map(function(b){return b.text||'';}).join('');
     var clean = raw.replace(/```json|```/g,'').trim();
     var result = JSON.parse(clean);
@@ -9860,6 +9861,20 @@ async function classifyAndProcessEmail() {
         ai_recommendation: result.action || 'Review and handle manually.'
       });
       toast('Email classified as ' + result.type + ' — sent to Gatekeeper for review', 'ok', 4000);
+    }
+
+    // Client messages (not leads/bills) get the same scope-change/complaint
+    // scan a typed message or daily log note gets — this was the gap Feishy
+    // flagged: email used to only get a category, not this deeper check.
+    if(result.type === 'client_message'){
+      var extForScope = result.extracted || {};
+      var matchedJob = null;
+      if(extForScope.client_name){
+        var jobsForScope = await dbGet('jobs','?client_name=eq.'+encodeURIComponent(extForScope.client_name));
+        matchedJob = jobsForScope && jobsForScope[0];
+      }
+      try{ await aiDetectScope(emailText.slice(0,3000), matchedJob ? matchedJob.id : null); }
+      catch(scopeErr){ console.warn('[classifyAndProcessEmail] scope detection failed silently', scopeErr); }
     }
 
     document.getElementById('email-paste').value = '';
