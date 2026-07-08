@@ -4009,9 +4009,10 @@ async function toggleRecording(){
       if('webkitSpeechRecognition' in window||'SpeechRecognition' in window){
         var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
         recog=new SR();recog.continuous=true;recog.interimResults=true;recog.lang='en-US';
+        var recogProcessedCount=0; // see qlToggleVoiceRecord fix — same repeat bug fixed here
         recog.onresult=function(e){
           var final='';
-          for(var i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';}
+          for(var i=recogProcessedCount;i<e.results.length;i++){if(e.results[i].isFinal){final+=e.results[i][0].transcript+' ';recogProcessedCount=i+1;}}
           if(final.trim()){
             liveWords.push(final.trim());
             if(liveWords.length%6===0){detectCommitments(liveWords.join(' '));}
@@ -4026,7 +4027,8 @@ async function toggleRecording(){
           if(e.error==='not-allowed') toast('Mic permission denied — allow mic and try again','err');
         };
         recog.onend=function(){
-          // Auto-restart if still recording
+          // Auto-restart if still recording — results array starts fresh at 0 on restart
+          recogProcessedCount=0;
           if(callRec) try{recog.start();}catch(ex){}
         };
         recog.start();
@@ -5328,10 +5330,20 @@ function qlToggleVoiceRecord(){
   qlRecog.continuous = true; qlRecog.interimResults = true; qlRecog.lang = 'en-US';
   var baseText = document.getElementById('ql-notes').value;
   if(baseText && !baseText.endsWith(' ')) baseText += ' ';
+  // Track which result indices have already been appended, using our own
+  // counter rather than trusting e.resultIndex — Chrome's speech engine can
+  // re-fire growing versions of the same "final" result on repeated events,
+  // which without this caused the same words to get appended over and over,
+  // each time with one more word tacked on ("it's missing" -> "it's missing
+  // hair" -> "it's missing hair all" ...). Found live by Feishy.
+  var qlProcessedCount = 0;
   qlRecog.onresult = function(e){
     var finalText = '';
-    for(var i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+    for(var i=qlProcessedCount;i<e.results.length;i++){
+      if(e.results[i].isFinal){
+        finalText += e.results[i][0].transcript + ' ';
+        qlProcessedCount = i+1;
+      }
     }
     if(finalText){
       baseText += finalText;
