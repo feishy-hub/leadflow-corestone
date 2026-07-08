@@ -3733,6 +3733,29 @@ async function gkExecuteAction(item) {
       toast('Change order execution acknowledged — coordinate with trades','ok');
       break;
 
+    case 'schedule_shift_request': {
+      // Only fires when Feishy explicitly approves THIS item — never automatic.
+      var shiftJobId = item.reference_id;
+      var daysMatch = (item.title||'').match(/(\d+)\s*day/);
+      var shiftDays = daysMatch ? parseInt(daysMatch[1]) : 0;
+      if(shiftJobId && shiftDays > 0){
+        var schedRows = await dbGet('schedule', '?job_id=eq.'+shiftJobId);
+        var toShift = (schedRows||[]).filter(function(s){ return s.status !== 'complete'; });
+        for(var si=0; si<toShift.length; si++){
+          var s = toShift[si];
+          var updates = {};
+          if(s.start_date) updates.start_date = new Date(new Date(s.start_date).getTime() + shiftDays*86400000).toISOString().split('T')[0];
+          if(s.end_date) updates.end_date = new Date(new Date(s.end_date).getTime() + shiftDays*86400000).toISOString().split('T')[0];
+          if(Object.keys(updates).length) await dbUpd('schedule', s.id, updates);
+        }
+        toast('Schedule shifted: '+toShift.length+' phase(s) moved forward '+shiftDays+' day(s)','ok',5000);
+        await auditLog('schedule', shiftJobId, 'schedule_shifted_from_co', {shift_days: shiftDays, phases_shifted: toShift.length});
+      } else {
+        toast('Could not determine how many days to shift — check the schedule manually','err');
+      }
+      break;
+    }
+
     case 'co_client_response':
       // Client responded to CO — update status
       if(item.reference_id){
@@ -7734,7 +7757,7 @@ async function voiceBid(){
   micFillField('nbid-scope','Describe the scope of work for this bid package in detail');
   if($('bid-form-wrap'))$('bid-form-wrap').style.display='block';
 }
-async function viewBidDetail(id){toast('Bid detail coming soon','info');}
+// (viewBidDetail replaced below — see REAL BID RESPONSE INTAKE)
 async function aiRankBid(id){aiRankBids();}
 async function pgTodos(){
   var jobs = await dbGet('jobs','?order=job_name.asc');
@@ -11375,6 +11398,21 @@ async function runBusinessCascade(action, objectType, objectId, context) {
         );
         triggered.push('PM execution task created in Gatekeeper');
 
+        // 3b. If this CO has a schedule impact, ask directly whether to move
+        // the schedule — do NOT move it automatically. Approving this specific
+        // item is what actually shifts the dates.
+        if(schedDelta > 0 && jobId){
+          await addToGatekeeper('schedule_shift_request',
+            'Move schedule by '+schedDelta+' day'+(schedDelta>1?'s':'')+'? — '+(co.title||'Change Order'),
+            'This change order has an estimated schedule impact of '+schedDelta+' day'+(schedDelta>1?'s':'')+'. Approve to push all not-yet-complete phases on this job forward by that many days.',
+            'normal',
+            'Approve to shift the schedule, or reject to leave it as-is and handle manually.',
+            'schedule_shift_request',
+            jobId
+          );
+          triggered.push('Asked whether to move the schedule by '+schedDelta+' day(s)');
+        }
+
         // 4. Create AI-drafted client notification (staged — not auto-sent)
         if(jobId) {
           var clientMsg = 'Hi [Client], just confirming that your approved change order for "' +
@@ -14730,6 +14768,104 @@ async function aifrSendSelected(sourceType, sourceId){
   );
   toast('✅ '+checked.length+' item(s) sent to Gatekeeper','ok');
   closeOv(el.querySelector('.mc'));
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// REAL BID RESPONSE INTAKE — viewBidDetail() was a stub ("coming soon").
+// Built per Feishy's workflow: record each sub's actual bid amount/notes,
+// review against the scope requested, approve the winning one, which then
+// auto-drafts a Change Order for the CLIENT priced from that real bid —
+// not a guess. Approving the CO (client side, existing co.approved cascade)
+// now also asks whether to move the schedule, rather than silently doing
+// nothing or moving it automatically.
+// ═══════════════════════════════════════════════════════════════════════
+async function viewBidDetail(id){
+  var bids = await dbGet('bids','?id=eq.'+id);
+  var bid = bids[0]; if(!bid){toast('Bid package not found','err');return;}
+  var jobs = bid.job_id ? await dbGet('jobs','?id=eq.'+bid.job_id) : [];
+  var job = jobs[0];
+  var subs = await dbGet('subcontractors');
+  var invitedIds = JSON.parse(bid.invited_sub_ids||'[]');
+  var responses = JSON.parse(bid.responses||'[]'); // [{sub_id, amount, notes, status:'pending|received|approved|declined', received_at}]
+
+  var invitedSubs = invitedIds.map(function(sid){
+    var sub = subs.find(function(s){return s.id===sid;});
+    var resp = responses.find(function(r){return r.sub_id===sid;});
+    return {id:sid, name: sub?sub.company_name:'Unknown Sub', resp: resp||{sub_id:sid,status:'pending'}};
+  });
+
+  var html = '<div style="max-width:640px">'
+    +'<div style="margin-bottom:14px"><div style="font-weight:800;font-size:15px">'+(job?job.job_name:'No job')+' — '+uxEsc(bid.trade)+'</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+uxEsc(bid.scope_of_work||'')+'</div></div>'
+    + invitedSubs.map(function(s){
+        var r = s.resp;
+        var statusColor = {pending:'#94a3b8',received:'#2563eb',approved:'#059669',declined:'#dc2626'}[r.status]||'#94a3b8';
+        return '<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center">'
+          +'<div style="font-weight:700;font-size:13px">'+uxEsc(s.name)+'</div>'
+          +'<span class="badge" style="background:'+statusColor+'22;color:'+statusColor+'">'+r.status.toUpperCase()+'</span></div>'
+          +(r.status==='received'||r.status==='approved' ? '<div style="font-size:13px;margin-top:6px">Bid amount: <b>'+fmt$(r.amount||0)+'</b></div><div style="font-size:12px;color:var(--muted)">'+uxEsc(r.notes||'')+'</div>' : '')
+          +(r.status==='pending'||r.status==='declined' ? '<div style="display:flex;gap:6px;margin-top:8px">'
+            +'<input type="number" placeholder="Bid $" id="bidamt-'+s.id+'" style="width:100px;padding:6px;border:1px solid var(--border);border-radius:4px">'
+            +'<input type="text" placeholder="Notes" id="bidnote-'+s.id+'" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:4px">'
+            +'<button onclick="recordBidResponse(\''+bid.id+'\',\''+s.id+'\')" class="btn btn-g btn-sm">Record</button></div>' : '')
+          +(r.status==='received' ? '<button onclick="approveBidAndCreateCO(\''+bid.id+'\',\''+s.id+'\')" class="btn btn-p btn-sm" style="margin-top:8px">✅ Approve This Bid → Create Client Change Order</button>' : '')
+          +'</div>';
+      }).join('')
+    +'</div>';
+  document.querySelectorAll('.ov').forEach(function(el){el.remove();});
+  var wrap = document.createElement('div'); wrap.className='ov'; wrap.id='bid-detail-ov';
+  wrap.innerHTML = '<div class="modal"><div class="mh"><div class="mt">Bid Package Detail</div><button class="mc" onclick="closeOv(this)">\u00d7</button></div><div class="mb">'+html+'</div></div>';
+  document.body.appendChild(wrap);
+}
+
+async function recordBidResponse(bidId, subId){
+  var amt = parseFloat(document.getElementById('bidamt-'+subId).value)||0;
+  var notes = document.getElementById('bidnote-'+subId).value||'';
+  if(!amt){ toast('Enter the bid amount first','err'); return; }
+  var bids = await dbGet('bids','?id=eq.'+bidId);
+  var bid = bids[0];
+  var responses = JSON.parse(bid.responses||'[]');
+  var idx = responses.findIndex(function(r){return r.sub_id===subId;});
+  var entry = {sub_id:subId, amount:amt, notes:notes, status:'received', received_at:new Date().toISOString()};
+  if(idx>=0) responses[idx]=entry; else responses.push(entry);
+  var receivedCount = responses.filter(function(r){return r.status==='received'||r.status==='approved';}).length;
+  await dbUpd('bids', bidId, {responses: JSON.stringify(responses), bids_received: receivedCount});
+  toast('Bid recorded — review and approve when ready','ok');
+  viewBidDetail(bidId);
+}
+
+async function approveBidAndCreateCO(bidId, subId){
+  var bids = await dbGet('bids','?id=eq.'+bidId);
+  var bid = bids[0];
+  var responses = JSON.parse(bid.responses||'[]');
+  var idx = responses.findIndex(function(r){return r.sub_id===subId;});
+  if(idx<0){toast('Bid response not found','err');return;}
+  responses[idx].status = 'approved';
+  await dbUpd('bids', bidId, {responses: JSON.stringify(responses), status:'Bid Approved'});
+
+  var subs = await dbGet('subcontractors','?id=eq.'+subId);
+  var subName = subs[0] ? subs[0].company_name : 'subcontractor';
+  var bidAmount = responses[idx].amount;
+  var markedUpPrice = Math.round(bidAmount * 1.20 * 100) / 100; // standard 20% contractor fee, same as estimates
+
+  var jobs = bid.job_id ? await dbGet('jobs','?id=eq.'+bid.job_id) : [];
+  var job = jobs[0];
+
+  await dbIns('change_orders', {
+    job_id: bid.job_id || null,
+    title: bid.trade + ' — additional scope',
+    description: bid.scope_of_work + '\n\n(Priced from approved sub bid — '+subName+': '+fmt$(bidAmount)+')',
+    reason: 'Unforeseen Condition',
+    labor_cost: bidAmount, material_cost: 0, markup_pct: 20,
+    cost_impact: markedUpPrice,
+    status: 'Draft', source: 'Approved Sub Bid'
+  });
+
+  toast('✅ Bid approved — Change Order drafted for the client at '+fmt$(markedUpPrice)+' (bid '+fmt$(bidAmount)+' + 20%). Review and send from Change Orders.','ok',8000);
+  document.querySelectorAll('.ov').forEach(function(el){el.remove();});
+  if(typeof pgCOs==='function') pgCOs();
 }
 
 </script>
