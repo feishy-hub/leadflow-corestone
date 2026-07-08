@@ -3634,7 +3634,65 @@ async function gkExecuteAction(item) {
       break;
 
     case 'photo_issue':
-      toast('Photo issue acknowledged — check Photo Log','ok');
+    case 'video_issue':
+      // Approving now actually creates a Punch List item tied to the job,
+      // not just a toast telling you to go look somewhere else.
+      var srcRecord = null;
+      if(item.reference_id){
+        var srcTable = (type==='video_issue') ? 'videos' : 'photos';
+        var srcRows = await dbGet(srcTable, '?id=eq.'+item.reference_id);
+        srcRecord = srcRows && srcRows[0];
+      }
+      await dbIns('punch_list', {
+        job_id: (srcRecord && srcRecord.job_id) || null,
+        title: (type==='video_issue'?'Video':'Photo')+' issue: '+(item.title||'').replace(/^(Photo|Video) issue flagged.?:?\s*/i,''),
+        description: item.description || '',
+        assigned_to: '', due_date: null, priority: 'High', status: 'Open',
+        source: type
+      });
+      toast('Punch list item created from '+(type==='video_issue'?'video':'photo')+' issue','ok');
+      break;
+
+    case 'message_ai_flag':
+      // The review checklist can contain a mix of "Possible Change Order" and
+      // "Possible Complaint" lines (each prefixed that way in the description
+      // by aiDetectScope/showAIFindingsReview). Split them and actually create
+      // a draft Change Order and/or a follow-up task — not just acknowledge.
+      var flagLines = (item.description||'').split('\n').filter(Boolean);
+      var coLines = flagLines.filter(function(l){return l.indexOf('[Possible Change Order]')===0;});
+      var complaintLines = flagLines.filter(function(l){return l.indexOf('[Possible Complaint]')===0;});
+      var createdCount = 0;
+      for(var ci2=0; ci2<coLines.length; ci2++){
+        await dbIns('change_orders', {
+          job_id: item.reference_id || null,
+          title: 'AI-detected scope change',
+          description: coLines[ci2].replace('[Possible Change Order] ',''),
+          reason: 'Unforeseen Condition', cost_impact: 0, schedule_impact_days: 0,
+          status: 'Draft', source: 'AI Message Detection'
+        });
+        createdCount++;
+      }
+      for(var pi2=0; pi2<complaintLines.length; pi2++){
+        await dbIns('todos', {
+          title: 'Follow up: '+complaintLines[pi2].replace('[Possible Complaint] ','').slice(0,80),
+          notes: complaintLines[pi2].replace('[Possible Complaint] ',''),
+          job_id: item.reference_id || null, assigned_to: 'Feishy',
+          due_date: new Date(Date.now()+86400000).toISOString().split('T')[0],
+          priority: 'high', done: false
+        });
+        createdCount++;
+      }
+      toast(createdCount+' item(s) created — check Change Orders/To-Dos','ok');
+      break;
+
+    case 'client_complaint':
+      await dbIns('todos', {
+        title: 'Follow up on complaint: '+(item.description||'').slice(0,80),
+        notes: item.description||'', job_id: item.reference_id||null,
+        assigned_to: 'Feishy', due_date: new Date().toISOString().split('T')[0],
+        priority: 'high', done: false
+      });
+      toast('Follow-up task created','ok');
       break;
 
     case 'warranty_claim':
