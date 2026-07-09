@@ -4895,7 +4895,10 @@ function showTakeoffResults(t,docId){
     +'<div class="mf"><button class="btn btn-g" onclick="closeOv(this)">Close</button>'
     +'<button class="btn btn-p" onclick="takeoffToEstimate(\''+docId+'\')">💰 Create Estimate from Takeoff</button>'
     +'<button class="btn btn-g" onclick="takeoffToBids(\''+docId+'\')">📦 Draft Bid Packages from Takeoff</button>'
-    +'<button class="btn btn-g" onclick="closeOv(document.getElementById(\'takeoff-results\'));showPlanMarkupTool(\''+docId+'\')">📐 Open Visual Markup Tool</button></div></div>';
+    +'<button class="btn btn-g" onclick="closeOv(document.getElementById(\'takeoff-results\'));showPlanMarkupTool(\''+docId+'\')">📐 Open Visual Markup Tool</button>'
+    +'<button class="btn btn-g" onclick="takeoffToProposal(\''+docId+'\')">📄 Create Proposal from Takeoff</button>'
+    +'<button class="btn btn-g" onclick="takeoffToPOs(\''+docId+'\')">📦 Draft POs from Takeoff</button>'
+    +'<button class="btn btn-g" onclick="showPlanVersionCompare(\''+docId+'\')">🔍 Compare to Another Plan Version</button></div></div>';
   document.body.appendChild(overlay);
 }
 
@@ -14336,6 +14339,11 @@ async function showPlanMarkupTool(docId){
   overlay.innerHTML =
     '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#22262b;border-bottom:1px solid rgba(255,255,255,0.08)">'
       +'<div style="color:#fff;font-weight:800;font-size:14px">📐 Plan Markup — '+uxEsc(doc.name||'Plan')+'</div>'
+      +'<div id="pmt-page-nav" style="display:none;align-items:center;gap:8px;color:#fff;font-size:12px">'
+        +'<button onclick="pmtGoToPage(PMT.currentPage-1)" style="background:#2d323a;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer">\u2039</button>'
+        +'<span id="pmt-page-label">Page 1</span>'
+        +'<button onclick="pmtGoToPage(PMT.currentPage+1)" style="background:#2d323a;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer">\u203a</button>'
+      +'</div>'
       +'<div style="display:flex;gap:8px">'
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
       +'<button onclick="pmtSaveAndClose()" style="padding:7px 14px;background:#fff;color:#1a1d21;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💾 Save & Close</button>'
@@ -14352,12 +14360,15 @@ async function showPlanMarkupTool(docId){
         ['poly','⬠','Polygon Area'],
         ['count','🔢','Count Items'],
         ['wall','🧱','Wall'],
-        ['perimeter','🔲','Perimeter']
+        ['perimeter','🔲','Perimeter'],
+        ['freehand','✏️','Freehand'],
+        ['volume','📦','Volume']
       ].map(function(t){
         return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[2]+'" style="padding:10px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:18px;display:flex;flex-direction:column;align-items:center;gap:2px">'
           +'<span>'+t[1]+'</span><span style="font-size:8px;font-weight:700">'+t[2].split(' ')[0]+'</span></button>';
       }).join('')
-      +'<button onclick="pmtUndo()" title="Undo last item" style="margin-top:auto;padding:10px 4px;background:#3a2d2d;color:#fca5a5;border:none;border-radius:6px;cursor:pointer;font-size:16px">↩️</button>'
+      +'<button onclick="pmtUndo()" title="Undo last item" style="padding:10px 4px;background:#3a2d2d;color:#fca5a5;border:none;border-radius:6px;cursor:pointer;font-size:16px">↩️</button>'
+      +'<button onclick="pmtShowHistory()" title="Markup history" style="margin-top:auto;padding:8px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">🕐</button>'
       +'</div>'
       // Canvas area
       +'<div id="pmt-canvas-wrap" style="flex:1;overflow:auto;background:#0d0f11;position:relative;display:flex;justify-content:center;padding:20px">'
@@ -14386,12 +14397,28 @@ async function showPlanMarkupTool(docId){
   document.body.appendChild(overlay);
 
   await ensurePdfJs();
-  var pdf = await window.pdfjsLib.getDocument(fileRec.dataUrl).promise;
-  var page = await pdf.getPage(1);
-  var viewport = page.getViewport({scale: 1.5});
+  PMT.pdfDoc = await window.pdfjsLib.getDocument(fileRec.dataUrl).promise;
+  PMT.numPages = PMT.pdfDoc.numPages;
+  PMT.currentPage = 1;
   PMT.renderScale = 1.5; // PDF points are 72/inch; at this render scale, pxPerInch = 72 * renderScale
+  if(PMT.numPages > 1){
+    document.getElementById('pmt-page-nav').style.display = 'flex';
+    document.getElementById('pmt-page-label').textContent = 'Page 1 of ' + PMT.numPages;
+  }
+  await pmtRenderPage(1);
+}
+
+async function pmtRenderPage(pageNum){
+  pageNum = Math.max(1, Math.min(PMT.numPages, pageNum));
+  PMT.currentPage = pageNum;
+  var lbl = document.getElementById('pmt-page-label');
+  if(lbl) lbl.textContent = 'Page ' + pageNum + ' of ' + PMT.numPages;
+
+  var page = await PMT.pdfDoc.getPage(pageNum);
+  var viewport = page.getViewport({scale: PMT.renderScale});
 
   var stack = document.getElementById('pmt-canvas-stack');
+  stack.innerHTML = '';
   var baseCanvas = document.createElement('canvas');
   baseCanvas.id = 'pmt-base'; baseCanvas.width = viewport.width; baseCanvas.height = viewport.height;
   baseCanvas.style.display = 'block';
@@ -14408,6 +14435,12 @@ async function showPlanMarkupTool(docId){
 
   pmtRenderSidebar();
   pmtRedraw();
+}
+
+function pmtGoToPage(pageNum){
+  if(pageNum < 1 || pageNum > PMT.numPages) return;
+  PMT.clickPoints = [];
+  pmtRenderPage(pageNum);
 }
 
 // ── SCALE ENTRY — replaces window.prompt() (poor on mobile/site use) with a
@@ -14492,7 +14525,9 @@ function pmtSetTool(tool){
     poly: 'Click each corner of the shape, then double-click to close it.',
     count: 'Click each item to count (doors, windows, fixtures, etc.) — one click per item.',
     wall: 'Click the two ends of a wall — auto-calculates studs, drywall sheets, and insulation (assumes 8ft height, 16" o.c. studs).',
-    perimeter: 'Click each corner of the room, then double-click to close — shows total perimeter, not area.'
+    perimeter: 'Click each corner of the room, then double-click to close — shows total perimeter, not area.',
+    freehand: 'Click a series of points to sketch a note or unusual shape, then double-click to finish — no automatic quantity is computed, just a visual note.',
+    volume: 'Click two opposite corners like Rectangle, then enter a depth — calculates cubic yards (for concrete, excavation, etc.).'
   };
   if(status) status.textContent = msgs[tool] || '';
 }
@@ -14586,10 +14621,52 @@ function pmtCanvasClick(e){
     pmtRedraw();
     return;
   }
+
+  if(PMT.tool === 'freehand'){
+    PMT.clickPoints.push({x:x,y:y});
+    pmtRedraw();
+    return;
+  }
+
+  if(PMT.tool === 'volume'){
+    PMT.clickPoints.push({x:x,y:y});
+    pmtRedraw();
+    if(PMT.clickPoints.length === 2){
+      var vp0=PMT.clickPoints[0], vp1=PMT.clickPoints[1];
+      var vwFt = Math.abs(vp1.x-vp0.x)/PMT.scalePxPerFt, vhFt = Math.abs(vp1.y-vp0.y)/PMT.scalePxPerFt;
+      var vAreaFt = Math.round(vwFt*vhFt*10)/10;
+      pmtShowVolumeDepthModal(PMT.clickPoints.slice(), vAreaFt);
+      PMT.clickPoints = [];
+    }
+    return;
+  }
+}
+
+function pmtShowVolumeDepthModal(points, areaFt){
+  document.querySelectorAll('#pmt-volume-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-volume-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:360px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Volume \u2014 Depth</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Area measured: '+areaFt+' sqft. How deep (in feet)? e.g. 0.33 for a 4" slab, 4 for a foundation excavation.</div>'
+    +'<input type="number" id="pmt-volume-depth-input" placeholder="e.g. 4" style="width:100%;padding:12px;font-size:15px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">'
+    +'<button onclick=\'pmtConfirmVolume('+JSON.stringify(points)+','+areaFt+')\' style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Calculate</button>'
+    +'<button onclick="document.getElementById(\'pmt-volume-ov\').remove()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+function pmtConfirmVolume(points, areaFt){
+  var depthFt = parseFloat(document.getElementById('pmt-volume-depth-input').value);
+  if(!depthFt || depthFt<=0){ toast('Enter a depth greater than 0','err'); return; }
+  var cubicYards = Math.round((areaFt * depthFt / 27) * 100) / 100;
+  pmtAddItem({type:'rect', points: points, value_sqft: areaFt, value_cy: cubicYards, label: areaFt+' sqft \u00d7 '+depthFt+'ft deep = '+cubicYards+' CY'});
+  document.getElementById('pmt-volume-ov').remove();
+  pmtRedraw();
 }
 
 function pmtCanvasDblClick(e){
-  if(!PMT || (PMT.tool!=='poly' && PMT.tool!=='perimeter')) return;
+  if(!PMT || (PMT.tool!=='poly' && PMT.tool!=='perimeter' && PMT.tool!=='freehand')) return;
   e.preventDefault();
   // A dblclick fires after two preceding click events at the same location —
   // that location IS the intended final vertex, just double-counted by the
@@ -14598,6 +14675,14 @@ function pmtCanvasDblClick(e){
   // removed both and silently lost the final vertex — found via careful
   // simulated click-sequence testing, not visual inspection.)
   var pts = PMT.clickPoints.slice(0, -1);
+  if(pts.length < 2){ PMT.clickPoints = []; pmtRedraw(); return; }
+
+  if(PMT.tool === 'freehand'){
+    pmtAddItem({type:'freehand', points: pts.slice(), label: 'Sketch note'});
+    PMT.clickPoints = [];
+    pmtRedraw();
+    return;
+  }
   if(pts.length < 3){ PMT.clickPoints = []; pmtRedraw(); return; }
 
   if(PMT.tool === 'perimeter'){
@@ -14631,12 +14716,33 @@ function pmtActiveGroup(){
 }
 function pmtAddItem(item){
   item.id = 'i'+Date.now()+Math.floor(Math.random()*1000);
+  item.page = PMT.currentPage || 1;
   pmtActiveGroup().items.push(item);
+  pmtLogHistory('added', item.label);
   pmtRenderSidebar();
+}
+function pmtLogHistory(action, detail){
+  if(!PMT.history) PMT.history = [];
+  PMT.history.push({action:action, detail:detail, at:new Date().toISOString(), page:PMT.currentPage||1});
 }
 function pmtUndo(){
   var g = pmtActiveGroup();
-  if(g.items.length){ g.items.pop(); pmtRenderSidebar(); pmtRedraw(); toast('Removed last item','ok'); }
+  if(g.items.length){ var removed=g.items.pop(); pmtLogHistory('undo-removed', removed.label); pmtRenderSidebar(); pmtRedraw(); toast('Removed last item','ok'); }
+}
+function pmtShowHistory(){
+  document.querySelectorAll('#pmt-history-ov').forEach(function(el){el.remove();});
+  var hist = (PMT.history||[]).slice().reverse();
+  var el = document.createElement('div');
+  el.id = 'pmt-history-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%;max-height:70vh;overflow-y:auto">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:12px">Markup History</div>'
+    +(hist.length ? hist.map(function(h){
+        return '<div style="padding:8px 0;border-bottom:1px solid #eee;font-size:12px"><b>'+h.action+'</b> — '+uxEsc(h.detail||'')+' <span style="color:#999">(page '+h.page+', '+new Date(h.at).toLocaleTimeString()+')</span></div>';
+      }).join('') : '<div style="color:#999;font-size:13px">No changes yet</div>')
+    +'<button onclick="document.getElementById(\'pmt-history-ov\').remove()" style="margin-top:16px;width:100%;padding:10px;background:var(--card-2,#f0f2f6);border:none;border-radius:8px;cursor:pointer;font-weight:600">Close</button>'
+    +'</div>';
+  document.body.appendChild(el);
 }
 async function pmtAskAI(question){
   question = (question||'').trim();
@@ -14732,7 +14838,15 @@ function pmtRenameItem(groupId, itemId, newLabel){
 }
 var pmtHighlightedItemId = null;
 function pmtHighlightItem(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var item = g ? g.items.find(function(i){return i.id===itemId;}) : null;
   pmtHighlightedItemId = itemId;
+  if(item && item.page && item.page !== PMT.currentPage){
+    pmtRenderPage(item.page).then(function(){
+      setTimeout(function(){ pmtHighlightedItemId=null; pmtRedraw(); }, 1500);
+    });
+    return;
+  }
   pmtRedraw();
   setTimeout(function(){ pmtHighlightedItemId=null; pmtRedraw(); }, 1500);
 }
@@ -14742,7 +14856,12 @@ function pmtToggleGroupVisible(id){
 }
 function pmtDeleteItem(groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
-  if(g){ g.items = g.items.filter(function(i){return i.id!==itemId;}); pmtRenderSidebar(); pmtRedraw(); }
+  if(g){
+    var item = g.items.find(function(i){return i.id===itemId;});
+    g.items = g.items.filter(function(i){return i.id!==itemId;});
+    if(item) pmtLogHistory('deleted', item.label);
+    pmtRenderSidebar(); pmtRedraw();
+  }
 }
 
 function pmtRenderSidebar(){
@@ -14788,6 +14907,7 @@ function pmtRedraw(){
     if(!g.visible) return;
     ctx.strokeStyle = g.color; ctx.fillStyle = g.color; ctx.lineWidth = g.lineWidth||2;
     g.items.forEach(function(it){
+      if((it.page||1) !== (PMT.currentPage||1)) return; // only draw items measured on the page currently shown
       var isHighlighted = it.id === pmtHighlightedItemId;
       if(isHighlighted){ ctx.save(); ctx.strokeStyle='#ffeb3b'; ctx.fillStyle='#ffeb3b'; ctx.lineWidth=(g.lineWidth||2)+3; }
       if(it.type==='linear'){
@@ -14812,6 +14932,12 @@ function pmtRedraw(){
       } else if(it.type==='perimeter'){
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y);
         it.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.closePath(); ctx.stroke();
+        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':g.color);
+      } else if(it.type==='freehand'){
+        ctx.setLineDash([5,3]);
+        ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y);
+        it.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.stroke();
+        ctx.setLineDash([]);
         pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':g.color);
       }
       if(isHighlighted) ctx.restore();
@@ -15140,6 +15266,95 @@ async function approveBidAndCreateCO(bidId, subId){
   toast('✅ Bid approved — Change Order drafted for the client at '+fmt$(markedUpPrice)+' (bid '+fmt$(bidAmount)+' + 20%). Review and send from Change Orders.','ok',8000);
   document.querySelectorAll('.ov').forEach(function(el){el.remove();});
   if(typeof pgCOs==='function') pgCOs();
+}
+
+
+// ── TAKEOFF → PROPOSAL auto-flow — generates the estimate (same as
+// takeoffToEstimate), then immediately builds a proposal from it. ──
+async function takeoffToProposal(docId){
+  toast('🤖 Building estimate, then proposal...','ok',15000);
+  await takeoffToEstimate(docId);
+  await new Promise(function(r){setTimeout(r,500);});
+  var ests = await dbGet('estimates','?doc_id=eq.'+docId+'&order=created_at.desc&limit=1');
+  if(!ests || !ests[0]){ toast('Estimate step did not complete — cannot build proposal yet','err'); return; }
+  await createProposalFromEstimate(ests[0].id);
+}
+
+// ── TAKEOFF → PURCHASE ORDER auto-flow — drafts a PO per material category
+// found in the takeoff. Suppliers are left as "TBD" for Feishy to fill in —
+// these are still drafts, and still go through the normal PO flow, they are
+// simply pre-populated instead of started from a blank form. ──
+async function takeoffToPOs(docId){
+  var docs = await dbGet('documents','?id=eq.'+docId);
+  var doc = docs[0]; if(!doc){toast('Plan not found','err');return;}
+  var t; try{ t = JSON.parse(doc.description); }catch(e){ toast('No takeoff data on this plan','err'); return; }
+  var jobId = doc.job_id || (AJOB ? AJOB.id : null);
+
+  toast('🤖 AI drafting purchase orders from takeoff quantities...','ok',12000);
+  var r = await ai(
+    'Based on this construction plan takeoff data, identify the distinct MATERIAL categories that would need a purchase order (e.g. lumber package, concrete, drywall, roofing materials, windows, doors) with an estimated quantity/description for each.\n'
+    +'TAKEOFF DATA: '+JSON.stringify(t)+'\n'
+    +'Return ONLY valid JSON: {"purchase_orders":[{"category":"Lumber Package","description":"2-3 sentences with quantities from the data","estimated_amount":0}]}. Only include categories genuinely implied by this takeoff. Max 8.',
+    'Return ONLY valid JSON. No markdown.', 1200
+  );
+  var parsed = safeJSON(r);
+  var pos = (parsed && Array.isArray(parsed.purchase_orders)) ? parsed.purchase_orders : [];
+  if(!pos.length){ toast('AI could not determine PO categories from this takeoff','err'); return; }
+
+  var createdCount = 0;
+  for(var i=0;i<pos.length;i++){
+    var po = pos[i];
+    await dbIns('purchase_orders', {
+      supplier_name: 'TBD — select supplier', supplier_email: '',
+      description: po.category + ': ' + (po.description||''),
+      amount: po.estimated_amount||0, job_id: jobId, phase: null,
+      status: 'draft', created_from: 'takeoff', source_doc_id: docId
+    });
+    createdCount++;
+  }
+  toast('✅ ' + createdCount + ' draft PO(s) created — pick a supplier and send from Purchase Orders','ok',6000);
+  if(typeof pgPOs==='function') pgPOs();
+}
+
+// ── PLAN VERSION COMPARISON — AI diffs the takeoff data of two uploaded
+// plan documents and summarizes what changed, with cost/schedule impact. ──
+async function showPlanVersionCompare(docId){
+  var allPlans = await dbGet('documents','?category=eq.Plan&order=created_at.desc');
+  var others = (allPlans||[]).filter(function(d){return d.id!==docId;});
+  document.querySelectorAll('#pmt-vercompare-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-vercompare-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Compare Plan Versions</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Pick the earlier version to compare this plan against.</div>'
+    +(others.length ? '<select id="pmt-vercompare-select" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">'
+        +others.map(function(d){return '<option value="'+d.id+'">'+uxEsc(d.name)+'</option>';}).join('')
+        +'</select>'
+        +'<button onclick="runPlanVersionCompare(\''+docId+'\',document.getElementById(\'pmt-vercompare-select\').value)" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Compare</button>'
+      : '<div style="color:var(--muted);font-size:13px">No other plans uploaded yet to compare against.</div>')
+    +'<button onclick="document.getElementById(\'pmt-vercompare-ov\').remove()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel</button>'
+    +'<div id="pmt-vercompare-result" style="margin-top:12px;font-size:13px;line-height:1.5"></div>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+async function runPlanVersionCompare(docIdA, docIdB){
+  var resultEl = document.getElementById('pmt-vercompare-result');
+  resultEl.innerHTML = '<div style="opacity:0.6">Comparing...</div>';
+  var docA = (await dbGet('documents','?id=eq.'+docIdA))[0];
+  var docB = (await dbGet('documents','?id=eq.'+docIdB))[0];
+  try{
+    var r = await ai(
+      'Compare these two construction plan takeoffs (A = newer/current, B = older/previous version) and summarize what changed, with an estimate of cost and schedule impact for each change.\n'
+      +'PLAN A ('+(docA.name||'')+'): '+(docA.description||'{}').slice(0,2500)+'\n'
+      +'PLAN B ('+(docB.name||'')+'): '+(docB.description||'{}').slice(0,2500)+'\n'
+      +'List each meaningful difference in 1-2 sentences, with a rough cost impact ($ + or -) where possible. If nothing meaningful changed, say so plainly.',
+      'You are a construction plan version-comparison assistant. Be concise and specific.', 700
+    );
+    resultEl.innerHTML = uxEsc(r).replace(/\n/g,'<br>');
+  }catch(e){
+    resultEl.innerHTML = '<span style="color:#dc2626">Comparison failed: '+uxEsc(e.message)+'</span>';
+  }
 }
 
 </script>
