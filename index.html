@@ -14343,6 +14343,8 @@ async function showPlanMarkupTool(docId){
     +'<div style="flex:1;display:flex;overflow:hidden">'
       // Toolbar
       +'<div style="width:64px;background:#22262b;display:flex;flex-direction:column;gap:6px;padding:10px 8px;border-right:1px solid rgba(255,255,255,0.08)">'
+      +'<button onclick="pmtShowScaleEntryModal(0)" title="Ratio or numeric scale (no clicking required)" style="padding:8px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:2px">'
+        +'<span>⚙️</span><span style="font-size:8px;font-weight:700">Scale Options</span></button>'
       +[
         ['scale','📏','Set Scale'],
         ['linear','📐','Linear'],
@@ -14429,12 +14431,27 @@ function pmtShowScaleEntryModal(pxDist){
         return '<button onclick="pmtConfirmPresetScale('+pxPerFtForPreset+')" style="padding:12px;background:var(--card-2,#f8fafc);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:13px">'+p.label+'</button>';
       }).join('')
     +'</div>'
+    +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:14px 0 8px">Or type the exact scale directly</div>'
+    +'<div style="display:flex;gap:8px;align-items:center">'
+    +'<input type="number" id="pmt-scale-raw-input" placeholder="e.g. 30" style="flex:1;padding:10px;font-size:14px;border:1px solid var(--border);border-radius:8px">'
+    +'<span style="font-size:12px;color:var(--muted)">pixels per foot</span>'
+    +'<button onclick="pmtConfirmRawScale()" style="padding:0 16px;height:38px;background:var(--card-2,#f0f2f6);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer">Set</button>'
+    +'</div>'
     +'<button onclick="document.getElementById(\'pmt-scale-ov\').remove()" style="margin-top:16px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel</button>'
     +'</div>';
   document.body.appendChild(el);
   setTimeout(function(){ var inp=document.getElementById('pmt-scale-ft-input'); if(inp) inp.focus(); }, 50);
 }
+function pmtConfirmRawScale(){
+  var val = parseFloat(document.getElementById('pmt-scale-raw-input').value);
+  if(!val || val<=0){ toast('Enter a pixels-per-foot value greater than 0','err'); return; }
+  PMT.scalePxPerFt = val;
+  document.getElementById('pmt-status').textContent = 'Scale set directly ('+val+' px/ft). Pick a measuring tool.';
+  toast('Scale set: '+val+' px/ft','ok');
+  document.getElementById('pmt-scale-ov').remove();
+}
 function pmtConfirmManualScale(pxDist){
+  if(!pxDist || pxDist<=0){ toast('Use "Set Scale" on the toolbar and click two points on the plan first for this option — or use the ratio/number options below instead','err',5000); return; }
   var ft = parseFloat(document.getElementById('pmt-scale-ft-input').value);
   if(!ft || ft<=0){ toast('Enter a real length greater than 0','err'); return; }
   PMT.scalePxPerFt = pxDist / ft;
@@ -14607,6 +14624,43 @@ function pmtUndo(){
   var g = pmtActiveGroup();
   if(g.items.length){ g.items.pop(); pmtRenderSidebar(); pmtRedraw(); toast('Removed last item','ok'); }
 }
+var PMT_TEMPLATES = {
+  framing: {label:'Framing Takeoff', groups:['Exterior Walls','Interior Walls','Headers','Blocking']},
+  drywall_paint: {label:'Drywall & Paint', groups:['Walls','Ceilings','Soffits']},
+  flooring: {label:'Flooring', groups:['Living Areas','Wet Areas','Stairs']},
+  full_reno: {label:'Full Renovation', groups:['Demo','Framing','MEP Rough','Insulation','Drywall','Flooring','Trim & Paint']}
+};
+function pmtShowTemplatePicker(){
+  document.querySelectorAll('#pmt-template-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-template-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:360px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Start From a Template</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:16px">Replaces your current groups with a ready-made set for this kind of job.</div>'
+    + Object.keys(PMT_TEMPLATES).map(function(key){
+        var t = PMT_TEMPLATES[key];
+        return '<button onclick="pmtApplyTemplate(\''+key+'\')" style="display:block;width:100%;text-align:left;padding:12px;margin-bottom:8px;background:var(--card-2,#f8fafc);border:1px solid var(--border);border-radius:8px;cursor:pointer">'
+          +'<div style="font-weight:700;font-size:13px">'+t.label+'</div>'
+          +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+t.groups.join(', ')+'</div></button>';
+      }).join('')
+    +'<button onclick="document.getElementById(\'pmt-template-ov\').remove()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel — keep my current groups</button>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+function pmtApplyTemplate(key){
+  var t = PMT_TEMPLATES[key];
+  if(!t) return;
+  var colors = ['#0d7a70','#2563eb','#d97706','#dc2626','#7c3aed','#059669','#db2777'];
+  PMT.groups = t.groups.map(function(name, i){
+    return {id:'g'+Date.now()+i, name:name, color:colors[i%colors.length], visible:true, items:[]};
+  });
+  PMT.activeGroupId = PMT.groups[0].id;
+  document.getElementById('pmt-template-ov').remove();
+  pmtRenderSidebar();
+  pmtRedraw();
+  toast('Template applied: '+t.label,'ok');
+}
 function pmtAddGroup(){
   var name = window.prompt('Group name (e.g. "Exterior Walls", "Windows", "Bathroom Fixtures"):','');
   if(!name) return;
@@ -14660,7 +14714,8 @@ function pmtRenderSidebar(){
   var el = document.getElementById('pmt-sidebar');
   if(!el) return;
   el.innerHTML = '<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">Measurement Groups'
-    +'<button onclick="pmtAddGroup()" style="background:var(--teal);border:none;color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer">+ Group</button></div>'
+    +'<span><button onclick="pmtShowTemplatePicker()" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px">Templates</button>'
+    +'<button onclick="pmtAddGroup()" style="background:var(--teal);border:none;color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer">+ Group</button></span></div>'
     + PMT.groups.map(function(g){
       var totalLinear = g.items.filter(function(i){return i.type==='linear'||i.type==='wall'||i.type==='perimeter';}).reduce(function(s,i){return s+i.value_ft;},0);
       var totalArea = g.items.filter(function(i){return i.type==='rect'||i.type==='poly';}).reduce(function(s,i){return s+i.value_sqft;},0);
