@@ -780,11 +780,17 @@ function safeJSON(str){
 
 // ── AI SCOPE CHANGE DETECTOR ──
 async function aiDetectScope(text, jobId){
+  var originalScope = '';
+  if(jobId){
+    try{ var scopeJobs = await dbGet('jobs','?id=eq.'+jobId); if(scopeJobs&&scopeJobs[0]) originalScope = scopeJobs[0].original_scope||''; }
+    catch(scopeFetchErr){ console.warn('[aiDetectScope] could not fetch original scope', scopeFetchErr); }
+  }
   var r=await aiBrain('Analyze this message/transcript for scope changes that should become change orders, and separately for anything that reads as a client complaint or urgent issue needing attention.\n'
     +'The text may be in English, Yiddish, or a mix of both \u2014 read and understand it in whatever language it is written, then respond only in English.\n'
+    +(originalScope ? 'ORIGINAL SIGNED SCOPE OF WORK FOR THIS JOB:\n"'+originalScope.slice(0,2000)+'"\nOnly recommend a change order for something that is genuinely NOT covered by that original scope above. If it is already included in the original scope, do not flag it as a change order even if it sounds like new work.\n' : 'Note: no original signed scope is on file for this job, so judge based on general construction norms.\n')
     +'TEXT: "'+text+'"\nJob: '+(AJOB?AJOB.job_name:'current job')+'\n'
     +'Return ONLY raw JSON: {"scope_changes_detected":true,"changes":[{"description":"what changed","estimated_impact":"$X","recommended_action":"create_co|monitor|no_action"}],"co_recommended":true,"complaint_detected":true,"complaint_summary":"summary if any, else empty string","urgency":"immediate|soon|low"}',
-    'You are a construction scope-change and complaint detector fluent in English and Yiddish. Return ONLY raw JSON.',700);
+    'You are a construction scope-change and complaint detector fluent in English and Yiddish. You only flag genuine additions beyond the original signed scope, never things already covered by it.',700);
   var d=safeJSON(r);
   var findings=[];
   if(d&&d.co_recommended&&d.changes&&d.changes.length){
@@ -3781,6 +3787,15 @@ async function gkExecuteAction(item) {
         if(signedProp) {
           var contractPrice = signedProp.total_price || 0;
           var depositAmt = 5000;
+          // Pull the actual scope-of-work text from the signed proposal's
+          // sections (section 1 is always "SCOPE OF WORK") so it can be
+          // compared against later to tell what's genuinely an addition.
+          var originalScopeText = '';
+          try{
+            var propSections = JSON.parse(signedProp.sections||'[]');
+            var scopeSection = propSections.find(function(s){return (s.title||'').indexOf('SCOPE OF WORK')>-1;});
+            originalScopeText = scopeSection ? scopeSection.content : '';
+          }catch(scopeParseErr){ console.warn('[proposal_signed] could not parse scope section', scopeParseErr); }
 
           // 1. Create Job record
           var newJobRec = await dbIns('jobs', {
@@ -3798,7 +3813,8 @@ async function gkExecuteAction(item) {
             budget_used: 0,
             created_from: 'signed_proposal',
             pm_assigned: null,
-            start_date: null
+            start_date: null,
+            original_scope: originalScopeText
           });
           var newJobId = newJobRec[0]?newJobRec[0].id:null;
 
@@ -14332,7 +14348,9 @@ async function showPlanMarkupTool(docId){
         ['linear','📐','Linear'],
         ['rect','▭','Rectangle'],
         ['poly','⬠','Polygon Area'],
-        ['count','🔢','Count Items']
+        ['count','🔢','Count Items'],
+        ['wall','🧱','Wall'],
+        ['perimeter','🔲','Perimeter']
       ].map(function(t){
         return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[2]+'" style="padding:10px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:18px;display:flex;flex-direction:column;align-items:center;gap:2px">'
           +'<span>'+t[1]+'</span><span style="font-size:8px;font-weight:700">'+t[2].split(' ')[0]+'</span></button>';
@@ -14355,6 +14373,7 @@ async function showPlanMarkupTool(docId){
   var pdf = await window.pdfjsLib.getDocument(fileRec.dataUrl).promise;
   var page = await pdf.getPage(1);
   var viewport = page.getViewport({scale: 1.5});
+  PMT.renderScale = 1.5; // PDF points are 72/inch; at this render scale, pxPerInch = 72 * renderScale
 
   var stack = document.getElementById('pmt-canvas-stack');
   var baseCanvas = document.createElement('canvas');
@@ -14375,6 +14394,61 @@ async function showPlanMarkupTool(docId){
   pmtRedraw();
 }
 
+// ── SCALE ENTRY — replaces window.prompt() (poor on mobile/site use) with a
+// proper in-app modal. Also offers standard drawing-scale presets, computed
+// directly from the known PDF render DPI, so a labeled plan (e.g. "1/4" = 1'-0"")
+// can be set with one tap instead of finding a known dimension to click on. ──
+function pmtShowScaleEntryModal(pxDist){
+  document.querySelectorAll('#pmt-scale-ov').forEach(function(el){el.remove();});
+  var pxPerInch = 72 * (PMT.renderScale||1.5);
+  var presets = [
+    {label:'1/4" = 1\'-0"', ftPerInch:4},
+    {label:'1/8" = 1\'-0"', ftPerInch:8},
+    {label:'3/16" = 1\'-0"', ftPerInch:64/12},
+    {label:'1/2" = 1\'-0"', ftPerInch:2},
+    {label:'1" = 10\'', ftPerInch:10},
+    {label:'1" = 20\'', ftPerInch:20},
+    {label:'1" = 30\'', ftPerInch:30},
+    {label:'1" = 40\'', ftPerInch:40}
+  ];
+  var el = document.createElement('div');
+  el.id = 'pmt-scale-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Set Scale</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:16px">You measured a line on the plan. How long is that line in real life?</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:16px">'
+    +'<input type="number" id="pmt-scale-ft-input" placeholder="e.g. 12" style="flex:1;padding:14px;font-size:16px;border:1px solid var(--border);border-radius:8px" autofocus>'
+    +'<span style="align-self:center;font-weight:700;color:var(--muted)">feet</span>'
+    +'<button onclick="pmtConfirmManualScale('+pxDist+')" style="padding:0 20px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Set</button>'
+    +'</div>'
+    +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Or use the plan\'s printed scale instead</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">'
+    + presets.map(function(p){
+        var pxPerFtForPreset = pxPerInch / p.ftPerInch;
+        return '<button onclick="pmtConfirmPresetScale('+pxPerFtForPreset+')" style="padding:12px;background:var(--card-2,#f8fafc);border:1px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:13px">'+p.label+'</button>';
+      }).join('')
+    +'</div>'
+    +'<button onclick="document.getElementById(\'pmt-scale-ov\').remove()" style="margin-top:16px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  setTimeout(function(){ var inp=document.getElementById('pmt-scale-ft-input'); if(inp) inp.focus(); }, 50);
+}
+function pmtConfirmManualScale(pxDist){
+  var ft = parseFloat(document.getElementById('pmt-scale-ft-input').value);
+  if(!ft || ft<=0){ toast('Enter a real length greater than 0','err'); return; }
+  PMT.scalePxPerFt = pxDist / ft;
+  document.getElementById('pmt-status').textContent = 'Scale set ('+PMT.scalePxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
+  toast('Scale set: '+PMT.scalePxPerFt.toFixed(1)+' px/ft','ok');
+  document.getElementById('pmt-scale-ov').remove();
+}
+function pmtConfirmPresetScale(pxPerFt){
+  PMT.scalePxPerFt = pxPerFt;
+  document.getElementById('pmt-status').textContent = 'Scale set from printed scale ('+pxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
+  toast('Scale set from printed scale','ok');
+  document.getElementById('pmt-scale-ov').remove();
+}
+
 function pmtSetTool(tool){
   PMT.tool = tool;
   PMT.clickPoints = [];
@@ -14385,7 +14459,9 @@ function pmtSetTool(tool){
     linear: 'Click a start point, then an end point, to measure a length.',
     rect: 'Click two opposite corners of a rectangular area.',
     poly: 'Click each corner of the shape, then double-click to close it.',
-    count: 'Click each item to count (doors, windows, fixtures, etc.) — one click per item.'
+    count: 'Click each item to count (doors, windows, fixtures, etc.) — one click per item.',
+    wall: 'Click the two ends of a wall — auto-calculates studs, drywall sheets, and insulation (assumes 8ft height, 16" o.c. studs).',
+    perimeter: 'Click each corner of the room, then double-click to close — shows total perimeter, not area.'
   };
   if(status) status.textContent = msgs[tool] || '';
 }
@@ -14400,15 +14476,10 @@ function pmtCanvasClick(e){
     pmtRedraw();
     if(PMT.clickPoints.length === 2){
       var pxDist = Math.hypot(PMT.clickPoints[1].x-PMT.clickPoints[0].x, PMT.clickPoints[1].y-PMT.clickPoints[0].y);
-      var realFt = parseFloat(window.prompt('Real-world length of that line, in feet (e.g. 12 for a 12-foot wall):','10'));
-      if(realFt && realFt>0){
-        PMT.scalePxPerFt = pxDist / realFt;
-        toast('Scale set: '+PMT.scalePxPerFt.toFixed(1)+' px/ft','ok');
-        document.getElementById('pmt-status').textContent = 'Scale set ('+PMT.scalePxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
-      }
-      PMT.clickPoints = [];
+      pmtShowScaleEntryModal(pxDist);
       PMT.tool = null;
       document.querySelectorAll('[data-pmt-tool]').forEach(function(b){ b.style.outline='none'; });
+      PMT.clickPoints = [];
       pmtRedraw();
     }
     return;
@@ -14454,16 +14525,63 @@ function pmtCanvasClick(e){
     pmtRedraw();
     return;
   }
+
+  if(PMT.tool === 'wall'){
+    PMT.clickPoints.push({x:x,y:y});
+    pmtRedraw();
+    if(PMT.clickPoints.length === 2){
+      var pxDw = Math.hypot(PMT.clickPoints[1].x-PMT.clickPoints[0].x, PMT.clickPoints[1].y-PMT.clickPoints[0].y);
+      var ftw = pxDw / PMT.scalePxPerFt;
+      // Standard framing math: studs every 16" o.c. (+1 for the end), one stud
+      // bay of insulation per stud spacing, drywall sheets at 32 sqft/sheet
+      // (4'x8'), assuming a standard 8' wall height.
+      var wallHeightFt = 8;
+      var studCount = Math.ceil(ftw / (16/12)) + 1;
+      var drywallSheets = Math.ceil((ftw * wallHeightFt) / 32);
+      var insulationSqft = Math.round(ftw * wallHeightFt);
+      pmtAddItem({
+        type:'wall', points:PMT.clickPoints.slice(), value_ft: Math.round(ftw*10)/10,
+        studs: studCount, drywall_sheets: drywallSheets, insulation_sqft: insulationSqft,
+        label: Math.round(ftw*10)/10+' ft wall — '+studCount+' studs, '+drywallSheets+' sheets drywall, '+insulationSqft+' sqft insulation'
+      });
+      PMT.clickPoints = [];
+      pmtRedraw();
+    }
+    return;
+  }
+
+  if(PMT.tool === 'perimeter'){
+    PMT.clickPoints.push({x:x,y:y});
+    pmtRedraw();
+    return;
+  }
 }
 
 function pmtCanvasDblClick(e){
-  if(!PMT || PMT.tool!=='poly') return;
+  if(!PMT || (PMT.tool!=='poly' && PMT.tool!=='perimeter')) return;
   e.preventDefault();
-  // A dblclick always fires after two preceding click events, each of which
-  // added a phantom point at the double-click location via the 'poly' branch
-  // of pmtCanvasClick. Remove those two duplicates before closing the shape.
-  var pts = PMT.clickPoints.slice(0, -2);
+  // A dblclick fires after two preceding click events at the same location —
+  // that location IS the intended final vertex, just double-counted by the
+  // browser's click+click+dblclick sequence. Remove only ONE of the two
+  // duplicates, keeping the other as the real closing point. (Earlier version
+  // removed both and silently lost the final vertex — found via careful
+  // simulated click-sequence testing, not visual inspection.)
+  var pts = PMT.clickPoints.slice(0, -1);
   if(pts.length < 3){ PMT.clickPoints = []; pmtRedraw(); return; }
+
+  if(PMT.tool === 'perimeter'){
+    var perimeterPx = 0;
+    for(var k=0;k<pts.length;k++){
+      var j2=(k+1)%pts.length;
+      perimeterPx += Math.hypot(pts[j2].x-pts[k].x, pts[j2].y-pts[k].y);
+    }
+    var perimeterFt = Math.round((perimeterPx/PMT.scalePxPerFt)*10)/10;
+    pmtAddItem({type:'perimeter', points: pts.slice(), value_ft: perimeterFt, label: perimeterFt+' ft perimeter'});
+    PMT.clickPoints = [];
+    pmtRedraw();
+    return;
+  }
+
   // Shoelace formula for polygon area in px^2, converted to sqft
   var areaPx = 0;
   for(var i=0;i<pts.length;i++){
@@ -14499,6 +14617,36 @@ function pmtAddGroup(){
   pmtRenderSidebar();
 }
 function pmtSetActiveGroup(id){ PMT.activeGroupId = id; pmtRenderSidebar(); }
+function pmtSetGroupColor(id, color){
+  var g = PMT.groups.find(function(x){return x.id===id;});
+  if(g){ g.color = color; pmtRenderSidebar(); pmtRedraw(); }
+}
+function pmtSetGroupLineWidth(id, width){
+  var g = PMT.groups.find(function(x){return x.id===id;});
+  if(g){ g.lineWidth = parseInt(width); pmtRedraw(); }
+}
+function pmtRenameGroup(id, newName){
+  var g = PMT.groups.find(function(x){return x.id===id;});
+  newName = (newName||'').trim();
+  if(g && newName){ g.name = newName; }
+  pmtRenderSidebar();
+}
+function pmtRenameItem(groupId, itemId, newLabel){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  newLabel = (newLabel||'').trim();
+  if(g && newLabel){
+    var item = g.items.find(function(i){return i.id===itemId;});
+    if(item) item.label = newLabel;
+  }
+  pmtRenderSidebar();
+  pmtRedraw();
+}
+var pmtHighlightedItemId = null;
+function pmtHighlightItem(groupId, itemId){
+  pmtHighlightedItemId = itemId;
+  pmtRedraw();
+  setTimeout(function(){ pmtHighlightedItemId=null; pmtRedraw(); }, 1500);
+}
 function pmtToggleGroupVisible(id){
   var g = PMT.groups.find(function(x){return x.id===id;});
   if(g){ g.visible = !g.visible; pmtRenderSidebar(); pmtRedraw(); }
@@ -14514,23 +14662,28 @@ function pmtRenderSidebar(){
   el.innerHTML = '<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">Measurement Groups'
     +'<button onclick="pmtAddGroup()" style="background:var(--teal);border:none;color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer">+ Group</button></div>'
     + PMT.groups.map(function(g){
-      var totalLinear = g.items.filter(function(i){return i.type==='linear';}).reduce(function(s,i){return s+i.value_ft;},0);
+      var totalLinear = g.items.filter(function(i){return i.type==='linear'||i.type==='wall'||i.type==='perimeter';}).reduce(function(s,i){return s+i.value_ft;},0);
       var totalArea = g.items.filter(function(i){return i.type==='rect'||i.type==='poly';}).reduce(function(s,i){return s+i.value_sqft;},0);
       var totalCount = g.items.filter(function(i){return i.type==='count';}).length;
       var totals = [];
       if(totalLinear) totals.push(Math.round(totalLinear*10)/10+' ft');
       if(totalArea) totals.push(Math.round(totalArea*10)/10+' sqft');
       if(totalCount) totals.push(totalCount+' items');
+      var lineWidth = g.lineWidth || 2;
       return '<div style="margin-bottom:10px;background:'+(g.id===PMT.activeGroupId?'#2d323a':'transparent')+';border-radius:6px;padding:8px;cursor:pointer" onclick="pmtSetActiveGroup(\''+g.id+'\')">'
         +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
-        +'<span style="width:10px;height:10px;border-radius:50%;background:'+g.color+';display:inline-block"></span>'
-        +'<span style="color:#fff;font-weight:700;font-size:12px;flex:1">'+uxEsc(g.name)+'</span>'
+        +'<input type="color" value="'+g.color+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();pmtSetGroupColor(\''+g.id+'\',this.value)" style="width:18px;height:18px;padding:0;border:none;border-radius:50%;cursor:pointer;background:none">'
+        +'<span class="pmt-group-name" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameGroup(\''+g.id+'\',this.textContent)" style="color:#fff;font-weight:700;font-size:12px;flex:1;outline:none;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+uxEsc(g.name)+'</span>'
+        +'<select onclick="event.stopPropagation()" onchange="event.stopPropagation();pmtSetGroupLineWidth(\''+g.id+'\',this.value)" style="background:#1a1d21;color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:3px;font-size:10px;padding:1px">'
+        +[1,2,3,4,5].map(function(w){return '<option value="'+w+'"'+(w===lineWidth?' selected':'')+'>'+w+'px</option>';}).join('')
+        +'</select>'
         +'<span onclick="event.stopPropagation();pmtToggleGroupVisible(\''+g.id+'\')" style="cursor:pointer;font-size:13px">'+(g.visible?'👁':'🚫')+'</span>'
         +'</div>'
         +'<div style="color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px">'+(totals.join(' · ')||'No items yet')+'</div>'
         + g.items.map(function(it){
-            return '<div style="display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,0.75);padding:2px 0">'
-              +'<span>'+it.label+'</span><span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span></div>';
+            return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.75);padding:2px 0;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
+              +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+uxEsc(it.label)+'</span>'
+              +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5;margin-left:6px">✕</span></div>';
           }).join('')
         +'</div>';
     }).join('');
@@ -14543,25 +14696,35 @@ function pmtRedraw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   PMT.groups.forEach(function(g){
     if(!g.visible) return;
-    ctx.strokeStyle = g.color; ctx.fillStyle = g.color; ctx.lineWidth = 2;
+    ctx.strokeStyle = g.color; ctx.fillStyle = g.color; ctx.lineWidth = g.lineWidth||2;
     g.items.forEach(function(it){
+      var isHighlighted = it.id === pmtHighlightedItemId;
+      if(isHighlighted){ ctx.save(); ctx.strokeStyle='#ffeb3b'; ctx.fillStyle='#ffeb3b'; ctx.lineWidth=(g.lineWidth||2)+3; }
       if(it.type==='linear'){
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y); ctx.lineTo(it.points[1].x,it.points[1].y); ctx.stroke();
-        pmtLabel(ctx, it.label, it.points[1].x, it.points[1].y, g.color);
+        pmtLabel(ctx, it.label, it.points[1].x, it.points[1].y, isHighlighted?'#ffeb3b':g.color);
       } else if(it.type==='rect'){
         var p0=it.points[0],p1=it.points[1];
         ctx.globalAlpha=0.25; ctx.fillRect(Math.min(p0.x,p1.x),Math.min(p0.y,p1.y),Math.abs(p1.x-p0.x),Math.abs(p1.y-p0.y)); ctx.globalAlpha=1;
         ctx.strokeRect(Math.min(p0.x,p1.x),Math.min(p0.y,p1.y),Math.abs(p1.x-p0.x),Math.abs(p1.y-p0.y));
-        pmtLabel(ctx, it.label, p1.x, p1.y, g.color);
+        pmtLabel(ctx, it.label, p1.x, p1.y, isHighlighted?'#ffeb3b':g.color);
       } else if(it.type==='poly'){
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y);
         it.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.closePath();
         ctx.globalAlpha=0.25; ctx.fill(); ctx.globalAlpha=1; ctx.stroke();
-        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, g.color);
+        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':g.color);
       } else if(it.type==='count'){
         ctx.beginPath(); ctx.arc(it.x,it.y,7,0,2*Math.PI); ctx.fill();
-        ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.fillText((g.items.indexOf(it)+1)+'', it.x-3, it.y+3); ctx.fillStyle=g.color;
+        ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.fillText((g.items.indexOf(it)+1)+'', it.x-3, it.y+3); ctx.fillStyle=isHighlighted?'#ffeb3b':g.color;
+      } else if(it.type==='wall'){
+        ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y); ctx.lineTo(it.points[1].x,it.points[1].y); ctx.stroke();
+        pmtLabel(ctx, it.label, it.points[1].x, it.points[1].y, isHighlighted?'#ffeb3b':g.color);
+      } else if(it.type==='perimeter'){
+        ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y);
+        it.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.closePath(); ctx.stroke();
+        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':g.color);
       }
+      if(isHighlighted) ctx.restore();
     });
   });
   // in-progress click points for linear/rect/poly/scale
@@ -14598,6 +14761,12 @@ async function pmtPushToEstimate(){
   var allItems = [];
   PMT.groups.forEach(function(g){
     g.items.forEach(function(it){
+      if(it.type==='wall'){
+        allItems.push({description: g.name+' — wall studs ('+it.value_ft+' ft wall)', cost_type:'Materials', unit:'EA', qty:it.studs, unit_cost:0, markup_pct:20});
+        allItems.push({description: g.name+' — drywall sheets ('+it.value_ft+' ft wall)', cost_type:'Materials', unit:'EA', qty:it.drywall_sheets, unit_cost:0, markup_pct:20});
+        allItems.push({description: g.name+' — insulation ('+it.value_ft+' ft wall)', cost_type:'Materials', unit:'SF', qty:it.insulation_sqft, unit_cost:0, markup_pct:20});
+        return;
+      }
       var qty = it.type==='count' ? 1 : (it.value_sqft!==undefined ? it.value_sqft : it.value_ft);
       var unit = it.type==='count' ? 'EA' : (it.value_sqft!==undefined ? 'SF' : 'LF');
       allItems.push({description: g.name+' — '+it.label, cost_type:'Materials', unit:unit, qty:qty, unit_cost:0, markup_pct:20});
