@@ -14353,6 +14353,8 @@ async function showPlanMarkupTool(docId){
       +'<div style="width:64px;background:#22262b;display:flex;flex-direction:column;gap:6px;padding:10px 8px;border-right:1px solid rgba(255,255,255,0.08)">'
       +'<button onclick="pmtShowScaleEntryModal(0)" title="Ratio or numeric scale (no clicking required)" style="padding:8px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:2px">'
         +'<span>⚙️</span><span style="font-size:8px;font-weight:700">Scale Options</span></button>'
+      +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="padding:8px 4px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:4px">'
+        +'<span>🤖</span><span style="font-size:8px;font-weight:700">AI Detect</span></button>'
       +[
         ['scale','📏','Set Scale'],
         ['linear','📐','Linear'],
@@ -15354,6 +15356,64 @@ async function runPlanVersionCompare(docIdA, docIdB){
     resultEl.innerHTML = uxEsc(r).replace(/\n/g,'<br>');
   }catch(e){
     resultEl.innerHTML = '<span style="color:#dc2626">Comparison failed: '+uxEsc(e.message)+'</span>';
+  }
+}
+
+
+// ── AI AUTO-DETECT ROOMS — an honestly-scoped first version of what
+// Togal.ai/Kreo do with dedicated computer vision. This uses a general
+// vision-language model call (not a purpose-trained room-segmentation
+// model), so it produces approximate bounding boxes for review, not
+// pixel-precise auto-tracing. Every detected room is added as a normal,
+// fully editable rectangle the user can adjust or delete — never treated
+// as final measurement without review. ──
+async function pmtAIAutoDetect(){
+  if(!PMT.scalePxPerFt){ toast('Set the scale first so AI-detected rooms can be converted to real sqft','err'); return; }
+  var canvas = document.getElementById('pmt-base');
+  if(!canvas){ toast('Plan not loaded','err'); return; }
+  toast('🤖 AI scanning the plan for rooms — this is an approximate first pass, review before trusting it','ok',8000);
+
+  var imgData = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+  try{
+    var r = await fetch('/api/claude', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:1200,
+        messages:[{role:'user', content:[
+          {type:'image', source:{type:'base64', media_type:'image/jpeg', data: imgData}},
+          {type:'text', text:'This is a construction floor plan image, '+canvas.width+'x'+canvas.height+' pixels. '
+            +'Identify each distinct room/space you can see and estimate its bounding box as a rectangle. '
+            +'Return coordinates as FRACTIONS of image width/height (0 to 1), not pixels, measured from the top-left corner.\n'
+            +'Return ONLY valid JSON: {"rooms":[{"name":"Kitchen","x1":0.1,"y1":0.2,"x2":0.4,"y2":0.5}]}. '
+            +'Only include rooms you can actually identify with reasonable confidence — do not guess at rooms you cannot see clearly. Max 20 rooms.'}
+        ]}]})});
+    var data = await r.json();
+    if(!r.ok) throw new Error(data.error||'API error');
+    var parsed = safeJSON(data.content[0].text);
+    var rooms = (parsed && Array.isArray(parsed.rooms)) ? parsed.rooms : [];
+    if(!rooms.length){ toast('AI could not confidently identify distinct rooms on this plan','err'); return; }
+
+    // Put everything AI detects into its own group, clearly labeled as
+    // needing verification, rather than mixing it into existing groups.
+    var detectGroup = {id:'g-ai-'+Date.now(), name:'AI Auto-Detected — VERIFY', color:'#7c3aed', visible:true, items:[]};
+    rooms.forEach(function(room){
+      var px1 = room.x1 * canvas.width, py1 = room.y1 * canvas.height;
+      var px2 = room.x2 * canvas.width, py2 = room.y2 * canvas.height;
+      var wFt = Math.abs(px2-px1)/PMT.scalePxPerFt, hFt = Math.abs(py2-py1)/PMT.scalePxPerFt;
+      var areaFt = Math.round(wFt*hFt*10)/10;
+      detectGroup.items.push({
+        id: 'i'+Date.now()+Math.floor(Math.random()*1000), type:'rect',
+        points:[{x:px1,y:py1},{x:px2,y:py2}], value_sqft: areaFt,
+        label: (room.name||'Room')+' — ~'+areaFt+' sqft (AI guess, verify)',
+        page: PMT.currentPage||1
+      });
+    });
+    PMT.groups.push(detectGroup);
+    PMT.activeGroupId = detectGroup.id;
+    pmtLogHistory('ai-auto-detect', rooms.length+' room(s) detected');
+    pmtRenderSidebar();
+    pmtRedraw();
+    toast('🤖 '+rooms.length+' room(s) detected — check each one, adjust or delete any that are wrong','ok',7000);
+  }catch(e){
+    toast('AI auto-detect failed: '+e.message,'err');
   }
 }
 
