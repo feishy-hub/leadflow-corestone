@@ -15146,6 +15146,12 @@ async function pmtPushToEstimate(){
   var allItems = [];
   PMT.groups.forEach(function(g){
     g.items.forEach(function(it){
+      if(it.assembly_outputs && it.assembly_outputs.length){
+        it.assembly_outputs.forEach(function(o){
+          allItems.push({description: g.name+' — '+o.name+' ['+it.assembly+']', cost_type:'Materials', unit:o.unit, qty:o.qty, unit_cost:0, markup_pct:20});
+        });
+        return;
+      }
       if(it.type==='wall'){
         allItems.push({description: g.name+' — wall studs ('+it.value_ft+' ft wall)', cost_type:'Materials', unit:'EA', qty:it.studs, unit_cost:0, markup_pct:20});
         allItems.push({description: g.name+' — drywall sheets ('+it.value_ft+' ft wall)', cost_type:'Materials', unit:'EA', qty:it.drywall_sheets, unit_cost:0, markup_pct:20});
@@ -15845,6 +15851,7 @@ function pmtCanvasContextMenu(e){
   }).join('');
   var items = [
     {label:'✏️ Edit', action:"pmtEditItemValue('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"},
+    {label:'🧩 Apply Assembly', action:"pmtShowAssemblyManager('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"},
     {label:'📋 Duplicate', action:"pmtDuplicateItem('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"},
     {label: (it.locked?'🔓 Unlock':'🔒 Lock'), action:"pmtToggleItemLock('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"},
     {label:'⬆️ Bring to Front', action:"pmtReorderItem('"+g.id+"','"+it.id+"','front');pmtCloseContextMenu();"},
@@ -15906,6 +15913,117 @@ function pmtMoveItemToGroup(fromGroupId, itemId, toGroupId){
   pmtLogHistory('moved to group', it.label+' -> '+toG.name);
   pmtRenderSidebar(); pmtRedraw();
   toast('Moved to '+toG.name,'ok');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// ASSEMBLIES — save a reusable material/labor formula once (e.g. "Standard
+// Exterior Wall" = studs + drywall + insulation from a linear measurement),
+// then apply it to any future measurement in one click instead of rebuilding
+// the math every time. This is the core feature PlanSwift and Autodesk are
+// actually built around.
+// ═══════════════════════════════════════════════════════════════════════
+function pmtGetAssemblies(){
+  try{ return JSON.parse(localStorage.getItem('cs_pmt_assemblies')||'[]'); }catch(e){ return []; }
+}
+function pmtSaveAssembliesList(list){
+  localStorage.setItem('cs_pmt_assemblies', JSON.stringify(list));
+}
+
+function pmtShowAssemblyManager(groupId, itemId){
+  var assemblies = pmtGetAssemblies();
+  document.querySelectorAll('#pmt-assembly-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-assembly-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%;max-height:80vh;overflow-y:auto">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Apply an Assembly</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Applies saved formulas to this measurement — creates the resulting line items automatically.</div>'
+    +(assemblies.length ? assemblies.map(function(a,i){
+        return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">'
+          +'<div><div style="font-weight:700;font-size:13px">'+uxEsc(a.name)+'</div><div style="font-size:11px;color:var(--muted)">'+a.formulas.length+' output(s)</div></div>'
+          +'<div style="display:flex;gap:6px">'
+          +'<button onclick="pmtApplyAssembly('+i+',\''+groupId+'\',\''+itemId+'\')" class="btn btn-p btn-sm">Apply</button>'
+          +'<button onclick="pmtDeleteAssembly('+i+')" style="background:none;border:none;color:#dc2626;cursor:pointer">🗑</button>'
+          +'</div></div>';
+      }).join('') : '<div style="color:var(--muted);font-size:13px;margin-bottom:12px">No assemblies saved yet.</div>')
+    +'<button onclick="pmtShowNewAssemblyForm(\''+groupId+'\',\''+itemId+'\')" class="btn btn-g" style="width:100%;margin-top:8px">+ Create New Assembly</button>'
+    +'<button onclick="document.getElementById(\'pmt-assembly-ov\').remove()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Close</button>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+
+function pmtShowNewAssemblyForm(groupId, itemId){
+  document.querySelectorAll('#pmt-assembly-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-assembly-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%;max-height:80vh;overflow-y:auto">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:14px">New Assembly</div>'
+    +'<div class="fr"><label>Assembly Name</label><input id="pmt-asm-name" placeholder="Standard Exterior Wall" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px"></div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Each output = (the measured value) \u00d7 (your multiplier), per foot or per sqft of the base measurement. Add as many outputs as this assembly needs.</div>'
+    +'<div id="pmt-asm-formulas"></div>'
+    +'<button type="button" onclick="pmtAddFormulaRow()" style="background:none;border:1px dashed var(--border);border-radius:6px;padding:8px;width:100%;cursor:pointer;font-size:12px;margin-bottom:10px">+ Add Output</button>'
+    +'<button onclick="pmtSaveNewAssembly(\''+groupId+'\',\''+itemId+'\')" class="btn btn-p" style="width:100%">Save Assembly</button>'
+    +'<button onclick="document.getElementById(\'pmt-assembly-ov\').remove()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  pmtAddFormulaRow();
+}
+function pmtAddFormulaRow(){
+  var wrap = document.getElementById('pmt-asm-formulas');
+  var rowId = 'row'+Date.now()+Math.floor(Math.random()*1000);
+  var row = document.createElement('div');
+  row.className = 'pmt-formula-row';
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
+  row.innerHTML = '<input placeholder="Output name (e.g. Studs)" class="pmt-formula-name" style="flex:2;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px">'
+    +'<input type="number" placeholder="Per ft/sqft" class="pmt-formula-mult" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px">'
+    +'<select class="pmt-formula-unit" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px"><option>EA</option><option>SF</option><option>LF</option><option>SHEETS</option></select>'
+    +'<button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:#dc2626;cursor:pointer">✕</button>';
+  wrap.appendChild(row);
+}
+function pmtSaveNewAssembly(groupId, itemId){
+  var name = document.getElementById('pmt-asm-name').value.trim();
+  if(!name){ toast('Name the assembly first','err'); return; }
+  var rows = document.querySelectorAll('.pmt-formula-row');
+  var formulas = [];
+  rows.forEach(function(row){
+    var outName = row.querySelector('.pmt-formula-name').value.trim();
+    var mult = parseFloat(row.querySelector('.pmt-formula-mult').value);
+    var unit = row.querySelector('.pmt-formula-unit').value;
+    if(outName && mult) formulas.push({name:outName, multiplier:mult, unit:unit});
+  });
+  if(!formulas.length){ toast('Add at least one output','err'); return; }
+  var assemblies = pmtGetAssemblies();
+  assemblies.push({name:name, formulas:formulas});
+  pmtSaveAssembliesList(assemblies);
+  toast('Assembly saved: '+name,'ok');
+  if(groupId && itemId) pmtShowAssemblyManager(groupId, itemId);
+  else document.getElementById('pmt-assembly-ov').remove();
+}
+function pmtDeleteAssembly(index){
+  var assemblies = pmtGetAssemblies();
+  assemblies.splice(index,1);
+  pmtSaveAssembliesList(assemblies);
+  toast('Assembly deleted','ok');
+  document.getElementById('pmt-assembly-ov').remove();
+}
+function pmtApplyAssembly(index, groupId, itemId){
+  var assemblies = pmtGetAssemblies();
+  var asm = assemblies[index];
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g ? g.items.find(function(i){return i.id===itemId;}) : null;
+  if(!asm || !it) return;
+  var base = it.value_sqft !== undefined ? it.value_sqft : (it.value_ft || 0);
+  it.assembly = asm.name;
+  it.assembly_outputs = asm.formulas.map(function(f){
+    return {name:f.name, qty: Math.round(base * f.multiplier * 100)/100, unit:f.unit};
+  });
+  it.label = it.label.split(' [')[0] + ' [' + asm.name + ']';
+  pmtLogHistory('assembly applied', asm.name+' -> '+it.label);
+  document.getElementById('pmt-assembly-ov').remove();
+  pmtRenderSidebar(); pmtRedraw();
+  toast('Assembly applied — '+it.assembly_outputs.length+' output(s) will be included when you push to estimate','ok',5000);
 }
 
 </script>
