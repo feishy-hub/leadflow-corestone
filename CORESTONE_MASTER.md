@@ -1,6 +1,6 @@
 # CORESTONE MASTER — Session Front Door
 ## Read this first. Then follow the reading order below.
-## Last updated: OS #9 — July 3, 2026
+## Last updated: Emergency Live-QA & Takeoff Build-Out Session — CS v2.10.4 — July 10, 2026 (see full summary at bottom of this file)
 
 ---
 
@@ -210,3 +210,99 @@ rfi_open, photo_issue, warranty_claim, punch_list_review, brain_risk, engineerin
 9. Request a PO → confirm it routes to Gatekeeper (not created directly)
 10. Use 💬 button → log an issue → open Engineering Board → view permanent ID
 
+
+---
+
+## SESSION UPDATE — "Emergency Live-QA + Takeoff Build-Out" (July 2026)
+## Current version: CS v2.10.4 — supersedes the CS v2.6 status above, which is now stale.
+
+**This was a single extended session that started because Feishy directly rejected
+code-inspection-based readiness claims and demanded real, live, click-through proof.**
+That instinct was immediately validated: the app was found completely non-navigable in
+production (goTab, toggleGroup, and 140+ other call sites pointed at functions that did
+not exist anywhere in the file). Everything below was found and fixed live, in the
+browser, not by reading the source.
+
+### Critical bugs found and fixed this session
+- Entire navigation layer missing (goTab, toggleGroup, showQuickAdd, updateNotifBadge)
+- New Lead form, New Estimate form did not exist at all
+- calcEstTotal() (the tax/fee engine) called in 5 places, defined nowhere
+- Premature job closeout: paying the FIRST invoice on any job incorrectly marked the
+  whole job "Closeout" and started the 1-year warranty clock, regardless of how much
+  of the contract was actually paid
+- 7 record-creation forms never existed (Punch List, RFI, Selections, Specifications,
+  Warranty Claim, Lien Waiver, Photo Upload)
+- Email classification (classifyAndProcessEmail) used a completely broken API request
+  format and was very likely non-functional the entire time it existed
+- aiAnalyzePhoto() was defined twice with conflicting signatures, silently breaking
+  whichever caller expected the other one
+- Voice transcription (Daily Log and Live Call Mode) produced garbled, escalating
+  repeated text due to relying on the browser's own (unreliable) result-index tracking
+- Plan upload crashed with a confusing error on real-sized files (server request-size
+  limit hit, code tried to parse the plain-text error as JSON)
+- Push-to-Estimate from the Takeoff tool always created a duplicate estimate instead of
+  updating the linked one — edits after the first push were silently lost
+
+### New capabilities built this session
+- **AI-driven review-and-approve pipeline**: photo, video, and message AI analysis no
+  longer auto-escalates to Gatekeeper silently — shows a checklist, Feishy picks what's
+  real, and only then does approving it create a real Punch List item / draft Change
+  Order / follow-up task. Full findings are always saved on the record regardless.
+- **Voice, photo, and video capture built directly into Daily Logs** — live speech-to-
+  text, camera capture vs. upload-from-library as separate options, video analyzed via
+  extracted frames (visual only, no audio transcription — that needs a real transcription
+  service, not attempted).
+- **Takeoff → Bids and Takeoff → Purchase Orders auto-flow**, plus Plan Version Compare.
+- **The full Bidding response loop**: real bid intake (amount + notes per sub, was a
+  stub before), approving a bid auto-drafts a Change Order for the client priced from
+  that real bid + standard markup.
+- **Schedule-shift-ask**: a Change Order with schedule impact now explicitly asks
+  "move the schedule by N days?" as its own Gatekeeper item, rather than moving it
+  silently or doing nothing.
+- **Original scope of work is now stored on the job record** (pulled from the signed
+  proposal) so scope-change detection can genuinely compare against what was actually
+  signed, not guess blind.
+- **The Visual Plan Markup Tool — built essentially from scratch this session** to the
+  full spec discussed, matching Procore/PlanSwift/Bluebeam/Autodesk feature parity:
+  - All 4 scale methods (2-point click, ratio dropdown, numeric entry, standard presets)
+  - Linear, Rectangle, Polygon, Count, Wall (auto studs/drywall/insulation), Perimeter,
+    Freehand, Volume (cubic yards from area + depth) measurement tools
+  - Right-click menu on any shape: Edit, Apply Assembly, Duplicate, Lock/Unlock,
+    Bring to Front/Send to Back, Delete, Move to Group
+  - Drag a corner to reshape, drag a whole shape to move it, values recalculate live
+  - Assemblies — save a reusable material/labor formula once, apply it anywhere
+  - Full Markup/Annotation layer separate from measuring: text notes, callouts, revision
+    clouds, stamps (Approved/For Construction/As-Built/etc.) with name+date attached
+  - Zoom in/out/reset, a toggleable Legend, Select/Stop mode, Escape-to-cancel
+  - Multi-page navigation with a jump-to-page dropdown AND real rendered sheet thumbnails
+  - Markup history/audit log of every change
+  - Classification codes per measurement group (CSI-style divisions)
+  - CSV/Excel export of every measurement
+  - Snap-to-existing-point and Ortho lock (Shift = perfectly straight lines)
+  - **"Generate All Schedules" button** — one AI call produces a window schedule, door
+    schedule, insulation/sound requirements by area, roof/ceiling needs, per-floor
+    breakdown, and a dedicated Non-Standard Items list flagging anything that needs
+    separate pricing instead of a standard rate
+
+### Honest, known gaps — not forgotten, deliberately not attempted this session
+- CAD/DWG file support (would need a real file-conversion service)
+- True AI auto-polygon room detection (a basic version — pmtAIAutoDetect — exists and
+  works via vision, but is not as precise as dedicated CV tools like Togal.ai/Kreo)
+- Real multi-user simultaneous access — structurally blocked until the Supabase
+  migration (this app is still single-browser localStorage only; any "send a link to a
+  client/sub" feature only works if they open it on the same browser as the data)
+- Purchase Orders still bypass the required 3-stage Gatekeeper approval — confirmed
+  live, matches the pre-existing Subsystem Status entry, not a new regression
+
+### Methodology note
+Two Claude sessions worked on this exact repo concurrently for part of this window
+(both independently running the same "find every broken reference" sweep and arriving
+at overlapping fixes). Both sets of changes reconciled cleanly in the final state, but
+this was closer than it should have been — the app pushes via full-file overwrite, not
+patch-based commits, so running two active sessions at once is a real risk going
+forward, not just a curiosity.
+
+**Almost none of tonight's new Markup Tool surface area (batches 1-5: drag-editing,
+assemblies, markup/annotation, zoom, ortho/snap, thumbnails, export) has been clicked
+by a human yet.** This is the single most important thing to live-test before relying
+on it for a real bid.
