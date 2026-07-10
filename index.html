@@ -16333,22 +16333,60 @@ async function pmtRenderThumbnail(pageNum, containerDiv){
 // "44.4 sqft" with no context. Found directly from Feishy describing this
 // exact gap: "it should ask me many things... calculate one to the other."
 // ═══════════════════════════════════════════════════════════════════════
-function pmtShowAreaDetailsModal(points, areaFt, shapeType){
+async function pmtShowAreaDetailsModal(points, areaFt, shapeType){
   document.querySelectorAll('#pmt-areadetails-ov').forEach(function(el){el.remove();});
   var el = document.createElement('div');
   el.id = 'pmt-areadetails-ov';
   el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
   el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:380px;width:90%">'
-    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">What is this?</div>'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">\ud83e\udd16 AI is looking at this measurement\u2026</div>'
+    +'<div style="font-size:13px;color:var(--muted)">'+areaFt+' sqft \u2014 figuring out what it probably is and whether it needs a standard depth.</div>'
+    +'</div>';
+  document.body.appendChild(el);
+
+  // AI proposes an identification + a standard depth + a matching assembly,
+  // using everything already known about this plan and job — not a blank
+  // form the person fills in from nothing. This is the actual fix Feishy
+  // asked for: the AI should propose the answer, not ask a generic question.
+  var doc = (await dbGet('documents','?id=eq.'+PMT.docId))[0];
+  var jobDoc = (PMT.jobId ? await dbGet('jobs','?id=eq.'+PMT.jobId) : []) || [];
+  var assemblies = pmtGetAssemblies();
+  var existingLabels = PMT.groups.map(function(g){return g.name;}).concat(PMT.groups.flatMap(function(g){return g.items.map(function(i){return i.label;});}));
+  var suggestion = null;
+  try{
+    var r = await ai(
+      'A user just measured a '+shapeType+' area of '+areaFt+' sqft on a construction plan takeoff tool, for Corestone Developers.\n'
+      +'FULL PLAN CONTEXT (AI-read takeoff data for this plan): '+(doc&&doc.description||'{}').slice(0,2500)+'\n'
+      +'JOB TYPE: '+(jobDoc[0]&&jobDoc[0].job_type||'unknown')+'\n'
+      +'OTHER MEASUREMENTS ALREADY TAKEN ON THIS PLAN: '+(existingLabels.join(', ')||'none yet')+'\n'
+      +'SAVED ASSEMBLIES AVAILABLE: '+(assemblies.map(function(a){return a.name;}).join(', ')||'none saved')+'\n\n'
+      +'Based on the room list/sizes in the plan data and the size of this specific measurement, propose your single best guess for what this measurement is (e.g. "Garage slab," "Kitchen floor," "Patio"). '
+      +'If it is the kind of thing that typically needs a depth (concrete, excavation, gravel base, etc.), propose a standard depth in feet a residential GC would normally use, and explain why briefly. If it does NOT need a depth (e.g. a room floor area, a roof area), say so. '
+      +'If one of the saved assemblies plausibly applies, name it.\n'
+      +'Return ONLY raw JSON: {"guess_name":"","needs_depth":true,"suggested_depth_ft":0,"depth_reasoning":"","matching_assembly":"" }',
+      'You are an experienced residential general contractor\'s estimating assistant. Be concise and use real construction standards (e.g. 4 inch = 0.33ft residential slab, 6 inch = 0.5ft driveway/garage slab). Return ONLY raw JSON.',
+      500
+    );
+    suggestion = safeJSON(r);
+  }catch(e){ console.warn('[pmtShowAreaDetailsModal] AI suggestion failed', e); }
+
+  document.querySelectorAll('#pmt-areadetails-ov').forEach(function(x){x.remove();});
+  var s = suggestion || {};
+  var el2 = document.createElement('div');
+  el2.id = 'pmt-areadetails-ov';
+  el2.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el2.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:400px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">\ud83e\udd16 AI Suggestion \u2014 confirm or change it</div>'
     +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Area measured: '+areaFt+' sqft.</div>'
-    +'<div class="fr"><label>Name it (e.g. "Garage slab," "Kitchen floor")</label><input id="pmt-area-name" placeholder="Concrete slab" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px" autofocus></div>'
-    +'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer"><input type="checkbox" id="pmt-area-addheight" onchange="document.getElementById(\'pmt-area-height-row\').style.display=this.checked?\'block\':\'none\'"> This needs a depth/height (concrete, excavation, etc. — calculates cubic yards)</label>'
-    +'<div id="pmt-area-height-row" style="display:none;margin-bottom:12px"><label>Depth/height (feet)</label><input type="number" id="pmt-area-height" placeholder="e.g. 0.33 for a 4&quot; slab" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px"></div>'
+    +'<div class="fr"><label>What this is</label><input id="pmt-area-name" value="'+uxEsc(s.guess_name||'')+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px"></div>'
+    +'<label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;cursor:pointer"><input type="checkbox" id="pmt-area-addheight" '+(s.needs_depth?'checked':'')+' onchange="document.getElementById(\'pmt-area-height-row\').style.display=this.checked?\'block\':\'none\'"> Needs a depth/height (calculates cubic yards)</label>'
+    +(s.needs_depth && s.depth_reasoning ? '<div style="font-size:11px;color:#0d7a70;margin-bottom:8px;padding-left:24px">\ud83e\udd16 '+uxEsc(s.depth_reasoning)+'</div>' : '')
+    +'<div id="pmt-area-height-row" style="display:'+(s.needs_depth?'block':'none')+';margin-bottom:12px"><label>Depth/height (feet)</label><input type="number" id="pmt-area-height" value="'+(s.suggested_depth_ft||'')+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px"></div>'
+    +(s.matching_assembly ? '<div style="font-size:12px;background:#f0f5f4;border-radius:6px;padding:8px;margin-bottom:12px">\ud83e\udde9 AI suggests applying assembly: <b>'+uxEsc(s.matching_assembly)+'</b> — you can apply it after adding this from the right-click menu.</div>' : '')
     +'<button onclick="pmtConfirmAreaDetails('+JSON.stringify(points)+','+areaFt+',\''+shapeType+'\')" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add Measurement</button>'
     +'<button onclick="pmtSkipAreaDetails('+JSON.stringify(points)+','+areaFt+',\''+shapeType+'\')" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Skip — just add as plain area</button>'
     +'</div>';
-  document.body.appendChild(el);
-  setTimeout(function(){ var inp=document.getElementById('pmt-area-name'); if(inp) inp.focus(); }, 50);
+  document.body.appendChild(el2);
 }
 function pmtConfirmAreaDetails(points, areaFt, shapeType){
   var name = document.getElementById('pmt-area-name').value.trim();
@@ -16358,6 +16396,7 @@ function pmtConfirmAreaDetails(points, areaFt, shapeType){
   if(addHeight && depth && depth>0){
     item.value_cy = Math.round((areaFt*depth/27)*100)/100;
     item.label = (name?name+' — ':'') + areaFt+' sqft \u00d7 '+depth+'ft deep = '+item.value_cy+' CY';
+
   } else {
     item.label = (name?name+' — ':'') + areaFt+' sqft';
   }
