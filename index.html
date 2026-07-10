@@ -14382,6 +14382,8 @@ async function showPlanMarkupTool(docId){
     +'<div style="flex:1;display:flex;overflow:hidden">'
       // Toolbar
       +'<div style="width:64px;background:#22262b;display:flex;flex-direction:column;gap:6px;padding:10px 8px;border-right:1px solid rgba(255,255,255,0.08)">'
+      +'<button data-pmt-tool="select" onclick="pmtSetTool(null)" title="Select / Stop — exit whatever tool is active" style="padding:10px 4px;background:#0d7a70;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:16px;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:2px">'
+        +'<span>✋</span><span style="font-size:8px;font-weight:700">Stop</span></button>'
       +'<button onclick="pmtShowScaleEntryModal(0)" title="Ratio or numeric scale (no clicking required)" style="padding:8px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:2px">'
         +'<span>⚙️</span><span style="font-size:8px;font-weight:700">Scale Options</span></button>'
       +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="padding:8px 4px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:4px">'
@@ -14405,6 +14407,7 @@ async function showPlanMarkupTool(docId){
       +'</div>'
       // Canvas area
       +'<div id="pmt-canvas-wrap" style="flex:1;overflow:auto;background:#0d0f11;position:relative;display:flex;justify-content:center;padding:20px">'
+      +'<div id="pmt-count-badge" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#0d7a70;color:#fff;padding:8px 20px;border-radius:20px;font-weight:800;font-size:14px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.3)">Count: 0</div>'
       +'<div id="pmt-canvas-stack" style="position:relative;line-height:0"></div>'
       +'</div>'
       // Sidebar
@@ -14564,21 +14567,39 @@ function pmtConfirmPresetScale(pxPerFt){
 function pmtSetTool(tool){
   PMT.tool = tool;
   PMT.clickPoints = [];
-  document.querySelectorAll('[data-pmt-tool]').forEach(function(b){ b.style.outline = (b.dataset.pmtTool===tool) ? '2px solid #fff' : 'none'; });
+  document.querySelectorAll('[data-pmt-tool]').forEach(function(b){ b.style.outline = (b.dataset.pmtTool===(tool||'select')) ? '2px solid #fff' : 'none'; });
   var status = document.getElementById('pmt-status');
   var msgs = {
     scale: 'Click two points on a known wall/dimension, then enter the real-world length.',
     linear: 'Click a start point, then an end point, to measure a length.',
     rect: 'Click two opposite corners of a rectangular area.',
     poly: 'Click each corner of the shape, then double-click to close it.',
-    count: 'Click each item to count (doors, windows, fixtures, etc.) — one click per item.',
+    count: 'Click each item to count (doors, windows, fixtures, etc.) — one click per item. Click "Stop" (top-left) when you\'re done counting.',
     wall: 'Click the two ends of a wall — auto-calculates studs, drywall sheets, and insulation (assumes 8ft height, 16" o.c. studs).',
     perimeter: 'Click each corner of the room, then double-click to close — shows total perimeter, not area.',
     freehand: 'Click a series of points to sketch a note or unusual shape, then double-click to finish — no automatic quantity is computed, just a visual note.',
     volume: 'Click two opposite corners like Rectangle, then enter a depth — calculates cubic yards (for concrete, excavation, etc.).'
   };
-  if(status) status.textContent = msgs[tool] || '';
+  var scaleReadout = PMT.scalePxPerFt ? ('Scale: ' + PMT.scalePxPerFt.toFixed(1) + ' px/ft. ') : 'No scale set yet. ';
+  if(status) status.textContent = scaleReadout + (tool ? (msgs[tool]||'') : 'Nothing selected — pick a tool above, or click a measurement in the list to review it. Press Escape any time to cancel an in-progress measurement.');
+  var countBadge = document.getElementById('pmt-count-badge');
+  if(countBadge){
+    if(tool === 'count'){
+      countBadge.style.display = 'block';
+      countBadge.textContent = 'Count: ' + pmtActiveGroup().items.filter(function(i){return i.type==='count';}).length;
+    } else {
+      countBadge.style.display = 'none';
+    }
+  }
 }
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape' && window.PMT && PMT.clickPoints && PMT.clickPoints.length){
+    PMT.clickPoints = [];
+    pmtRedraw();
+    toast('Cancelled the in-progress measurement','ok');
+  }
+});
+
 
 function pmtCanvasClick(e){
   if(!PMT || !PMT.tool) return;
@@ -14604,6 +14625,8 @@ function pmtCanvasClick(e){
   if(PMT.tool === 'count'){
     pmtAddItem({type:'count', x:x, y:y, label:'Item '+(pmtActiveGroup().items.filter(function(i){return i.type==='count';}).length+1)});
     pmtRedraw();
+    var countBadge2 = document.getElementById('pmt-count-badge');
+    if(countBadge2) countBadge2.textContent = 'Count: ' + pmtActiveGroup().items.filter(function(i){return i.type==='count';}).length;
     return;
   }
 
@@ -14898,6 +14921,21 @@ function pmtHighlightItem(groupId, itemId){
   pmtRedraw();
   setTimeout(function(){ pmtHighlightedItemId=null; pmtRedraw(); }, 1500);
 }
+function pmtDeleteGroup(id){
+  var g = PMT.groups.find(function(x){return x.id===id;});
+  if(!g) return;
+  var itemCount = g.items.length;
+  if(itemCount > 0 && !window.confirm('Delete "'+g.name+'" and all '+itemCount+' measurement(s) in it? This cannot be undone.')) return;
+  PMT.groups = PMT.groups.filter(function(x){return x.id!==id;});
+  if(PMT.groups.length === 0){
+    PMT.groups.push({id:'g'+Date.now(), name:'General', color:'#0d7a70', visible:true, items:[]});
+  }
+  if(PMT.activeGroupId === id) PMT.activeGroupId = PMT.groups[0].id;
+  pmtLogHistory('group-deleted', g.name+' ('+itemCount+' items)');
+  pmtRenderSidebar();
+  pmtRedraw();
+  toast('Group deleted','ok');
+}
 function pmtToggleGroupVisible(id){
   var g = PMT.groups.find(function(x){return x.id===id;});
   if(g){ g.visible = !g.visible; pmtRenderSidebar(); pmtRedraw(); }
@@ -14935,6 +14973,7 @@ function pmtRenderSidebar(){
         +[1,2,3,4,5].map(function(w){return '<option value="'+w+'"'+(w===lineWidth?' selected':'')+'>'+w+'px</option>';}).join('')
         +'</select>'
         +'<span onclick="event.stopPropagation();pmtToggleGroupVisible(\''+g.id+'\')" style="cursor:pointer;font-size:13px">'+(g.visible?'👁':'🚫')+'</span>'
+        +'<span onclick="event.stopPropagation();pmtDeleteGroup(\''+g.id+'\')" style="cursor:pointer;font-size:13px;color:#fca5a5">🗑</span>'
         +'</div>'
         +'<div style="color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px">'+(totals.join(' · ')||'No items yet')+'</div>'
         + g.items.map(function(it){
