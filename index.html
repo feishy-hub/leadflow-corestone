@@ -14708,9 +14708,8 @@ function pmtCanvasClick(e){
       var p0=PMT.clickPoints[0], p1=PMT.clickPoints[1];
       var wFt = Math.abs(p1.x-p0.x)/PMT.scalePxPerFt, hFt = Math.abs(p1.y-p0.y)/PMT.scalePxPerFt;
       var areaFt = Math.round(wFt*hFt*10)/10;
-      pmtAddItem({type:'rect', points:PMT.clickPoints.slice(), value_sqft: areaFt, label: areaFt+' sqft ('+Math.round(wFt*10)/10+"'×"+Math.round(hFt*10)/10+"')"});
+      pmtShowAreaDetailsModal(PMT.clickPoints.slice(), areaFt, 'rect');
       PMT.clickPoints = [];
-      pmtRedraw();
     }
     return;
   }
@@ -14851,7 +14850,7 @@ function pmtCanvasDblClick(e){
   }
   areaPx = Math.abs(areaPx/2);
   var areaFt = Math.round((areaPx/(PMT.scalePxPerFt*PMT.scalePxPerFt))*10)/10;
-  pmtAddItem({type:'poly', points: pts.slice(), value_sqft: areaFt, label: areaFt+' sqft'});
+  pmtShowAreaDetailsModal(pts.slice(), areaFt, 'poly');
   PMT.clickPoints = [];
   pmtRedraw();
 }
@@ -16325,6 +16324,51 @@ async function pmtRenderThumbnail(pageNum, containerDiv){
   }catch(e){
     containerDiv.innerHTML = '<span style="color:#fca5a5;font-size:10px">Preview failed</span>';
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SMART AREA PROMPT — every Rectangle/Polygon now asks what it is and
+// whether to calculate volume, instead of silently becoming a bare
+// "44.4 sqft" with no context. Found directly from Feishy describing this
+// exact gap: "it should ask me many things... calculate one to the other."
+// ═══════════════════════════════════════════════════════════════════════
+function pmtShowAreaDetailsModal(points, areaFt, shapeType){
+  document.querySelectorAll('#pmt-areadetails-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-areadetails-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:380px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">What is this?</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Area measured: '+areaFt+' sqft.</div>'
+    +'<div class="fr"><label>Name it (e.g. "Garage slab," "Kitchen floor")</label><input id="pmt-area-name" placeholder="Concrete slab" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px" autofocus></div>'
+    +'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer"><input type="checkbox" id="pmt-area-addheight" onchange="document.getElementById(\'pmt-area-height-row\').style.display=this.checked?\'block\':\'none\'"> This needs a depth/height (concrete, excavation, etc. — calculates cubic yards)</label>'
+    +'<div id="pmt-area-height-row" style="display:none;margin-bottom:12px"><label>Depth/height (feet)</label><input type="number" id="pmt-area-height" placeholder="e.g. 0.33 for a 4&quot; slab" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px"></div>'
+    +'<button onclick="pmtConfirmAreaDetails('+JSON.stringify(points)+','+areaFt+',\''+shapeType+'\')" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add Measurement</button>'
+    +'<button onclick="pmtSkipAreaDetails('+JSON.stringify(points)+','+areaFt+',\''+shapeType+'\')" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Skip — just add as plain area</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  setTimeout(function(){ var inp=document.getElementById('pmt-area-name'); if(inp) inp.focus(); }, 50);
+}
+function pmtConfirmAreaDetails(points, areaFt, shapeType){
+  var name = document.getElementById('pmt-area-name').value.trim();
+  var addHeight = document.getElementById('pmt-area-addheight').checked;
+  var depth = addHeight ? parseFloat(document.getElementById('pmt-area-height').value) : null;
+  var item = {type: shapeType, points: points, value_sqft: areaFt};
+  if(addHeight && depth && depth>0){
+    item.value_cy = Math.round((areaFt*depth/27)*100)/100;
+    item.label = (name?name+' — ':'') + areaFt+' sqft \u00d7 '+depth+'ft deep = '+item.value_cy+' CY';
+  } else {
+    item.label = (name?name+' — ':'') + areaFt+' sqft';
+  }
+  document.getElementById('pmt-areadetails-ov').remove();
+  pmtAddItem(item);
+  pmtRedraw();
+}
+function pmtSkipAreaDetails(points, areaFt, shapeType){
+  document.getElementById('pmt-areadetails-ov').remove();
+  pmtAddItem({type:shapeType, points:points, value_sqft:areaFt, label:areaFt+' sqft'});
+  pmtRedraw();
 }
 
 </script>
