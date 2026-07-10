@@ -14374,8 +14374,10 @@ async function showPlanMarkupTool(docId){
         +'<button onclick="pmtGoToPage(PMT.currentPage-1)" title="Previous page" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:14px">\u2039</button>'
         +'<select id="pmt-page-select" onchange="pmtGoToPage(parseInt(this.value))" style="background:#1a1d21;color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:4px;padding:5px 8px;font-size:12px"></select>'
         +'<button onclick="pmtGoToPage(PMT.currentPage+1)" title="Next page" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:14px">\u203a</button>'
+        +'<button onclick="pmtShowThumbnails()" title="Show sheet thumbnails" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 10px;cursor:pointer;font-size:12px">🖼</button>'
       +'</div>'
       +'<div style="display:flex;gap:8px">'
+      +'<button onclick="pmtExportCSV()" style="padding:7px 14px;background:#374151;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">⬇️ Export CSV</button>'
       +'<button onclick="pmtGenerateSchedules()" style="padding:7px 14px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">📄 Generate All Schedules</button>'
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
       +'<button onclick="pmtSaveAndClose()" style="padding:7px 14px;background:#fff;color:#1a1d21;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💾 Save & Close</button>'
@@ -14444,7 +14446,7 @@ async function showPlanMarkupTool(docId){
       +'</div></div>'
     +'</div>'
     +'<div style="padding:8px 16px;background:#22262b;border-top:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-size:11px" id="pmt-status">'
-      +(PMT.scalePxPerFt ? 'Scale set — click a tool to start measuring.' : 'Start by setting the scale — click "Set Scale," then click two points on a known wall or dimension.')
+      +(PMT.scalePxPerFt ? 'Scale set — click a tool to start measuring. Tip: hold Shift for perfectly straight lines, clicks near an existing point snap to it automatically.' : 'Start by setting the scale — click "Set Scale," then click two points on a known wall or dimension.')
     +'</div>';
   document.body.appendChild(overlay);
 
@@ -14642,6 +14644,8 @@ function pmtCanvasClick(e){
   var rect = e.target.getBoundingClientRect();
   var zoomFactor = PMT.zoomLevel || 1;
   var x = (e.clientX - rect.left) / zoomFactor, y = (e.clientY - rect.top) / zoomFactor;
+  var snapped = pmtApplySnapAndOrtho(x, y, e.shiftKey);
+  x = snapped.x; y = snapped.y;
 
   if(PMT.tool === 'scale'){
     PMT.clickPoints.push({x:x,y:y});
@@ -14940,6 +14944,10 @@ function pmtSetGroupColor(id, color){
   var g = PMT.groups.find(function(x){return x.id===id;});
   if(g){ g.color = color; pmtRenderSidebar(); pmtRedraw(); }
 }
+function pmtSetGroupClassification(id, code){
+  var g = PMT.groups.find(function(x){return x.id===id;});
+  if(g){ g.classification = code; pmtLogHistory('classification set', g.name+' -> '+code); }
+}
 function pmtSetGroupLineWidth(id, width){
   var g = PMT.groups.find(function(x){return x.id===id;});
   if(g){ g.lineWidth = parseInt(width); pmtRedraw(); }
@@ -15092,6 +15100,11 @@ function pmtRenderSidebar(){
         +'<span onclick="event.stopPropagation();pmtToggleGroupVisible(\''+g.id+'\')" style="cursor:pointer;font-size:13px">'+(g.visible?'👁':'🚫')+'</span>'
         +'<span onclick="event.stopPropagation();pmtDeleteGroup(\''+g.id+'\')" style="cursor:pointer;font-size:13px;color:#fca5a5">🗑</span>'
         +'</div>'
+        +'<select onclick="event.stopPropagation()" onchange="event.stopPropagation();pmtSetGroupClassification(\''+g.id+'\',this.value)" style="width:100%;background:#1a1d21;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.1);border-radius:4px;font-size:10px;padding:3px;margin-bottom:4px">'
+        +['','Sitework','Concrete','Masonry','Metals','Wood & Plastics','Thermal & Moisture','Doors & Windows','Finishes','Specialties','Equipment','Furnishings','Mechanical','Electrical'].map(function(c){
+            return '<option value="'+c+'"'+(g.classification===c?' selected':'')+'>'+(c||'No classification')+'</option>';
+          }).join('')
+        +'</select>'
         +'<div style="color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px">'+(totals.join(' · ')||'No items yet')+'</div>'
         + g.items.map(function(it){
             return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.75);padding:2px 0;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
@@ -16194,6 +16207,107 @@ function pmtToggleLegend(){
         return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span style="width:10px;height:10px;border-radius:50%;background:'+g.color+';display:inline-block"></span>'+uxEsc(g.name)+'</div>';
       }).join('') : '<div style="color:#888">No measurements on this page</div>');
   document.getElementById('pmt-canvas-wrap').appendChild(box);
+}
+
+
+// ── SNAP-TO-POINT & ORTHO LOCK ──
+function pmtApplySnapAndOrtho(x, y, shiftHeld){
+  var SNAP_TOL = 10;
+  // Snap to any existing point on the current page (own tool's in-progress
+  // points, plus every other measurement's points) if one is close enough.
+  var candidates = [];
+  PMT.groups.forEach(function(g){
+    g.items.forEach(function(it){
+      if((it.page||1) !== (PMT.currentPage||1)) return;
+      pmtGetItemPoints(it).forEach(function(p){ candidates.push(p); });
+    });
+  });
+  for(var i=0;i<candidates.length;i++){
+    if(Math.hypot(candidates[i].x-x, candidates[i].y-y) <= SNAP_TOL){
+      x = candidates[i].x; y = candidates[i].y;
+      break;
+    }
+  }
+  // Ortho lock — hold Shift to snap the new point to perfectly horizontal,
+  // vertical, or 45 degrees relative to the last click in this measurement.
+  if(shiftHeld && PMT.clickPoints && PMT.clickPoints.length){
+    var last = PMT.clickPoints[PMT.clickPoints.length-1];
+    var dx = x-last.x, dy = y-last.y;
+    var angle = Math.atan2(dy,dx);
+    var snapAngle = Math.round(angle/(Math.PI/4)) * (Math.PI/4);
+    var dist = Math.hypot(dx,dy);
+    x = last.x + Math.cos(snapAngle)*dist;
+    y = last.y + Math.sin(snapAngle)*dist;
+  }
+  return {x:x, y:y};
+}
+
+
+// ── EXCEL/CSV EXPORT — every measurement, with classification and page, for
+// handoff to a client, sub, or spreadsheet-based estimating workflow. ──
+function pmtExportCSV(){
+  var rows = [['Group','Classification','Page','Type','Label','Quantity','Unit']];
+  PMT.groups.forEach(function(g){
+    g.items.forEach(function(it){
+      var qty = it.value_cy!==undefined ? it.value_cy : (it.value_sqft!==undefined ? it.value_sqft : (it.value_ft!==undefined ? it.value_ft : (it.type==='count'?1:'')));
+      var unit = it.value_cy!==undefined ? 'CY' : (it.value_sqft!==undefined ? 'SF' : (it.value_ft!==undefined ? 'LF' : (it.type==='count'?'EA':'')));
+      rows.push([g.name, g.classification||'', it.page||1, it.type, it.label, qty, unit]);
+    });
+  });
+  if(rows.length===1){ toast('No measurements to export yet','err'); return; }
+  var csv = rows.map(function(r){
+    return r.map(function(cell){
+      var s = String(cell==null?'':cell);
+      return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+    }).join(',');
+  }).join('\n');
+  var blob = new Blob([csv], {type:'text/csv'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'takeoff-export.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast('CSV downloaded','ok');
+}
+
+
+// ── SHEET THUMBNAILS — real rendered previews, not just a text dropdown ──
+async function pmtShowThumbnails(){
+  document.querySelectorAll('#pmt-thumb-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-thumb-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:3500;display:flex;align-items:center;justify-content:center;padding:20px';
+  el.innerHTML = '<div style="background:#1a1d21;border-radius:12px;padding:20px;max-width:90vw;max-height:85vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    +'<div style="color:#fff;font-weight:800">Sheets</div>'
+    +'<button onclick="document.getElementById(\'pmt-thumb-ov\').remove()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer">×</button></div>'
+    +'<div id="pmt-thumb-grid" style="display:grid;grid-template-columns:repeat(auto-fill,140px);gap:12px"></div>'
+    +'</div>';
+  document.body.appendChild(el);
+  var grid = document.getElementById('pmt-thumb-grid');
+  for(var i=1;i<=PMT.numPages;i++){
+    var cell = document.createElement('div');
+    cell.style.cssText = 'cursor:pointer;text-align:center';
+    cell.innerHTML = '<div style="width:140px;height:100px;background:#0d0f11;border:2px solid '+(i===PMT.currentPage?'#0d7a70':'rgba(255,255,255,0.15)')+';border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden"><span style="color:rgba(255,255,255,0.3);font-size:11px">Loading\u2026</span></div>'
+      +'<div style="color:#fff;font-size:11px;margin-top:4px">Page '+i+'</div>';
+    cell.onclick = (function(pageNum){ return function(){ pmtGoToPage(pageNum); document.getElementById('pmt-thumb-ov').remove(); }; })(i);
+    grid.appendChild(cell);
+    pmtRenderThumbnail(i, cell.querySelector('div'));
+  }
+}
+async function pmtRenderThumbnail(pageNum, containerDiv){
+  try{
+    var page = await PMT.pdfDoc.getPage(pageNum);
+    var viewport = page.getViewport({scale: 0.15});
+    var canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    await page.render({canvasContext: canvas.getContext('2d'), viewport: viewport}).promise;
+    canvas.style.cssText = 'max-width:100%;max-height:100%';
+    containerDiv.innerHTML = '';
+    containerDiv.appendChild(canvas);
+  }catch(e){
+    containerDiv.innerHTML = '<span style="color:#fca5a5;font-size:10px">Preview failed</span>';
+  }
 }
 
 </script>
