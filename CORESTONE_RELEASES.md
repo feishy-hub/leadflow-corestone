@@ -406,3 +406,44 @@ not a stub or placeholder.
   live, not a new regression, matches the existing Subsystem Status entry
 - clearJob, openGlobalSearch, openNotifCenter, renderPage, toggleJobPicker,
   uxSortDelegated, uxStatusOptClick, eisBulkExportJobs, micFillField — not yet investigated
+
+---
+
+## CS v2.7.6 – v2.10.4 — Same Emergency Live-QA Session, Continued
+**These were never logged here individually — recording them now as one batch so nothing is lost.**
+
+- v2.7.6: takeoffToBids() -- auto-drafts bid packages per trade from plan takeoff + lead/job data, through Gatekeeper
+- v2.7.7: Visual Plan Markup Tool built from scratch -- scale calibration, Linear/Rect/Poly/Count tools, plan files persisted to IndexedDB (previously not saved anywhere reusable)
+- v2.7.8: Fixed polygon double-click phantom-points bug (found via manual code trace)
+- v2.8.0: Video upload + frame-by-frame AI vision analysis; fixed a garbled prompt fragment; Yiddish-awareness added to all text-based AI classification; honest on-screen note that live call transcription is English-only
+- v2.8.1: Daily Log modal said "speak naturally" but had zero mic/camera controls -- added real Record Voice, Add Photo, Add Video
+- v2.8.2: Split "take live" vs "upload existing file" for photo/video, added Attach Recording for audio, larger touch-friendly buttons
+- v2.8.3: AI Findings Review -- photo/video/message AI analysis no longer auto-creates Gatekeeper items silently; shows a checklist, only escalates what's checked
+- v2.8.4: Fixed repeated/duplicate AI findings in video analysis (was analyzing 4 frames independently; now one combined call)
+- v2.8.5: CRITICAL -- fixed garbled/escalating-repeat voice transcription bug (Daily Log and Call Mode both relied on the browser's own unreliable result-index tracking)
+- v2.8.6: Approving photo/video/message findings in Gatekeeper now actually creates the real Punch List item / draft Change Order / follow-up task, instead of just acknowledging or doing nothing
+- v2.8.7: Real bid response intake (was a stub) -- record each sub's actual bid, approve one to auto-draft a Change Order priced from that bid; Change Orders with schedule impact now explicitly ask before shifting the schedule
+- v2.8.8: CRITICAL -- classifyAndProcessEmail() was using a completely broken API request format, likely non-functional the entire time; fixed, and wired scope/complaint detection into client-message emails
+- v2.8.9: Fixed the SAME polygon phantom-point bug a second time correctly (off-by-one in the first fix), replaced window.prompt scale entry with a proper modal + standard scale presets, added per-group color/line-width, editable names, click-to-highlight, Wall + Perimeter tools
+- v2.9.0: All 4 scale methods complete (ratio/numeric entry added), 4 pre-built templates (Framing, Drywall & Paint, Flooring, Full Renovation)
+- v2.9.1: AI Plan Questions panel (quick-tap + free-text Q&A about the plan, answered from its takeoff data)
+- v2.9.2: Multi-page plan navigation, markup history/audit log, Freehand + Volume tools, Takeoff->Proposal and Takeoff->PO auto-flows, Plan Version Comparison
+- v2.9.3: CRITICAL -- fixed "Unexpected token R" crash on real-sized plan uploads (server request-size limit hit, code tried to parse a plain-text error as JSON)
+- v2.9.4: Fixed the plan-upload error screen -- previously told the user to "use the manual tool" with no actual way to get there; now gives a real, working button straight into the Markup Tool when the file was saved
+- v2.9.5: Select/Stop button, Escape-to-cancel, persistent on-screen scale readout, live count badge on canvas, delete-whole-group
+- v2.9.6: Real jump-to-page dropdown (shows which pages have measurements), real Edit button on every measurement including editing volume depth
+- v2.9.7: CRITICAL -- Push to Estimate always created a duplicate estimate every time; now updates the linked one in place. NEW: Generate All Schedules button (window/door schedule, insulation by area, per-floor, non-standard items flagged for separate pricing)
+- v2.10.0: Right-click menu on any shape (Edit, Duplicate, Lock, Bring to Front/Back, Delete, Move to Group), drag a corner or whole shape to reshape/move, values recalculate live
+- v2.10.1: Assemblies -- save a reusable material/labor formula once, apply anywhere, outputs flow into the estimate
+- v2.10.2: Markup & Annotation layer -- text notes, callouts, revision clouds, stamps with name+date, separate Markups List
+- v2.10.3: Zoom in/out/reset, toggleable Legend, made all click/drag coordinate math zoom-aware
+- v2.10.4: Ortho lock (Shift = straight lines), snap-to-existing-point, classification codes per group, real rendered sheet thumbnails, CSV/Excel export
+
+### What's still genuinely not built, on purpose
+CAD/DWG file support (needs a real conversion service), true AI auto-polygon room detection
+to Togal.ai/Kreo precision (a basic vision-based version exists), real multi-user simultaneous
+access (blocked on the Supabase migration), Purchase Orders still bypass the 3-stage Gatekeeper
+approval (pre-existing, confirmed live, not new).
+
+**Almost none of the v2.10.x Markup Tool batch (right-click, drag, assemblies, markup layer,
+zoom, ortho/snap, thumbnails, export) has been clicked by a human yet as of this entry.**
