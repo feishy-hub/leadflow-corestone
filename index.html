@@ -4725,7 +4725,8 @@ async function uploadAndAnalyzePlan(){
   
   var result=$('pn-result');
   result.innerHTML='<div class="loading-row"><div class="spin"></div>Reading plan — AI extracting takeoff... this takes 30-60 seconds for complex plans</div>';
-  
+  var docId = null; // set once the document record is saved, so the catch block below knows whether a manual fallback is actually available
+
   try{
     // Convert to base64
     var base64=await new Promise(function(res,rej){
@@ -4743,7 +4744,7 @@ async function uploadAndAnalyzePlan(){
       visible_to_client:false,
       created_at:new Date().toISOString()
     });
-    var docId=saved[0].id;
+    docId=saved[0].id;
     // Save the actual file bytes to IndexedDB (too large for localStorage) so the
     // Plan Markup Tool can render and measure it later
     try{ await idbSavePlanFile(docId, 'data:'+file.type+';base64,'+base64, file.type); }catch(idbErr){ console.error('[idbSavePlanFile]', idbErr); }
@@ -4822,7 +4823,19 @@ async function uploadAndAnalyzePlan(){
     showTakeoffResults(takeoff,docId);
     
   }catch(e){
-    result.innerHTML='<div style="background:var(--red-bg);border:1.5px solid var(--red);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--red)">AI Error: '+e.message+'<br><br>Make sure you uploaded a clear PDF or image of the plan.</div>';
+    if(docId){
+      // The document and file WERE saved successfully before the AI call
+      // failed — there's a real manual path available, so say so directly
+      // and give a button to it, instead of leaving just an error message
+      // with no next step.
+      result.innerHTML='<div style="background:var(--red-bg);border:1.5px solid var(--red);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--red)">AI Error: '+e.message+'</div>'
+        +'<div style="margin-top:10px;padding:14px;background:var(--green-bg);border:1.5px solid var(--green);border-radius:var(--radius);font-size:13px;color:var(--green)">'
+        +'Your plan file WAS saved successfully — only the automatic AI reading failed. You can still measure it yourself with the Visual Markup Tool (scale + click-to-measure), which doesn\'t depend on the AI reading the whole file.'
+        +'<div style="margin-top:10px"><button class="btn btn-p btn-sm" onclick="closeOv(document.querySelector(\'#plan-upload .mc\'));showPlanMarkupTool(\''+docId+'\')">📐 Open Visual Markup Tool Now</button></div>'
+        +'</div>';
+    } else {
+      result.innerHTML='<div style="background:var(--red-bg);border:1.5px solid var(--red);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--red)">AI Error: '+e.message+'<br><br>Nothing was saved for this upload — please try again.</div>';
+    }
   }
 }
 
