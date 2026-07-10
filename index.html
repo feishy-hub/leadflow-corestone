@@ -14495,6 +14495,10 @@ async function pmtRenderPage(pageNum){
 
   drawCanvas.addEventListener('click', pmtCanvasClick);
   drawCanvas.addEventListener('dblclick', pmtCanvasDblClick);
+  drawCanvas.addEventListener('mousedown', pmtCanvasMouseDown);
+  drawCanvas.addEventListener('mousemove', pmtCanvasMouseMove);
+  drawCanvas.addEventListener('mouseup', pmtCanvasMouseUp);
+  drawCanvas.addEventListener('contextmenu', pmtCanvasContextMenu);
 
   pmtRenderSidebar();
   pmtRedraw();
@@ -15054,7 +15058,7 @@ function pmtRenderSidebar(){
         +'<div style="color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px">'+(totals.join(' · ')||'No items yet')+'</div>'
         + g.items.map(function(it){
             return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.75);padding:2px 0;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
-              +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+uxEsc(it.label)+'</span>'
+              +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(it.label)+'</span>'
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;margin-left:6px" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5;margin-left:6px">✕</span></div>';
           }).join('')
@@ -15688,6 +15692,220 @@ function pmtShowScheduleResults(data){
     +'<button onclick="document.getElementById(\'pmt-schedule-ov\').remove()" style="width:100%;padding:10px;background:var(--card-2,#f0f2f6);border:none;border-radius:8px;cursor:pointer;font-weight:600;margin-top:8px">Close</button>'
     +'</div>';
   document.body.appendChild(el);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHAPE INTERACTION LAYER — right-click menu + drag-to-move/drag-corners.
+// Only active in Select/Stop mode (no drawing tool active), matching how
+// Procore/PlanSwift/Bluebeam all separate "drawing" from "editing what's
+// already drawn."
+// ═══════════════════════════════════════════════════════════════════════
+function pmtGetItemPoints(it){
+  if(it.type==='count') return [{x:it.x,y:it.y}];
+  return it.points || [];
+}
+function pmtHitTest(x, y){
+  var HANDLE_R = 9;
+  // Check corner handles first (topmost group drawn last = visually on top)
+  for(var gi=PMT.groups.length-1; gi>=0; gi--){
+    var g = PMT.groups[gi];
+    if(!g.visible) continue;
+    for(var ii=g.items.length-1; ii>=0; ii--){
+      var it = g.items[ii];
+      if((it.page||1) !== (PMT.currentPage||1)) continue;
+      if(it.locked) continue;
+      var pts = pmtGetItemPoints(it);
+      for(var pi=0; pi<pts.length; pi++){
+        if(Math.hypot(pts[pi].x-x, pts[pi].y-y) <= HANDLE_R){
+          return {group:g, item:it, cornerIndex:pi, mode:'corner'};
+        }
+      }
+    }
+  }
+  // Then check shape bodies
+  for(var gi2=PMT.groups.length-1; gi2>=0; gi2--){
+    var g2 = PMT.groups[gi2];
+    if(!g2.visible) continue;
+    for(var ii2=g2.items.length-1; ii2>=0; ii2--){
+      var it2 = g2.items[ii2];
+      if((it2.page||1) !== (PMT.currentPage||1)) continue;
+      if(pmtPointInItem(it2, x, y)) return {group:g2, item:it2, mode:'body'};
+    }
+  }
+  return null;
+}
+function pmtPointInItem(it, x, y){
+  var TOL = 8;
+  if(it.type==='count'){ return Math.hypot(it.x-x, it.y-y) <= 10; }
+  if(it.type==='rect'){
+    var p0=it.points[0], p1=it.points[1];
+    var minX=Math.min(p0.x,p1.x), maxX=Math.max(p0.x,p1.x), minY=Math.min(p0.y,p1.y), maxY=Math.max(p0.y,p1.y);
+    return x>=minX-TOL && x<=maxX+TOL && y>=minY-TOL && y<=maxY+TOL;
+  }
+  // linear/wall/perimeter/poly/freehand — distance to nearest segment
+  var pts = it.points;
+  for(var i=0;i<pts.length-1;i++){
+    if(pmtDistToSegment(x,y,pts[i],pts[i+1]) <= TOL) return true;
+  }
+  if(it.type==='poly' || it.type==='perimeter'){
+    if(pmtDistToSegment(x,y,pts[pts.length-1],pts[0]) <= TOL) return true;
+  }
+  return false;
+}
+function pmtDistToSegment(px,py,a,b){
+  var dx=b.x-a.x, dy=b.y-a.y;
+  var lenSq = dx*dx+dy*dy;
+  var t = lenSq ? Math.max(0,Math.min(1, ((px-a.x)*dx+(py-a.y)*dy)/lenSq)) : 0;
+  var cx = a.x+t*dx, cy = a.y+t*dy;
+  return Math.hypot(px-cx, py-cy);
+}
+
+var pmtDragState = null;
+
+function pmtCanvasMouseDown(e){
+  if(PMT.tool) return; // only drag/edit in Select/Stop mode
+  var canvas = document.getElementById('pmt-draw');
+  var rect = canvas.getBoundingClientRect();
+  var x = e.clientX-rect.left, y = e.clientY-rect.top;
+  var hit = pmtHitTest(x,y);
+  if(!hit) return;
+  pmtDragState = {group:hit.group, item:hit.item, mode:hit.mode, cornerIndex:hit.cornerIndex, lastX:x, lastY:y, startPoints: JSON.parse(JSON.stringify(pmtGetItemPoints(hit.item)))};
+}
+function pmtCanvasMouseMove(e){
+  if(!pmtDragState) return;
+  var canvas = document.getElementById('pmt-draw');
+  var rect = canvas.getBoundingClientRect();
+  var x = e.clientX-rect.left, y = e.clientY-rect.top;
+  var it = pmtDragState.item;
+  if(pmtDragState.mode==='corner'){
+    var pts = pmtGetItemPoints(it);
+    if(it.type==='count'){ it.x=x; it.y=y; }
+    else { pts[pmtDragState.cornerIndex].x = x; pts[pmtDragState.cornerIndex].y = y; }
+  } else {
+    var dx = x - pmtDragState.lastX, dy = y - pmtDragState.lastY;
+    if(it.type==='count'){ it.x+=dx; it.y+=dy; }
+    else { it.points.forEach(function(p){ p.x+=dx; p.y+=dy; }); }
+    pmtDragState.lastX = x; pmtDragState.lastY = y;
+  }
+  pmtRedraw();
+}
+function pmtCanvasMouseUp(){
+  if(!pmtDragState) return;
+  pmtRecalcItemValue(pmtDragState.item);
+  pmtLogHistory('moved/resized', pmtDragState.item.label);
+  pmtDragState = null;
+  pmtRenderSidebar();
+  pmtRedraw();
+}
+function pmtRecalcItemValue(it){
+  if(!PMT.scalePxPerFt) return;
+  if(it.type==='linear' || it.type==='wall'){
+    var ft = Math.hypot(it.points[1].x-it.points[0].x, it.points[1].y-it.points[0].y) / PMT.scalePxPerFt;
+    it.value_ft = Math.round(ft*10)/10;
+    if(it.type==='wall'){
+      var studCount = Math.ceil(ft / (16/12)) + 1, drywallSheets = Math.ceil((ft*8)/32), insulationSqft = Math.round(ft*8);
+      it.studs=studCount; it.drywall_sheets=drywallSheets; it.insulation_sqft=insulationSqft;
+      it.label = it.value_ft+' ft wall — '+studCount+' studs, '+drywallSheets+' sheets drywall, '+insulationSqft+' sqft insulation';
+    } else { it.label = it.value_ft+' ft'; }
+  } else if(it.type==='rect' && it.value_cy===undefined){
+    var p0=it.points[0], p1=it.points[1];
+    var area = Math.abs(p1.x-p0.x)/PMT.scalePxPerFt * Math.abs(p1.y-p0.y)/PMT.scalePxPerFt;
+    it.value_sqft = Math.round(area*10)/10;
+    it.label = it.value_sqft+' sqft';
+  } else if(it.type==='poly' || it.type==='perimeter'){
+    if(it.type==='poly'){
+      var areaPx=0;
+      for(var i=0;i<it.points.length;i++){ var j=(i+1)%it.points.length; areaPx += it.points[i].x*it.points[j].y - it.points[j].x*it.points[i].y; }
+      it.value_sqft = Math.round((Math.abs(areaPx/2)/(PMT.scalePxPerFt*PMT.scalePxPerFt))*10)/10;
+      it.label = it.value_sqft+' sqft';
+    } else {
+      var per=0;
+      for(var k=0;k<it.points.length;k++){ var j2=(k+1)%it.points.length; per += Math.hypot(it.points[j2].x-it.points[k].x, it.points[j2].y-it.points[k].y); }
+      it.value_ft = Math.round((per/PMT.scalePxPerFt)*10)/10;
+      it.label = it.value_ft+' ft perimeter';
+    }
+  }
+}
+
+function pmtCanvasContextMenu(e){
+  e.preventDefault();
+  var canvas = document.getElementById('pmt-draw');
+  var rect = canvas.getBoundingClientRect();
+  var x = e.clientX-rect.left, y = e.clientY-rect.top;
+  var hit = pmtHitTest(x,y);
+  if(!hit) return;
+  document.querySelectorAll('#pmt-context-menu').forEach(function(el){el.remove();});
+  var menu = document.createElement('div');
+  menu.id = 'pmt-context-menu';
+  menu.style.cssText = 'position:fixed;top:'+e.clientY+'px;left:'+e.clientX+'px;background:#22262b;border:1px solid rgba(255,255,255,0.15);border-radius:8px;z-index:4000;min-width:170px;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden';
+  var g = hit.group, it = hit.item;
+  var groupOptions = PMT.groups.filter(function(x){return x.id!==g.id;}).map(function(og){
+    return '<div onclick="pmtMoveItemToGroup(\''+g.id+'\',\''+it.id+'\',\''+og.id+'\')" style="padding:8px 14px 8px 26px;font-size:12px;color:#fff;cursor:pointer">'+uxEsc(og.name)+'</div>';
+  }).join('');
+  var items = [
+    {label:'✏️ Edit', action:"pmtEditItemValue('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"},
+    {label:'📋 Duplicate', action:"pmtDuplicateItem('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"},
+    {label: (it.locked?'🔓 Unlock':'🔒 Lock'), action:"pmtToggleItemLock('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"},
+    {label:'⬆️ Bring to Front', action:"pmtReorderItem('"+g.id+"','"+it.id+"','front');pmtCloseContextMenu();"},
+    {label:'⬇️ Send to Back', action:"pmtReorderItem('"+g.id+"','"+it.id+"','back');pmtCloseContextMenu();"},
+    {label:'🗑 Delete', action:"pmtDeleteItem('"+g.id+"','"+it.id+"');pmtCloseContextMenu();"}
+  ];
+  menu.innerHTML = items.map(function(mi){
+    return '<div onclick="'+mi.action+'" style="padding:9px 14px;font-size:12px;color:#fff;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.06)" onmouseover="this.style.background=\'#2d323a\'" onmouseout="this.style.background=\'none\'">'+mi.label+'</div>';
+  }).join('')
+  + '<div style="padding:9px 14px;font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;border-top:1px solid rgba(255,255,255,0.1);margin-top:4px">Move to group</div>'
+  + groupOptions;
+  document.body.appendChild(menu);
+  setTimeout(function(){
+    document.addEventListener('click', function closeOnce(ev){
+      if(!menu.contains(ev.target)){ menu.remove(); document.removeEventListener('click', closeOnce); }
+    });
+  }, 50);
+}
+function pmtCloseContextMenu(){ var m=document.getElementById('pmt-context-menu'); if(m) m.remove(); }
+function pmtDuplicateItem(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g.items.find(function(i){return i.id===itemId;});
+  if(!it) return;
+  var copy = JSON.parse(JSON.stringify(it));
+  copy.id = 'i'+Date.now()+Math.floor(Math.random()*1000);
+  copy.label = it.label + ' (copy)';
+  var offset = 20;
+  if(copy.type==='count'){ copy.x+=offset; copy.y+=offset; }
+  else { copy.points.forEach(function(p){ p.x+=offset; p.y+=offset; }); }
+  g.items.push(copy);
+  pmtLogHistory('duplicated', it.label);
+  pmtRenderSidebar(); pmtRedraw();
+  toast('Duplicated — drag it to the right spot','ok');
+}
+function pmtToggleItemLock(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g.items.find(function(i){return i.id===itemId;});
+  if(!it) return;
+  it.locked = !it.locked;
+  pmtRenderSidebar(); pmtRedraw();
+  toast(it.locked?'Locked':'Unlocked','ok');
+}
+function pmtReorderItem(groupId, itemId, dir){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var idx = g.items.findIndex(function(i){return i.id===itemId;});
+  if(idx<0) return;
+  var it = g.items.splice(idx,1)[0];
+  if(dir==='front') g.items.push(it); else g.items.unshift(it);
+  pmtRedraw();
+}
+function pmtMoveItemToGroup(fromGroupId, itemId, toGroupId){
+  var fromG = PMT.groups.find(function(x){return x.id===fromGroupId;});
+  var toG = PMT.groups.find(function(x){return x.id===toGroupId;});
+  if(!fromG || !toG) return;
+  var idx = fromG.items.findIndex(function(i){return i.id===itemId;});
+  if(idx<0) return;
+  var it = fromG.items.splice(idx,1)[0];
+  toG.items.push(it);
+  pmtLogHistory('moved to group', it.label+' -> '+toG.name);
+  pmtRenderSidebar(); pmtRedraw();
+  toast('Moved to '+toG.name,'ok');
 }
 
 </script>
