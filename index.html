@@ -14413,6 +14413,13 @@ async function showPlanMarkupTool(docId){
       // Canvas area
       +'<div id="pmt-canvas-wrap" style="flex:1;overflow:auto;background:#0d0f11;position:relative;display:flex;justify-content:center;padding:20px">'
       +'<div id="pmt-count-badge" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#0d7a70;color:#fff;padding:8px 20px;border-radius:20px;font-weight:800;font-size:14px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.3)">Count: 0</div>'
+      +'<div style="position:absolute;top:10px;right:10px;display:flex;align-items:center;gap:6px;background:#2d323a;padding:6px 10px;border-radius:8px;color:#fff;font-size:12px;z-index:10">'
+        +'<button onclick="pmtZoom(-0.15)" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 10px;cursor:pointer">−</button>'
+        +'<span id="pmt-zoom-label">100%</span>'
+        +'<button onclick="pmtZoom(0.15)" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 10px;cursor:pointer">+</button>'
+        +'<button onclick="pmtZoomReset()" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 10px;cursor:pointer;font-size:11px">Reset</button>'
+        +'<label style="display:flex;align-items:center;gap:4px;margin-left:8px;cursor:pointer"><input type="checkbox" id="pmt-legend-toggle" onchange="pmtToggleLegend()"> Legend</label>'
+      +'</div>'
       +'<div id="pmt-canvas-stack" style="position:relative;line-height:0"></div>'
       +'</div>'
       // Sidebar
@@ -14633,7 +14640,8 @@ document.addEventListener('keydown', function(e){
 function pmtCanvasClick(e){
   if(!PMT || !PMT.tool) return;
   var rect = e.target.getBoundingClientRect();
-  var x = e.clientX - rect.left, y = e.clientY - rect.top;
+  var zoomFactor = PMT.zoomLevel || 1;
+  var x = (e.clientX - rect.left) / zoomFactor, y = (e.clientY - rect.top) / zoomFactor;
 
   if(PMT.tool === 'scale'){
     PMT.clickPoints.push({x:x,y:y});
@@ -15829,7 +15837,8 @@ function pmtCanvasMouseDown(e){
   if(PMT.tool) return; // only drag/edit in Select/Stop mode
   var canvas = document.getElementById('pmt-draw');
   var rect = canvas.getBoundingClientRect();
-  var x = e.clientX-rect.left, y = e.clientY-rect.top;
+  var zf = PMT.zoomLevel || 1;
+  var x = (e.clientX-rect.left)/zf, y = (e.clientY-rect.top)/zf;
   var hit = pmtHitTest(x,y);
   if(!hit) return;
   pmtDragState = {group:hit.group, item:hit.item, mode:hit.mode, cornerIndex:hit.cornerIndex, lastX:x, lastY:y, startPoints: JSON.parse(JSON.stringify(pmtGetItemPoints(hit.item)))};
@@ -15838,7 +15847,8 @@ function pmtCanvasMouseMove(e){
   if(!pmtDragState) return;
   var canvas = document.getElementById('pmt-draw');
   var rect = canvas.getBoundingClientRect();
-  var x = e.clientX-rect.left, y = e.clientY-rect.top;
+  var zf = PMT.zoomLevel || 1;
+  var x = (e.clientX-rect.left)/zf, y = (e.clientY-rect.top)/zf;
   var it = pmtDragState.item;
   if(pmtDragState.mode==='corner'){
     var pts = pmtGetItemPoints(it);
@@ -15894,7 +15904,8 @@ function pmtCanvasContextMenu(e){
   e.preventDefault();
   var canvas = document.getElementById('pmt-draw');
   var rect = canvas.getBoundingClientRect();
-  var x = e.clientX-rect.left, y = e.clientY-rect.top;
+  var zf = PMT.zoomLevel || 1;
+  var x = (e.clientX-rect.left)/zf, y = (e.clientY-rect.top)/zf;
   var hit = pmtHitTest(x,y);
   if(!hit) return;
   document.querySelectorAll('#pmt-context-menu').forEach(function(el){el.remove();});
@@ -16155,6 +16166,34 @@ function pmtRenderMarkupsList(){
       +'<span>'+icon+' '+uxEsc((a.text||'').slice(0,40))+' <span style="color:rgba(255,255,255,0.35)">— '+uxEsc(a.author)+'</span></span>'
       +'<span onclick="pmtDeleteAnnotation(\''+a.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span></div>';
   }).join('');
+}
+
+
+// ── ZOOM & LEGEND ──
+function pmtZoom(delta){
+  PMT.zoomLevel = Math.max(0.25, Math.min(3, (PMT.zoomLevel||1) + delta));
+  var stack = document.getElementById('pmt-canvas-stack');
+  if(stack) stack.style.transform = 'scale('+PMT.zoomLevel+')';
+  if(stack) stack.style.transformOrigin = 'top center';
+  var lbl = document.getElementById('pmt-zoom-label');
+  if(lbl) lbl.textContent = Math.round(PMT.zoomLevel*100)+'%';
+}
+function pmtZoomReset(){ PMT.zoomLevel = 1; pmtZoom(0); }
+
+function pmtToggleLegend(){
+  var show = document.getElementById('pmt-legend-toggle').checked;
+  var existing = document.getElementById('pmt-legend-box');
+  if(!show){ if(existing) existing.remove(); return; }
+  if(existing) existing.remove();
+  var box = document.createElement('div');
+  box.id = 'pmt-legend-box';
+  box.style.cssText = 'position:absolute;bottom:10px;left:10px;background:rgba(255,255,255,0.95);border-radius:8px;padding:10px 14px;font-size:12px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.2);max-width:220px';
+  var visibleGroups = PMT.groups.filter(function(g){return g.visible && g.items.some(function(i){return (i.page||1)===(PMT.currentPage||1);});});
+  box.innerHTML = '<div style="font-weight:800;margin-bottom:6px">Legend</div>'
+    + (visibleGroups.length ? visibleGroups.map(function(g){
+        return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span style="width:10px;height:10px;border-radius:50%;background:'+g.color+';display:inline-block"></span>'+uxEsc(g.name)+'</div>';
+      }).join('') : '<div style="color:#888">No measurements on this page</div>');
+  document.getElementById('pmt-canvas-wrap').appendChild(box);
 }
 
 </script>
