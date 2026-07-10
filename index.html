@@ -4659,9 +4659,10 @@ async function pgPlans(){
             +(d.file_url?'<span class="badge" style="background:var(--green-bg);color:var(--green)">✅ Takeoff Done</span>':'<span class="badge badge-warm">⏳ No Takeoff Yet</span>')
             +'</div></div>'
             +(d.description?'<div style="margin-top:10px;font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:80px;overflow:hidden">'+d.description.substring(0,300)+'...</div>':'')
-            +'<div style="margin-top:10px;display:flex;gap:8px">'
+            +'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
             +'<button class="btn btn-p btn-sm" onclick="event.stopPropagation();runPlanAI(\''+d.id+'\')">🤖 Run AI Takeoff</button>'
             +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();viewPlanTakeoff(\''+d.id+'\')">📋 View Takeoff</button>'
+            +'<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showPlanMarkupTool(\''+d.id+'\')">📐 Open Visual Markup Tool</button>'
             +'</div></div>';
         }).join('')
       )+'</div>';
