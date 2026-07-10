@@ -14376,6 +14376,7 @@ async function showPlanMarkupTool(docId){
         +'<button onclick="pmtGoToPage(PMT.currentPage+1)" title="Next page" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:14px">\u203a</button>'
       +'</div>'
       +'<div style="display:flex;gap:8px">'
+      +'<button onclick="pmtGenerateSchedules()" style="padding:7px 14px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">📄 Generate All Schedules</button>'
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
       +'<button onclick="pmtSaveAndClose()" style="padding:7px 14px;background:#fff;color:#1a1d21;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💾 Save & Close</button>'
       +'</div></div>'
@@ -15154,13 +15155,24 @@ async function pmtPushToEstimate(){
   });
   if(!allItems.length){ toast('No measurements to push yet','err'); return; }
   var doc = (await dbGet('documents','?id=eq.'+PMT.docId))[0];
-  var saved = await dbIns('estimates', {
-    job_id: doc.job_id || (AJOB?AJOB.id:null), doc_id: PMT.docId, version:1,
-    source:'plan_markup', line_items: JSON.stringify(allItems), status:'draft', created_from:'plan_markup'
-  });
-  toast(allItems.length+' measured line items pushed to a new estimate — set unit costs there','ok',5000);
+  // Check if an estimate is already linked to this plan — if so, UPDATE it
+  // instead of creating a disconnected duplicate every time this is clicked.
+  var existing = await dbGet('estimates', '?doc_id=eq.'+PMT.docId+'&order=created_at.desc&limit=1');
+  var savedEst;
+  if(existing && existing[0]){
+    await dbUpd('estimates', existing[0].id, {line_items: JSON.stringify(allItems)});
+    savedEst = existing[0];
+    toast(allItems.length+' measured line items updated in the existing estimate','ok',5000);
+  } else {
+    var saved = await dbIns('estimates', {
+      job_id: doc.job_id || (AJOB?AJOB.id:null), doc_id: PMT.docId, version:1,
+      source:'plan_markup', line_items: JSON.stringify(allItems), status:'draft', created_from:'plan_markup'
+    });
+    savedEst = saved[0];
+    toast(allItems.length+' measured line items pushed to a new estimate — set unit costs there','ok',5000);
+  }
   await pmtSaveAndClose();
-  if(saved[0]) openEstimate(saved[0].id);
+  if(savedEst) openEstimate(savedEst.id);
 }
 
 
@@ -15577,6 +15589,105 @@ async function pmtAIAutoDetect(){
   }catch(e){
     toast('AI auto-detect failed: '+e.message,'err');
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI SCHEDULE GENERATOR — one button that reads everything measured on
+// this plan (plus the AI's original whole-plan read) and produces every
+// schedule a real bid needs: window schedule, door schedule, insulation/
+// sound requirements by wall type and floor, roof/ceiling installation
+// needs, and — critically — flags anything non-standard so it gets priced
+// specially instead of silently bundled into a standard rate.
+// ═══════════════════════════════════════════════════════════════════════
+async function pmtGenerateSchedules(){
+  if(!PMT) return;
+  var doc = (await dbGet('documents','?id=eq.'+PMT.docId))[0];
+  var measuredSummary = PMT.groups.map(function(g){
+    return g.name+': '+g.items.map(function(it){return it.label;}).join('; ');
+  }).join('\n');
+
+  document.querySelectorAll('#pmt-schedule-ov').forEach(function(el){el.remove();});
+  var loadingEl = document.createElement('div');
+  loadingEl.id = 'pmt-schedule-ov';
+  loadingEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  loadingEl.innerHTML = '<div style="background:#fff;border-radius:12px;padding:30px;text-align:center"><div class="spin" style="margin:0 auto 12px"></div>Generating every schedule from this plan\u2026 this can take up to a minute</div>';
+  document.body.appendChild(loadingEl);
+
+  try{
+    var r = await ai(
+      'You are generating construction schedules for a residential/light-commercial job for Corestone Developers, from a plan takeoff.\n'
+      +'AI-READ PLAN DATA: '+(doc.description||'{}').slice(0,3000)+'\n'
+      +'MANUALLY MEASURED ITEMS: '+(measuredSummary||'none yet')+'\n\n'
+      +'Generate the following as completely as the data allows. Where the plan doesn\'t specify something precisely, make a reasonable standard assumption and say so.\n'
+      +'Return ONLY valid JSON in this exact shape:\n'
+      +'{\n'
+      +'"window_schedule":[{"location":"","size":"","type":"","qty":1,"notes":""}],\n'
+      +'"door_schedule":[{"location":"","size":"","type":"","qty":1,"notes":""}],\n'
+      +'"insulation_by_area":[{"area":"Exterior Walls","r_value":"R-21","notes":""},{"area":"Between Units (sound)","r_value":"","notes":"acoustic/sound batt insulation, if this is a multi-unit building"}],\n'
+      +'"roof_ceiling":[{"item":"","spec":"","notes":""}],\n'
+      +'"per_floor":[{"floor":"1st Floor","items":["what needs installing on this floor specifically"]}],\n'
+      +'"non_standard_items":[{"item":"","why_its_unusual":"","recommendation":"quote separately / verify with client / get sub input"}]\n'
+      +'}\n'
+      +'The non_standard_items array is the most important one — that is specifically for anything that is NOT a normal, standard-rate item and needs its own price, verification, or special sub. Be honest: if nothing is unusual, return an empty array rather than inventing something.',
+      'You are a meticulous residential construction schedule generator. Be specific, cite real numbers/locations from the data given, and clearly separate standard assumptions from actual plan data. Return ONLY raw JSON.',
+      2500
+    );
+    var parsed = safeJSON(r);
+    document.getElementById('pmt-schedule-ov').remove();
+    if(!parsed){ toast('Could not generate schedules from this plan — try again or add more measurements first','err'); return; }
+    pmtShowScheduleResults(parsed);
+  }catch(e){
+    var el2 = document.getElementById('pmt-schedule-ov');
+    if(el2) el2.remove();
+    toast('Schedule generation failed: '+e.message,'err');
+  }
+}
+
+function pmtShowScheduleResults(data){
+  document.querySelectorAll('#pmt-schedule-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-schedule-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  function section(title, rows, cols){
+    if(!rows || !rows.length) return '';
+    return '<div style="margin-bottom:18px"><div style="font-weight:800;font-size:13px;margin-bottom:6px;color:#0d7a70">'+title+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      +'<tr style="background:#f0f5f4">'+cols.map(function(c){return '<th style="text-align:left;padding:6px;border:1px solid #e2e8f0">'+c+'</th>';}).join('')+'</tr>'
+      + rows.map(function(row){
+          return '<tr>'+cols.map(function(c){
+            var key = c.toLowerCase().replace(/[^a-z]/g,'_');
+            return '<td style="padding:6px;border:1px solid #e2e8f0">'+uxEsc(String(row[key]!==undefined?row[key]:(row[c.toLowerCase()]||'')))+'</td>';
+          }).join('')+'</tr>';
+        }).join('')
+      +'</table></div>';
+  }
+
+  var nonStandardHtml = (data.non_standard_items && data.non_standard_items.length)
+    ? '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-bottom:18px">'
+      +'<div style="font-weight:800;font-size:13px;margin-bottom:8px;color:#92400e">\u26A0\uFE0F Non-Standard — Price These Separately</div>'
+      + data.non_standard_items.map(function(it){
+          return '<div style="margin-bottom:8px;font-size:12px"><b>'+uxEsc(it.item||'')+'</b> — '+uxEsc(it.why_its_unusual||'')+'<br><i style="color:#92400e">Recommendation: '+uxEsc(it.recommendation||'')+'</i></div>';
+        }).join('')
+      +'</div>'
+    : '<div style="background:#e8f5f0;border:1px solid #0d7a70;border-radius:8px;padding:12px;margin-bottom:18px;font-size:12px;color:#0d7a70">No non-standard items flagged — everything looks like normal scope.</div>';
+
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:700px;width:100%;max-height:85vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    +'<div style="font-weight:800;font-size:17px">\ud83d\udcc4 Generated Schedules</div>'
+    +'<button onclick="document.getElementById(\'pmt-schedule-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer">\u00d7</button></div>'
+    + nonStandardHtml
+    + section('Window Schedule', data.window_schedule, ['Location','Size','Type','Qty','Notes'])
+    + section('Door Schedule', data.door_schedule, ['Location','Size','Type','Qty','Notes'])
+    + section('Insulation By Area', data.insulation_by_area, ['Area','R Value','Notes'])
+    + section('Roof & Ceiling', data.roof_ceiling, ['Item','Spec','Notes'])
+    +(data.per_floor && data.per_floor.length ? '<div style="margin-bottom:18px"><div style="font-weight:800;font-size:13px;margin-bottom:6px;color:#0d7a70">Per-Floor Installation Needs</div>'
+      + data.per_floor.map(function(f){ return '<div style="font-size:12px;margin-bottom:6px"><b>'+uxEsc(f.floor||'')+':</b> '+(f.items||[]).map(uxEsc).join(', ')+'</div>'; }).join('')
+      +'</div>' : '')
+    +'<button onclick="document.getElementById(\'pmt-schedule-ov\').remove()" style="width:100%;padding:10px;background:var(--card-2,#f0f2f6);border:none;border-radius:8px;cursor:pointer;font-weight:600;margin-top:8px">Close</button>'
+    +'</div>';
+  document.body.appendChild(el);
 }
 
 </script>
