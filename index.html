@@ -14495,8 +14495,22 @@ async function pmtRenderPage(pageNum){
   var stackLoading = document.getElementById('pmt-canvas-stack');
   if(stackLoading) stackLoading.innerHTML = '<div style="color:rgba(255,255,255,0.5);padding:60px;text-align:center;font-size:13px">Loading page '+pageNum+'\u2026</div>';
 
+  // Reentrancy guard: if pmtRenderPage gets called again before this call
+  // finishes (e.g. rapid page-switch clicks), the FIRST call's canvas gets
+  // removed from the DOM by the second call's stack.innerHTML='' before the
+  // first call reaches its own addEventListener lines below -- so the first
+  // call's listeners silently bind to a canvas that's no longer visible or
+  // queryable, and clicks on the real (second) canvas do nothing at all.
+  // Found live: a fresh page load's Rectangle tool silently stopped creating
+  // measurements with zero console errors. Fixed by (a) attaching listeners
+  // immediately, synchronously, right after creating+appending the canvas —
+  // before any further await — and (b) a token check so a stale in-flight
+  // render never touches the DOM after a newer one has started.
+  var myRenderToken = (PMT._renderToken = (PMT._renderToken||0) + 1);
+
   var page = await PMT.pdfDoc.getPage(pageNum);
   var viewport = page.getViewport({scale: PMT.renderScale});
+  if(myRenderToken !== PMT._renderToken) return; // a newer render started while we awaited; abandon this one
 
   var stack = document.getElementById('pmt-canvas-stack');
   stack.innerHTML = '';
@@ -14509,14 +14523,17 @@ async function pmtRenderPage(pageNum){
   stack.style.width = viewport.width+'px'; stack.style.height = viewport.height+'px';
   stack.appendChild(baseCanvas); stack.appendChild(drawCanvas);
 
-  await page.render({canvasContext: baseCanvas.getContext('2d'), viewport: viewport}).promise;
-
+  // Attach listeners immediately, synchronously, right after this canvas is
+  // the one actually in the DOM — not after the next await.
   drawCanvas.addEventListener('click', pmtCanvasClick);
   drawCanvas.addEventListener('dblclick', pmtCanvasDblClick);
   drawCanvas.addEventListener('mousedown', pmtCanvasMouseDown);
   drawCanvas.addEventListener('mousemove', pmtCanvasMouseMove);
   drawCanvas.addEventListener('mouseup', pmtCanvasMouseUp);
   drawCanvas.addEventListener('contextmenu', pmtCanvasContextMenu);
+
+  await page.render({canvasContext: baseCanvas.getContext('2d'), viewport: viewport}).promise;
+  if(myRenderToken !== PMT._renderToken) return; // abandoned mid-render too
 
   pmtRenderSidebar();
   pmtRedraw();
