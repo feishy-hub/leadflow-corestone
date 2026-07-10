@@ -14416,10 +14416,23 @@ async function showPlanMarkupTool(docId){
   document.body.appendChild(overlay);
 
   await ensurePdfJs();
+  var canvasStack0 = document.getElementById('pmt-canvas-stack');
+  canvasStack0.innerHTML = '<div style="color:rgba(255,255,255,0.5);padding:60px;text-align:center;font-size:13px">Loading plan\u2026 large architectural sheets can take a few seconds.</div>';
+
   PMT.pdfDoc = await window.pdfjsLib.getDocument(fileRec.dataUrl).promise;
   PMT.numPages = PMT.pdfDoc.numPages;
   PMT.currentPage = 1;
-  PMT.renderScale = 1.5; // PDF points are 72/inch; at this render scale, pxPerInch = 72 * renderScale
+  // Adaptive render scale — real architectural sheets (24x36in and larger)
+  // rendered at a fixed 1.5x scale produced a ~3900x2600px canvas that took
+  // 45+ seconds to render and manipulate, looking frozen. Found live on a
+  // real 20-page plan set uploaded by Feishy, not caught by the small test
+  // PDF used earlier. Now caps the longest side at a reasonable size while
+  // keeping small sheets crisp.
+  var firstPage = await PMT.pdfDoc.getPage(1);
+  var nativeViewport = firstPage.getViewport({scale: 1});
+  var longestSide = Math.max(nativeViewport.width, nativeViewport.height);
+  var maxRenderPx = 1800;
+  PMT.renderScale = Math.min(1.5, Math.max(0.6, maxRenderPx / longestSide));
   if(PMT.numPages > 1){
     document.getElementById('pmt-page-nav').style.display = 'flex';
     document.getElementById('pmt-page-label').textContent = 'Page 1 of ' + PMT.numPages;
@@ -14432,6 +14445,8 @@ async function pmtRenderPage(pageNum){
   PMT.currentPage = pageNum;
   var lbl = document.getElementById('pmt-page-label');
   if(lbl) lbl.textContent = 'Page ' + pageNum + ' of ' + PMT.numPages;
+  var stackLoading = document.getElementById('pmt-canvas-stack');
+  if(stackLoading) stackLoading.innerHTML = '<div style="color:rgba(255,255,255,0.5);padding:60px;text-align:center;font-size:13px">Loading page '+pageNum+'\u2026</div>';
 
   var page = await PMT.pdfDoc.getPage(pageNum);
   var viewport = page.getViewport({scale: PMT.renderScale});
