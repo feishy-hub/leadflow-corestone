@@ -14694,7 +14694,7 @@ function pmtCanvasClick(e){
     if(PMT.clickPoints.length === 2){
       var pxD = Math.hypot(PMT.clickPoints[1].x-PMT.clickPoints[0].x, PMT.clickPoints[1].y-PMT.clickPoints[0].y);
       var ft = pxD / PMT.scalePxPerFt;
-      pmtAddItem({type:'linear', points:PMT.clickPoints.slice(), value_ft: Math.round(ft*10)/10, label: Math.round(ft*10)/10+' ft'});
+      pmtProposeAndConfirm('linear', Math.round(ft*10)/10+' ft', PMT.clickPoints.slice(), {value_ft: Math.round(ft*10)/10});
       PMT.clickPoints = [];
       pmtRedraw();
     }
@@ -14733,10 +14733,8 @@ function pmtCanvasClick(e){
       var studCount = Math.ceil(ftw / (16/12)) + 1;
       var drywallSheets = Math.ceil((ftw * wallHeightFt) / 32);
       var insulationSqft = Math.round(ftw * wallHeightFt);
-      pmtAddItem({
-        type:'wall', points:PMT.clickPoints.slice(), value_ft: Math.round(ftw*10)/10,
-        studs: studCount, drywall_sheets: drywallSheets, insulation_sqft: insulationSqft,
-        label: Math.round(ftw*10)/10+' ft wall — '+studCount+' studs, '+drywallSheets+' sheets drywall, '+insulationSqft+' sqft insulation'
+      pmtProposeAndConfirm('wall', Math.round(ftw*10)/10+' ft wall — '+studCount+' studs, '+drywallSheets+' sheets drywall, '+insulationSqft+' sqft insulation', PMT.clickPoints.slice(), {
+        value_ft: Math.round(ftw*10)/10, studs: studCount, drywall_sheets: drywallSheets, insulation_sqft: insulationSqft
       });
       PMT.clickPoints = [];
       pmtRedraw();
@@ -14836,7 +14834,7 @@ function pmtCanvasDblClick(e){
       perimeterPx += Math.hypot(pts[j2].x-pts[k].x, pts[j2].y-pts[k].y);
     }
     var perimeterFt = Math.round((perimeterPx/PMT.scalePxPerFt)*10)/10;
-    pmtAddItem({type:'perimeter', points: pts.slice(), value_ft: perimeterFt, label: perimeterFt+' ft perimeter'});
+    pmtProposeAndConfirm('perimeter', perimeterFt+' ft perimeter', pts.slice(), {value_ft: perimeterFt});
     PMT.clickPoints = [];
     pmtRedraw();
     return;
@@ -15105,6 +15103,7 @@ function pmtRenderSidebar(){
       if(totalLinear) totals.push(Math.round(totalLinear*10)/10+' ft');
       if(totalArea) totals.push(Math.round(totalArea*10)/10+' sqft');
       if(totalCount) totals.push(totalCount+' items');
+      var countBtn = totalCount ? '<button onclick="event.stopPropagation();pmtAISuggestCountNames(\''+g.id+'\')" style="background:#4c1d95;color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;margin-left:4px">\ud83e\udd16 Name these</button>' : '';
       var lineWidth = g.lineWidth || 2;
       return '<div style="margin-bottom:10px;background:'+(g.id===PMT.activeGroupId?'#2d323a':'transparent')+';border-radius:6px;padding:8px;cursor:pointer" onclick="pmtSetActiveGroup(\''+g.id+'\')">'
         +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
@@ -15121,7 +15120,7 @@ function pmtRenderSidebar(){
             return '<option value="'+c+'"'+(g.classification===c?' selected':'')+'>'+(c||'No classification')+'</option>';
           }).join('')
         +'</select>'
-        +'<div style="color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px">'+(totals.join(' · ')||'No items yet')+'</div>'
+        +'<div style="color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px">'+(totals.join(' · ')||'No items yet')+countBtn+'</div>'
         + g.items.map(function(it){
             return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.75);padding:2px 0;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
               +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(it.label)+'</span>'
@@ -16408,6 +16407,92 @@ function pmtSkipAreaDetails(points, areaFt, shapeType){
   document.getElementById('pmt-areadetails-ov').remove();
   pmtAddItem({type:shapeType, points:points, value_sqft:areaFt, label:areaFt+' sqft'});
   pmtRedraw();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SYSTEMIC FIX — Feishy correctly pointed out that fixing Rectangle and
+// Polygon alone was not a real fix, just fixing the one thing pointed at.
+// This extends the same "AI proposes, human confirms" pattern to every
+// remaining tool that was still creating a bare, unnamed measurement:
+// Linear, Wall, Perimeter. Count gets a batch AI-rename instead (per-click
+// AI calls would make rapid counting unusable). Volume already had a depth
+// prompt — upgraded to also propose a name.
+// ═══════════════════════════════════════════════════════════════════════
+async function pmtProposeAndConfirm(shapeType, valueSummary, points, extra){
+  extra = extra || {};
+  document.querySelectorAll('#pmt-propose-ov').forEach(function(el){el.remove();});
+  var loading = document.createElement('div');
+  loading.id = 'pmt-propose-ov';
+  loading.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  loading.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:380px;width:90%"><div style="font-weight:800;font-size:16px">\ud83e\udd16 AI is looking at this measurement\u2026</div><div style="font-size:13px;color:var(--muted);margin-top:6px">'+valueSummary+'</div></div>';
+  document.body.appendChild(loading);
+
+  var doc = (await dbGet('documents','?id=eq.'+PMT.docId))[0];
+  var existingLabels = PMT.groups.flatMap(function(g){return g.items.map(function(i){return i.label;});});
+  var s = null;
+  try{
+    var r = await ai(
+      'A user just measured this on a construction plan takeoff for Corestone Developers: '+shapeType+' \u2014 '+valueSummary+'.\n'
+      +'FULL PLAN CONTEXT: '+(doc&&doc.description||'{}').slice(0,2000)+'\n'
+      +'OTHER MEASUREMENTS ALREADY TAKEN: '+(existingLabels.join(', ')||'none yet')+'\n\n'
+      +'Propose your single best guess for what this specific measurement is (e.g. "Exterior wall - north side," "Kitchen perimeter for baseboard"). Keep it short.\n'
+      +'Return ONLY raw JSON: {"guess_name":""}',
+      'You are an experienced residential GC estimating assistant. Return ONLY raw JSON.', 250
+    );
+    s = safeJSON(r);
+  }catch(e){ console.warn('[pmtProposeAndConfirm] AI suggestion failed', e); }
+
+  document.querySelectorAll('#pmt-propose-ov').forEach(function(x){x.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-propose-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:380px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">\ud83e\udd16 AI Suggestion</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">'+valueSummary+'</div>'
+    +'<div class="fr"><label>What this is</label><input id="pmt-propose-name" value="'+uxEsc((s&&s.guess_name)||'')+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px" autofocus></div>'
+    +'<button onclick="pmtConfirmPropose()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add Measurement</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  window._pmtPendingItem = Object.assign({type:shapeType, points:points}, extra);
+  window._pmtPendingBaseLabel = valueSummary;
+  setTimeout(function(){ var inp=document.getElementById('pmt-propose-name'); if(inp) inp.focus(); }, 50);
+}
+function pmtConfirmPropose(){
+  var name = document.getElementById('pmt-propose-name').value.trim();
+  var item = window._pmtPendingItem;
+  item.label = (name ? name+' — ' : '') + window._pmtPendingBaseLabel;
+  document.getElementById('pmt-propose-ov').remove();
+  pmtAddItem(item);
+  pmtRedraw();
+  window._pmtPendingItem = null;
+}
+
+// AI batch-rename for Count items — per-click AI calls would make rapid
+// counting (doors, windows, outlets) unusably slow, so this is a single
+// call after the fact instead, applied to the whole group at once.
+async function pmtAISuggestCountNames(groupId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  if(!g) return;
+  var countItems = g.items.filter(function(i){return i.type==='count';});
+  if(!countItems.length){ toast('No count items in this group yet','err'); return; }
+  toast('\ud83e\udd16 AI naming '+countItems.length+' counted item(s)\u2026','ok',8000);
+  var doc = (await dbGet('documents','?id=eq.'+PMT.docId))[0];
+  try{
+    var r = await ai(
+      'A user counted '+countItems.length+' items on a construction plan in a group called "'+g.name+'".\n'
+      +'FULL PLAN CONTEXT: '+(doc&&doc.description||'{}').slice(0,2000)+'\n'
+      +'Based on the group name and plan context, propose what these '+countItems.length+' counted items most likely are (e.g. if the group is called "Windows," they are probably window units).\n'
+      +'Return ONLY raw JSON: {"item_name":"singular name, e.g. Window"}',
+      'You are a residential GC estimating assistant. Return ONLY raw JSON.', 200
+    );
+    var s = safeJSON(r);
+    var name = (s && s.item_name) || g.name;
+    countItems.forEach(function(it, i){ it.label = name+' #'+(i+1); });
+    pmtLogHistory('AI renamed count items', name+' x'+countItems.length);
+    pmtRenderSidebar(); pmtRedraw();
+    toast('Named as "'+name+'" — rename any individually if needed','ok',5000);
+  }catch(e){ toast('AI naming failed: '+e.message,'err'); }
 }
 
 </script>
