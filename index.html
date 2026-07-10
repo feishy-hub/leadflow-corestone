@@ -14398,7 +14398,11 @@ async function showPlanMarkupTool(docId){
         ['wall','🧱','Wall'],
         ['perimeter','🔲','Perimeter'],
         ['freehand','✏️','Freehand'],
-        ['volume','📦','Volume']
+        ['volume','📦','Volume'],
+        ['text','📝','Note'],
+        ['callout','💬','Callout'],
+        ['cloud','☁️','Cloud'],
+        ['stamp','🔖','Stamp']
       ].map(function(t){
         return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[2]+'" style="padding:10px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:18px;display:flex;flex-direction:column;align-items:center;gap:2px">'
           +'<span>'+t[1]+'</span><span style="font-size:8px;font-weight:700">'+t[2].split(' ')[0]+'</span></button>';
@@ -14426,6 +14430,10 @@ async function showPlanMarkupTool(docId){
       +'<button onclick="pmtAskAI(document.getElementById(\'pmt-ai-question\').value)" style="padding:0 12px;background:var(--teal);border:none;color:#fff;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px">Ask</button>'
       +'</div>'
       +'<div id="pmt-ai-answer" style="margin-top:10px;font-size:12px;color:rgba(255,255,255,0.8);line-height:1.5"></div>'
+      +'</div>'
+      +'<div style="border-top:1px solid rgba(255,255,255,0.08);padding:12px">'
+      +'<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:8px">Markups (Notes, Callouts, Clouds, Stamps)</div>'
+      +'<div id="pmt-markups-list"></div>'
       +'</div></div>'
     +'</div>'
     +'<div style="padding:8px 16px;background:#22262b;border-top:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-size:11px" id="pmt-status">'
@@ -14474,6 +14482,7 @@ async function pmtRenderPage(pageNum){
   pageNum = Math.max(1, Math.min(PMT.numPages, pageNum));
   PMT.currentPage = pageNum;
   pmtRefreshPageDropdown();
+  if(typeof pmtRenderMarkupsList==='function') pmtRenderMarkupsList();
   var stackLoading = document.getElementById('pmt-canvas-stack');
   if(stackLoading) stackLoading.innerHTML = '<div style="color:rgba(255,255,255,0.5);padding:60px;text-align:center;font-size:13px">Loading page '+pageNum+'\u2026</div>';
 
@@ -14594,7 +14603,11 @@ function pmtSetTool(tool){
     wall: 'Click the two ends of a wall — auto-calculates studs, drywall sheets, and insulation (assumes 8ft height, 16" o.c. studs).',
     perimeter: 'Click each corner of the room, then double-click to close — shows total perimeter, not area.',
     freehand: 'Click a series of points to sketch a note or unusual shape, then double-click to finish — no automatic quantity is computed, just a visual note.',
-    volume: 'Click two opposite corners like Rectangle, then enter a depth — calculates cubic yards (for concrete, excavation, etc.).'
+    volume: 'Click two opposite corners like Rectangle, then enter a depth — calculates cubic yards (for concrete, excavation, etc.).',
+    text: 'Click anywhere to drop a text note. No quantity attached — just a visual note.',
+    callout: 'Click the exact spot you want to point at, then click where the text should sit.',
+    cloud: 'Click each corner around the area that changed, then double-click to close it — the standard way to mark a plan revision.',
+    stamp: 'Click anywhere to place a stamp (Approved, For Construction, etc.) — your name and today\'s date are attached automatically.'
   };
   var scaleReadout = PMT.scalePxPerFt ? ('Scale: ' + PMT.scalePxPerFt.toFixed(1) + ' px/ft. ') : 'No scale set yet. ';
   if(status) status.textContent = scaleReadout + (tool ? (msgs[tool]||'') : 'Nothing selected — pick a tool above, or click a measurement in the list to review it. Press Escape any time to cancel an in-progress measurement.');
@@ -14727,6 +14740,15 @@ function pmtCanvasClick(e){
     }
     return;
   }
+
+  if(PMT.tool === 'text'){ pmtHandleTextTool(x,y); return; }
+  if(PMT.tool === 'callout'){ pmtHandleCalloutClick(x,y); return; }
+  if(PMT.tool === 'stamp'){ pmtShowStampPicker(x,y); return; }
+  if(PMT.tool === 'cloud'){
+    PMT.clickPoints.push({x:x,y:y});
+    pmtRedraw();
+    return;
+  }
 }
 
 function pmtShowVolumeDepthModal(points, areaFt){
@@ -14753,8 +14775,15 @@ function pmtConfirmVolume(points, areaFt){
 }
 
 function pmtCanvasDblClick(e){
-  if(!PMT || (PMT.tool!=='poly' && PMT.tool!=='perimeter' && PMT.tool!=='freehand')) return;
+  if(!PMT || (PMT.tool!=='poly' && PMT.tool!=='perimeter' && PMT.tool!=='freehand' && PMT.tool!=='cloud')) return;
   e.preventDefault();
+  if(PMT.tool === 'cloud'){
+    var cpts = PMT.clickPoints.slice(0,-1);
+    if(cpts.length >= 3){ pmtFinishCloud(cpts); }
+    PMT.clickPoints = [];
+    pmtRedraw();
+    return;
+  }
   // A dblclick fires after two preceding click events at the same location —
   // that location IS the intended final vertex, just double-counted by the
   // browser's click+click+dblclick sequence. Remove only ONE of the two
@@ -15112,6 +15141,33 @@ function pmtRedraw(){
       if(isHighlighted) ctx.restore();
     });
   });
+  // Annotations (text/callout/cloud/stamp) — separate from measurement groups
+  (PMT.annotations||[]).forEach(function(a){
+    if((a.page||1) !== (PMT.currentPage||1)) return;
+    if(a.type==='text'){
+      ctx.fillStyle='#fbbf24'; ctx.font='11px sans-serif';
+      ctx.fillRect(a.x-2,a.y-14,ctx.measureText(a.text).width+8,16);
+      ctx.fillStyle='#000'; ctx.fillText(a.text, a.x+2, a.y-2);
+    } else if(a.type==='callout'){
+      ctx.strokeStyle='#fbbf24'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(a.from.x,a.from.y); ctx.lineTo(a.to.x,a.to.y); ctx.stroke();
+      ctx.beginPath(); ctx.arc(a.from.x,a.from.y,4,0,2*Math.PI); ctx.fillStyle='#fbbf24'; ctx.fill();
+      pmtLabel(ctx, a.text, a.to.x, a.to.y, '#fbbf24');
+    } else if(a.type==='cloud'){
+      ctx.strokeStyle='#22c55e'; ctx.lineWidth=2; ctx.setLineDash([2,4]);
+      ctx.beginPath(); ctx.moveTo(a.points[0].x,a.points[0].y);
+      a.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.closePath(); ctx.stroke();
+      ctx.setLineDash([]);
+      if(a.text) pmtLabel(ctx, a.text, a.points[0].x, a.points[0].y, '#22c55e');
+    } else if(a.type==='stamp'){
+      ctx.strokeStyle='#dc2626'; ctx.fillStyle='#dc2626'; ctx.lineWidth=2;
+      ctx.font='bold 11px sans-serif';
+      var w = ctx.measureText(a.stampType).width+16;
+      ctx.strokeRect(a.x-w/2, a.y-12, w, 22);
+      ctx.fillText(a.stampType, a.x-w/2+8, a.y+3);
+    }
+  });
+
   // in-progress click points for linear/rect/poly/scale
   if(PMT.clickPoints.length){
     ctx.strokeStyle='#fff'; ctx.fillStyle='#fff';
@@ -16024,6 +16080,81 @@ function pmtApplyAssembly(index, groupId, itemId){
   document.getElementById('pmt-assembly-ov').remove();
   pmtRenderSidebar(); pmtRedraw();
   toast('Assembly applied — '+it.assembly_outputs.length+' output(s) will be included when you push to estimate','ok',5000);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// MARKUP & ANNOTATION LAYER — separate from measuring. Text notes, callouts
+// with arrows, revision clouds, and stamps with name+date attached. Stored
+// in their own PMT.annotations array (not measurement groups), since they
+// don't have a quantity — they're communication, not takeoff data.
+// ═══════════════════════════════════════════════════════════════════════
+function pmtAddAnnotation(ann){
+  if(!PMT.annotations) PMT.annotations = [];
+  ann.id = 'a'+Date.now()+Math.floor(Math.random()*1000);
+  ann.page = PMT.currentPage||1;
+  ann.author = (typeof CURRENT_USER!=='undefined' && CURRENT_USER) ? CURRENT_USER : 'Feishy';
+  ann.created_at = new Date().toISOString();
+  PMT.annotations.push(ann);
+  pmtLogHistory('annotation added', ann.type+': '+(ann.text||''));
+  pmtRedraw();
+  pmtRenderMarkupsList();
+}
+
+// Text note — click once to place
+function pmtHandleTextTool(x,y){
+  var text = window.prompt('Note text:','');
+  if(text) pmtAddAnnotation({type:'text', x:x, y:y, text:text});
+}
+// Callout — click the target point, then click where the text should sit
+function pmtHandleCalloutClick(x,y){
+  if(!PMT.calloutStart){
+    PMT.calloutStart = {x:x,y:y};
+    toast('Now click where the note text should appear','ok',3000);
+  } else {
+    var text = window.prompt('Callout text:','');
+    if(text) pmtAddAnnotation({type:'callout', from:PMT.calloutStart, to:{x:x,y:y}, text:text});
+    PMT.calloutStart = null;
+  }
+}
+// Cloud — click corners like polygon, double-click to close (reuses clickPoints)
+function pmtFinishCloud(pts){
+  var text = window.prompt('What changed in this revision? (optional)','');
+  pmtAddAnnotation({type:'cloud', points:pts, text:text||''});
+}
+// Stamp — click to place a pre-set stamp
+function pmtHandleStampClick(x,y,stampType){
+  pmtAddAnnotation({type:'stamp', x:x, y:y, stampType:stampType, text:stampType});
+}
+
+function pmtShowStampPicker(x,y){
+  document.querySelectorAll('#pmt-stamp-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-stamp-ov';
+  el.style.cssText = 'position:fixed;top:'+(y+60)+'px;left:'+(x+240)+'px;background:#fff;border-radius:8px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);z-index:4000';
+  var stamps = ['APPROVED','FOR CONSTRUCTION','AS-BUILT','REJECTED','VERIFY IN FIELD'];
+  el.innerHTML = stamps.map(function(s){
+    return '<div onclick="pmtHandleStampClick('+x+','+y+',\''+s+'\');document.getElementById(\'pmt-stamp-ov\').remove()" style="padding:8px 12px;cursor:pointer;font-weight:700;font-size:12px;border-bottom:1px solid #eee">'+s+'</div>';
+  }).join('');
+  document.body.appendChild(el);
+}
+
+function pmtDeleteAnnotation(id){
+  PMT.annotations = (PMT.annotations||[]).filter(function(a){return a.id!==id;});
+  pmtRedraw();
+  pmtRenderMarkupsList();
+}
+function pmtRenderMarkupsList(){
+  var listEl = document.getElementById('pmt-markups-list');
+  if(!listEl) return;
+  var onPage = (PMT.annotations||[]).filter(function(a){return (a.page||1)===(PMT.currentPage||1);});
+  if(!onPage.length){ listEl.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-size:11px">No markups on this page</div>'; return; }
+  listEl.innerHTML = onPage.map(function(a){
+    var icon = {text:'📝',callout:'💬',cloud:'☁️',stamp:'🔖'}[a.type]||'•';
+    return '<div style="display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,0.75);padding:3px 0">'
+      +'<span>'+icon+' '+uxEsc((a.text||'').slice(0,40))+' <span style="color:rgba(255,255,255,0.35)">— '+uxEsc(a.author)+'</span></span>'
+      +'<span onclick="pmtDeleteAnnotation(\''+a.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span></div>';
+  }).join('');
 }
 
 </script>
