@@ -14370,10 +14370,10 @@ async function showPlanMarkupTool(docId){
   overlay.innerHTML =
     '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#22262b;border-bottom:1px solid rgba(255,255,255,0.08)">'
       +'<div style="color:#fff;font-weight:800;font-size:14px">📐 Plan Markup — '+uxEsc(doc.name||'Plan')+'</div>'
-      +'<div id="pmt-page-nav" style="display:none;align-items:center;gap:8px;color:#fff;font-size:12px">'
-        +'<button onclick="pmtGoToPage(PMT.currentPage-1)" style="background:#2d323a;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer">\u2039</button>'
-        +'<span id="pmt-page-label">Page 1</span>'
-        +'<button onclick="pmtGoToPage(PMT.currentPage+1)" style="background:#2d323a;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer">\u203a</button>'
+      +'<div id="pmt-page-nav" style="display:none;align-items:center;gap:8px;color:#fff;font-size:12px;background:#2d323a;padding:6px 10px;border-radius:8px">'
+        +'<button onclick="pmtGoToPage(PMT.currentPage-1)" title="Previous page" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:14px">\u2039</button>'
+        +'<select id="pmt-page-select" onchange="pmtGoToPage(parseInt(this.value))" style="background:#1a1d21;color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:4px;padding:5px 8px;font-size:12px"></select>'
+        +'<button onclick="pmtGoToPage(PMT.currentPage+1)" title="Next page" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:14px">\u203a</button>'
       +'</div>'
       +'<div style="display:flex;gap:8px">'
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
@@ -14452,16 +14452,27 @@ async function showPlanMarkupTool(docId){
   PMT.renderScale = Math.min(1.5, Math.max(0.6, maxRenderPx / longestSide));
   if(PMT.numPages > 1){
     document.getElementById('pmt-page-nav').style.display = 'flex';
-    document.getElementById('pmt-page-label').textContent = 'Page 1 of ' + PMT.numPages;
+    pmtRefreshPageDropdown();
   }
   await pmtRenderPage(1);
+}
+
+function pmtRefreshPageDropdown(){
+  var sel = document.getElementById('pmt-page-select');
+  if(!sel) return;
+  var pagesWithItems = {};
+  PMT.groups.forEach(function(g){ g.items.forEach(function(it){ pagesWithItems[it.page||1] = true; }); });
+  var options = [];
+  for(var i=1;i<=PMT.numPages;i++){
+    options.push('<option value="'+i+'"'+(i===PMT.currentPage?' selected':'')+'>Page '+i+' of '+PMT.numPages+(pagesWithItems[i]?' \u25CF has measurements':'')+'</option>');
+  }
+  sel.innerHTML = options.join('');
 }
 
 async function pmtRenderPage(pageNum){
   pageNum = Math.max(1, Math.min(PMT.numPages, pageNum));
   PMT.currentPage = pageNum;
-  var lbl = document.getElementById('pmt-page-label');
-  if(lbl) lbl.textContent = 'Page ' + pageNum + ' of ' + PMT.numPages;
+  pmtRefreshPageDropdown();
   var stackLoading = document.getElementById('pmt-canvas-stack');
   if(stackLoading) stackLoading.innerHTML = '<div style="color:rgba(255,255,255,0.5);padding:60px;text-align:center;font-size:13px">Loading page '+pageNum+'\u2026</div>';
 
@@ -14921,6 +14932,70 @@ function pmtHighlightItem(groupId, itemId){
   pmtRedraw();
   setTimeout(function(){ pmtHighlightedItemId=null; pmtRedraw(); }, 1500);
 }
+function pmtEditItemValue(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g ? g.items.find(function(i){return i.id===itemId;}) : null;
+  if(!it) return;
+  document.querySelectorAll('#pmt-edit-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-edit-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+
+  var fields = '';
+  if(it.type==='wall' || it.type==='linear' || it.type==='perimeter'){
+    fields = '<div class="fr"><label>Length (feet)</label><input type="number" id="pmt-edit-ft" value="'+it.value_ft+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px"></div>';
+  } else if(it.value_cy !== undefined){
+    fields = '<div class="fr"><label>Area (sqft)</label><input type="number" id="pmt-edit-area" value="'+it.value_sqft+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px"></div>'
+      +'<div class="fr"><label>Depth (feet) — add or change to update the cubic yard total</label><input type="number" id="pmt-edit-depth" value="'+(it.value_cy*27/it.value_sqft).toFixed(2)+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px"></div>';
+  } else {
+    fields = '<div class="fr"><label>Area (sqft)</label><input type="number" id="pmt-edit-area" value="'+it.value_sqft+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px"></div>';
+  }
+
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:360px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:14px">Edit Measurement</div>'
+    + fields
+    +'<button onclick="pmtSaveEditedItem(\''+groupId+'\',\''+itemId+'\')" style="width:100%;margin-top:14px;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Save</button>'
+    +'<button onclick="document.getElementById(\'pmt-edit-ov\').remove()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+function pmtSaveEditedItem(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g ? g.items.find(function(i){return i.id===itemId;}) : null;
+  if(!it) return;
+
+  if(it.type==='wall' || it.type==='linear' || it.type==='perimeter'){
+    var newFt = parseFloat(document.getElementById('pmt-edit-ft').value);
+    if(!newFt || newFt<=0){ toast('Enter a value greater than 0','err'); return; }
+    it.value_ft = newFt;
+    if(it.type==='wall'){
+      var studCount = Math.ceil(newFt / (16/12)) + 1;
+      var drywallSheets = Math.ceil((newFt * 8) / 32);
+      var insulationSqft = Math.round(newFt * 8);
+      it.studs = studCount; it.drywall_sheets = drywallSheets; it.insulation_sqft = insulationSqft;
+      it.label = Math.round(newFt*10)/10+' ft wall — '+studCount+' studs, '+drywallSheets+' sheets drywall, '+insulationSqft+' sqft insulation';
+    } else {
+      it.label = Math.round(newFt*10)/10 + (it.type==='perimeter' ? ' ft perimeter' : ' ft');
+    }
+  } else if(it.value_cy !== undefined){
+    var newArea = parseFloat(document.getElementById('pmt-edit-area').value);
+    var newDepth = parseFloat(document.getElementById('pmt-edit-depth').value);
+    if(!newArea || newArea<=0 || !newDepth || newDepth<=0){ toast('Enter values greater than 0','err'); return; }
+    it.value_sqft = newArea;
+    it.value_cy = Math.round((newArea * newDepth / 27) * 100) / 100;
+    it.label = newArea+' sqft \u00d7 '+newDepth+'ft deep = '+it.value_cy+' CY';
+  } else {
+    var newArea2 = parseFloat(document.getElementById('pmt-edit-area').value);
+    if(!newArea2 || newArea2<=0){ toast('Enter a value greater than 0','err'); return; }
+    it.value_sqft = newArea2;
+    it.label = newArea2 + ' sqft';
+  }
+  pmtLogHistory('edited', it.label);
+  document.getElementById('pmt-edit-ov').remove();
+  pmtRenderSidebar();
+  pmtRedraw();
+  toast('Measurement updated','ok');
+}
 function pmtDeleteGroup(id){
   var g = PMT.groups.find(function(x){return x.id===id;});
   if(!g) return;
@@ -14979,10 +15054,12 @@ function pmtRenderSidebar(){
         + g.items.map(function(it){
             return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.75);padding:2px 0;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
               +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+uxEsc(it.label)+'</span>'
+              +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;margin-left:6px" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5;margin-left:6px">✕</span></div>';
           }).join('')
         +'</div>';
     }).join('');
+  pmtRefreshPageDropdown();
 }
 
 function pmtRedraw(){
