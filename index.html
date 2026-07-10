@@ -4527,6 +4527,7 @@ async function processScreenshot(e){
   var base64=await new Promise(function(res2,rej){var fr=new FileReader();fr.onload=function(){res2(fr.result.split(',')[1]);};fr.onerror=rej;fr.readAsDataURL(file);});
   try{
     var resp=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,system:'Extract construction lead info from screenshot. Return ONLY valid JSON.',messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:file.type,data:base64}},{type:'text',text:'Extract lead info from this Angi screenshot for Corestone Developers Hudson Valley NY. Return ONLY valid JSON: {"client_name":"","phone":"","email":"","address":"","job_type":"Custom Home Build|Full Home Renovation|Kitchen Remodel|Bathroom Remodel|Addition / Extension|Basement Finish|Deck / Patio|Garage / ADU|Roofing|Siding and Exterior|Commercial Build-Out|Other","estimated_value":0,"timeline":"","notes":"everything they said about project","owns_property":"yes/no/own land/unknown","lead_source":"Angi"}'}]}]})});
+    if(!resp.ok){ var errTxt=await resp.text(); throw new Error('Server rejected the request (status '+resp.status+'): '+errTxt.slice(0,150)); }
     var d=await resp.json();
     var lead=JSON.parse((d.content&&d.content[0]?d.content[0].text:'{}').replace(/```json|```/g,'').trim());
     showLeadResult(res,lead,'SCREENSHOT');
@@ -4775,6 +4776,14 @@ async function uploadAndAnalyzePlan(){
       +'"red_flags":["anything unusual or risky noted on the plan"]\n'
       +'}';
     
+    // Vercel serverless functions reject request bodies over ~4.5MB, and a
+    // real architectural PDF (base64-encoded, so ~33% larger than the raw
+    // file) can exceed that easily. Warn honestly before sending, rather
+    // than let it fail with a cryptic parse error.
+    if(base64.length > 4000000){
+      throw new Error('This file is too large to send for AI analysis (roughly '+Math.round(file.size/1024/1024)+'MB). Try a smaller/lower-resolution export of the plan, or use the Visual Markup Tool instead, which measures the plan directly without sending the whole file to the AI.');
+    }
+
     var response=await fetch('/api/claude',{
       method:'POST',
       headers:{
@@ -4790,6 +4799,14 @@ async function uploadAndAnalyzePlan(){
         ]}]
       })
     });
+    // Check the HTTP status before trying to parse as JSON — a request that's
+    // rejected for being too large (or any other gateway-level error) comes
+    // back as plain text, not JSON, and calling .json() on it throws a
+    // confusing "Unexpected token" error instead of a clear one.
+    if(!response.ok){
+      var errText = await response.text();
+      throw new Error('The server rejected this request (status '+response.status+'). '+(errText.slice(0,150)||'No further detail was returned.')+' This usually means the file is too large — try a smaller export, or use the Visual Markup Tool instead.');
+    }
     var rd=await response.json();
     if(rd.error)throw new Error(rd.error.message);
     var takeoff=JSON.parse((rd.content[0].text||'{}').replace(/```json|```/g,'').trim());
