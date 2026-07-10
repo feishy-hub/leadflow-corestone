@@ -181,6 +181,37 @@ This is DEC-022. Locked. Cannot be reversed.
 
 ---
 
-*Status document updated: OS #8 — July 2, 2026*
+## Takeoff / Plan Markup Module — added this section, was never tracked here before
+
+| Piece | Status |
+|---|---|
+| AI reads whole PDF -> structured takeoff JSON | Built, verified live |
+| Takeoff -> Estimate auto-flow | Built, verified live |
+| Takeoff -> Bids auto-flow | Built |
+| Takeoff -> Purchase Orders auto-flow | Built |
+| Takeoff -> Proposal auto-flow | Built, not live-tested |
+| Plan version comparison (AI diff) | Built, not live-tested |
+| Visual Markup Tool -- scale (4 methods), Linear/Rect/Poly/Count/Wall/Perimeter/Freehand/Volume | Built, partially live-tested |
+| Right-click menu, drag-to-edit, Assemblies, Markup/Annotation layer, Zoom, Ortho/Snap, Thumbnails, CSV export | Built this session, NOT live-tested |
+| AI Generate All Schedules (window/door schedule, insulation by area, non-standard items) | Built, not live-tested |
+| CAD/DWG file support | Not built -- needs a real conversion service |
+| True AI auto-polygon room detection | Basic version built (vision-based, less precise than dedicated CV tools) |
+
+## Financial / Job Lifecycle -- corrected this session
+
+| Piece | Status |
+|---|---|
+| Premature closeout bug (paying first invoice marked job complete) | FIXED and verified live with a real 3-invoice test |
+| calcEstTotal (tax/fee engine) | Was completely missing, rebuilt, verified live |
+| Email classification | Was using a broken API format (likely non-functional the whole time it existed), fixed |
+| Photo/video AI analysis -> Gatekeeper | Was silently auto-escalating; now shows a review checklist first, only acts on what's approved |
+| Bid response intake (amount + notes per sub) | Was a stub ("coming soon"), fully built |
+| Approve a bid -> auto-draft Change Order priced from that bid | Built |
+| Schedule-shift-ask on CO approval | Built -- explicitly asks before moving dates, never silent/automatic |
+| Original scope of work stored on job record | Built -- enables real scope-deviation comparison instead of guessing |
+
+---
+
+*Status document updated: Emergency Live-QA + Takeoff Build-Out Session — July 10, 2026*
 *Must be updated every session before any code is written.*
 *Implementation status must reflect reality, not aspirations.*
