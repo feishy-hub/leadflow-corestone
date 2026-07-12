@@ -182,7 +182,31 @@ tr:hover td{background:#fafbfc}
 }
 
         @media (max-width: 768px) {
-            #bt-sidebar { width: 0 !important; overflow: hidden; }
+            /* The sidebar was permanently width:0 on real phone screens with
+               NO way to reopen it -- the hamburger button toggled a .collapsed
+               class that had no !important, so it could never win against this
+               rule. Fixed: sidebar is hidden by default on mobile, but sliding
+               it open via .mobile-open is now a real overlay on top of
+               everything else, with its own backdrop to close it. */
+            #bt-sidebar { width: 0 !important; overflow: hidden; transition: width 0.2s; }
+            #bt-sidebar.mobile-open {
+                width: 260px !important;
+                position: fixed !important; top: 0; left: 0; bottom: 0;
+                z-index: 5000 !important; overflow-y: auto !important;
+                box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+            }
+            #bt-sidebar.mobile-open .bt-logo-text,
+            #bt-sidebar.mobile-open .bt-nav-label,
+            #bt-sidebar.mobile-open .bt-nav-arrow,
+            #bt-sidebar.mobile-open .bt-nav-sub,
+            #bt-sidebar.mobile-open .bt-user div,
+            #bt-sidebar.mobile-open .bt-job-sel div:last-child {
+                display: block !important;
+            }
+            #bt-mobile-backdrop {
+                display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 4999;
+            }
+            #bt-mobile-backdrop.show { display: block; }
             #bt-main { margin-left: 0 !important; }
             button { min-height: 44px; }
             input, select, textarea { min-height: 44px; font-size: 16px !important; }
@@ -13950,6 +13974,14 @@ function goTab(tab){
     } else if(c){
       c.innerHTML = '<div class="empty"><div class="ei">🚧</div><div class="et">Page not found: '+tab+'</div></div>';
     }
+    // On mobile, close the slide-in menu automatically after picking a page
+    // — otherwise it stays open covering the whole screen you just navigated to.
+    if(window.innerWidth <= 768){
+      var sb = document.querySelector('.bt-sidebar') || document.getElementById('bt-sidebar');
+      var backdrop = document.getElementById('bt-mobile-backdrop');
+      if(sb) sb.classList.remove('mobile-open');
+      if(backdrop) backdrop.classList.remove('show');
+    }
   }catch(e){
     console.error('[goTab] failed for tab', tab, e);
     var c2 = document.getElementById('content');
@@ -13975,6 +14007,19 @@ function toggleGroup(groupId){
 // ── SIDEBAR SHOW/HIDE (was completely missing — 1 call site) ──
 function toggleSidebar(){
   var sb = document.querySelector('.bt-sidebar') || document.getElementById('bt-sidebar');
+  if(window.innerWidth <= 768){
+    // Mobile: the sidebar is a slide-in overlay, not an inline collapse
+    if(sb) sb.classList.toggle('mobile-open');
+    var backdrop = document.getElementById('bt-mobile-backdrop');
+    if(!backdrop){
+      backdrop = document.createElement('div');
+      backdrop.id = 'bt-mobile-backdrop';
+      backdrop.onclick = function(){ sb.classList.remove('mobile-open'); backdrop.classList.remove('show'); };
+      document.body.appendChild(backdrop);
+    }
+    backdrop.classList.toggle('show', sb.classList.contains('mobile-open'));
+    return;
+  }
   if(sb) sb.classList.toggle('collapsed');
   document.body.classList.toggle('sidebar-collapsed');
 }
