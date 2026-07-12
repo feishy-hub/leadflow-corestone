@@ -16132,7 +16132,8 @@ function pmtApplyAssembly(index, groupId, itemId){
   });
   it.label = it.label.split(' [')[0] + ' [' + asm.name + ']';
   pmtLogHistory('assembly applied', asm.name+' -> '+it.label);
-  document.getElementById('pmt-assembly-ov').remove();
+  var asmModal = document.getElementById('pmt-assembly-ov');
+  if(asmModal) asmModal.remove();
   pmtRenderSidebar(); pmtRedraw();
   toast('Assembly applied — '+it.assembly_outputs.length+' output(s) will be included when you push to estimate','ok',5000);
 }
