@@ -14428,7 +14428,7 @@ async function showPlanMarkupTool(docId){
       +'<div id="pmt-canvas-stack" style="position:relative;line-height:0"></div>'
       +'</div>'
       // Sidebar
-      +'<div style="width:280px;background:#22262b;border-left:1px solid rgba(255,255,255,0.08);overflow-y:auto;display:flex;flex-direction:column">'
+      +'<div style="width:280px;background:#22262b;border-left:1px solid rgba(255,255,255,0.08);overflow-y:auto;display:flex;flex-direction:column;min-height:0;height:100%">'
       +'<div id="pmt-sidebar" style="padding:12px"></div>'
       +'<div style="border-top:1px solid rgba(255,255,255,0.08);padding:12px">'
       +'<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:8px">🤖 Ask AI About This Plan</div>'
@@ -14594,28 +14594,50 @@ function pmtShowScaleEntryModal(pxDist){
   document.body.appendChild(el);
   setTimeout(function(){ var inp=document.getElementById('pmt-scale-ft-input'); if(inp) inp.focus(); }, 50);
 }
+// ── AUTOSAVE — persists scale + measurements immediately as they change,
+// instead of only when "Save & Close" is explicitly clicked. Found live:
+// navigating away any other way (not clicking Save & Close) silently lost
+// the scale calibration and any un-pushed measurements. Debounced slightly
+// so rapid changes (like dragging) don't hammer storage on every frame.
+var _pmtAutoSaveTimer = null;
+function pmtAutoSave(){
+  if(!PMT || !PMT.docId) return;
+  clearTimeout(_pmtAutoSaveTimer);
+  _pmtAutoSaveTimer = setTimeout(function(){
+    dbUpd('documents', PMT.docId, {
+      markup_data: JSON.stringify({scalePxPerFt: PMT.scalePxPerFt, groups: PMT.groups})
+    }).catch(function(e){ console.warn('[pmtAutoSave] failed', e); });
+  }, 400);
+}
+
 function pmtConfirmRawScale(){
   var val = parseFloat(document.getElementById('pmt-scale-raw-input').value);
   if(!val || val<=0){ toast('Enter a pixels-per-foot value greater than 0','err'); return; }
   PMT.scalePxPerFt = val;
-  document.getElementById('pmt-status').textContent = 'Scale set directly ('+val+' px/ft). Pick a measuring tool.';
+  pmtAutoSave();
+  var statusEl = document.getElementById('pmt-status');
+  if(statusEl) statusEl.textContent = 'Scale set directly ('+val+' px/ft). Pick a measuring tool.';
   toast('Scale set: '+val+' px/ft','ok');
-  document.getElementById('pmt-scale-ov').remove();
+  var ov1 = document.getElementById('pmt-scale-ov'); if(ov1) ov1.remove();
 }
 function pmtConfirmManualScale(pxDist){
   if(!pxDist || pxDist<=0){ toast('Use "Set Scale" on the toolbar and click two points on the plan first for this option — or use the ratio/number options below instead','err',5000); return; }
   var ft = parseFloat(document.getElementById('pmt-scale-ft-input').value);
   if(!ft || ft<=0){ toast('Enter a real length greater than 0','err'); return; }
   PMT.scalePxPerFt = pxDist / ft;
-  document.getElementById('pmt-status').textContent = 'Scale set ('+PMT.scalePxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
+  pmtAutoSave();
+  var statusEl2 = document.getElementById('pmt-status');
+  if(statusEl2) statusEl2.textContent = 'Scale set ('+PMT.scalePxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
   toast('Scale set: '+PMT.scalePxPerFt.toFixed(1)+' px/ft','ok');
-  document.getElementById('pmt-scale-ov').remove();
+  var ov2 = document.getElementById('pmt-scale-ov'); if(ov2) ov2.remove();
 }
 function pmtConfirmPresetScale(pxPerFt){
   PMT.scalePxPerFt = pxPerFt;
-  document.getElementById('pmt-status').textContent = 'Scale set from printed scale ('+pxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
+  pmtAutoSave();
+  var statusEl3 = document.getElementById('pmt-status');
+  if(statusEl3) statusEl3.textContent = 'Scale set from printed scale ('+pxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
   toast('Scale set from printed scale','ok');
-  document.getElementById('pmt-scale-ov').remove();
+  var ov3 = document.getElementById('pmt-scale-ov'); if(ov3) ov3.remove();
 }
 
 function pmtSetTool(tool){
@@ -14865,6 +14887,7 @@ function pmtAddItem(item){
   pmtActiveGroup().items.push(item);
   pmtLogHistory('added', item.label);
   pmtRenderSidebar();
+  pmtAutoSave();
   // Auto-return to Select/Stop after ONE completed measurement, instead of
   // silently staying armed for another — Count is the one exception, since
   // counting multiple items in a row is the entire point of that tool.
@@ -15217,14 +15240,25 @@ function pmtRedraw(){
     }
   });
 
-  // in-progress click points for linear/rect/poly/scale
+  // In-progress click points for linear/rect/poly/scale — these were plain
+  // white before, which is invisible against a white plan background (the
+  // overwhelming majority of plans). Now bright red/orange with a black
+  // outline so they're visible no matter what's underneath.
   if(PMT.clickPoints.length){
-    ctx.strokeStyle='#fff'; ctx.fillStyle='#fff';
-    PMT.clickPoints.forEach(function(p){ ctx.beginPath(); ctx.arc(p.x,p.y,4,0,2*Math.PI); ctx.fill(); });
+    PMT.clickPoints.forEach(function(p){
+      ctx.beginPath(); ctx.arc(p.x,p.y,6,0,2*Math.PI);
+      ctx.fillStyle='#ff3b30'; ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle='#000'; ctx.stroke();
+    });
     if(PMT.clickPoints.length>1){
+      ctx.strokeStyle='#ff3b30'; ctx.lineWidth=3;
       ctx.beginPath(); ctx.moveTo(PMT.clickPoints[0].x,PMT.clickPoints[0].y);
       PMT.clickPoints.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);});
       ctx.stroke();
+      // A thin black outline under the red line too, for maximum contrast
+      ctx.save(); ctx.globalCompositeOperation='destination-over';
+      ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=5; ctx.stroke();
+      ctx.restore();
     }
   }
 }
@@ -15910,6 +15944,7 @@ function pmtCanvasMouseUp(){
   pmtDragState = null;
   pmtRenderSidebar();
   pmtRedraw();
+  pmtAutoSave();
 }
 function pmtRecalcItemValue(it){
   if(!PMT.scalePxPerFt) return;
