@@ -15669,7 +15669,7 @@ async function pmtAIAutoDetect(){
         messages:[{role:'user', content:[
           {type:'image', source:{type:'base64', media_type:'image/jpeg', data: imgData}},
           {type:'text', text:'This is a construction floor plan image, '+canvas.width+'x'+canvas.height+' pixels. '
-            +'Identify each distinct room/space you can see and estimate its bounding box as a rectangle. '
+            +'Identify each distinct room/space you can see and estimate its bounding box as a rectangle. Be precise and conservative: hug the INTERIOR floor area only \u2014 stop at the inside face of the walls, do not include wall thickness or adjacent rooms/hallways, and do not round to a clean number. For an irregular (L-shaped) room, box just its main rectangular portion rather than overshooting into space that is not part of that room \u2014 the person will drag the corners to fix the rest by hand. When unsure, make the box smaller rather than larger. '
             +'Return coordinates as FRACTIONS of image width/height (0 to 1), not pixels, measured from the top-left corner.\n'
             +'Return ONLY valid JSON: {"rooms":[{"name":"Kitchen","x1":0.1,"y1":0.2,"x2":0.4,"y2":0.5}]}. '
             +'Only include rooms you can actually identify with reasonable confidence — do not guess at rooms you cannot see clearly. Max 20 rooms.'}
