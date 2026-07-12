@@ -16110,14 +16110,14 @@ function pmtSaveNewAssembly(groupId, itemId){
   pmtSaveAssembliesList(assemblies);
   toast('Assembly saved: '+name,'ok');
   if(groupId && itemId) pmtShowAssemblyManager(groupId, itemId);
-  else document.getElementById('pmt-assembly-ov').remove();
+  else { var m1=document.getElementById('pmt-assembly-ov'); if(m1) m1.remove(); }
 }
 function pmtDeleteAssembly(index){
   var assemblies = pmtGetAssemblies();
   assemblies.splice(index,1);
   pmtSaveAssembliesList(assemblies);
   toast('Assembly deleted','ok');
-  document.getElementById('pmt-assembly-ov').remove();
+  var m2=document.getElementById('pmt-assembly-ov'); if(m2) m2.remove();
 }
 function pmtApplyAssembly(index, groupId, itemId){
   var assemblies = pmtGetAssemblies();
