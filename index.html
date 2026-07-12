@@ -15900,30 +15900,46 @@ function pmtCanvasMouseUp(){
 }
 function pmtRecalcItemValue(it){
   if(!PMT.scalePxPerFt) return;
+  // Dragging/resizing a shape used to silently wipe out any custom name the
+  // AI-suggested-and-confirmed flow (or manual edit) had given it, replacing
+  // "Kitchen Floor Area — 44.4 sqft" with just "44.4 sqft" the moment it was
+  // moved a single pixel. Preserve the "Name — " prefix if one exists.
+  var namePrefix = '';
+  var dashIdx = (it.label||'').indexOf(' — ');
+  if(dashIdx > -1) namePrefix = it.label.slice(0, dashIdx+3);
+
   if(it.type==='linear' || it.type==='wall'){
     var ft = Math.hypot(it.points[1].x-it.points[0].x, it.points[1].y-it.points[0].y) / PMT.scalePxPerFt;
     it.value_ft = Math.round(ft*10)/10;
     if(it.type==='wall'){
       var studCount = Math.ceil(ft / (16/12)) + 1, drywallSheets = Math.ceil((ft*8)/32), insulationSqft = Math.round(ft*8);
       it.studs=studCount; it.drywall_sheets=drywallSheets; it.insulation_sqft=insulationSqft;
-      it.label = it.value_ft+' ft wall — '+studCount+' studs, '+drywallSheets+' sheets drywall, '+insulationSqft+' sqft insulation';
-    } else { it.label = it.value_ft+' ft'; }
+      it.label = namePrefix + it.value_ft+' ft wall — '+studCount+' studs, '+drywallSheets+' sheets drywall, '+insulationSqft+' sqft insulation';
+    } else { it.label = namePrefix + it.value_ft+' ft'; }
   } else if(it.type==='rect' && it.value_cy===undefined){
     var p0=it.points[0], p1=it.points[1];
     var area = Math.abs(p1.x-p0.x)/PMT.scalePxPerFt * Math.abs(p1.y-p0.y)/PMT.scalePxPerFt;
     it.value_sqft = Math.round(area*10)/10;
-    it.label = it.value_sqft+' sqft';
+    it.label = namePrefix + it.value_sqft+' sqft';
+  } else if(it.type==='rect' && it.value_cy!==undefined){
+    // Volume rect — recompute area from the new points, keep the same depth
+    var vp0=it.points[0], vp1=it.points[1];
+    var vArea = Math.abs(vp1.x-vp0.x)/PMT.scalePxPerFt * Math.abs(vp1.y-vp0.y)/PMT.scalePxPerFt;
+    var priorDepth = it.value_sqft ? (it.value_cy*27/it.value_sqft) : 0;
+    it.value_sqft = Math.round(vArea*10)/10;
+    it.value_cy = priorDepth ? Math.round((it.value_sqft*priorDepth/27)*100)/100 : it.value_cy;
+    it.label = namePrefix + it.value_sqft+' sqft \u00d7 '+(Math.round(priorDepth*100)/100)+'ft deep = '+it.value_cy+' CY';
   } else if(it.type==='poly' || it.type==='perimeter'){
     if(it.type==='poly'){
       var areaPx=0;
       for(var i=0;i<it.points.length;i++){ var j=(i+1)%it.points.length; areaPx += it.points[i].x*it.points[j].y - it.points[j].x*it.points[i].y; }
       it.value_sqft = Math.round((Math.abs(areaPx/2)/(PMT.scalePxPerFt*PMT.scalePxPerFt))*10)/10;
-      it.label = it.value_sqft+' sqft';
+      it.label = namePrefix + it.value_sqft+' sqft';
     } else {
       var per=0;
       for(var k=0;k<it.points.length;k++){ var j2=(k+1)%it.points.length; per += Math.hypot(it.points[j2].x-it.points[k].x, it.points[j2].y-it.points[k].y); }
       it.value_ft = Math.round((per/PMT.scalePxPerFt)*10)/10;
-      it.label = it.value_ft+' ft perimeter';
+      it.label = namePrefix + it.value_ft+' ft perimeter';
     }
   }
 }
