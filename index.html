@@ -14391,6 +14391,8 @@ async function showPlanMarkupTool(docId){
         +'<span>⚙️</span><span style="font-size:8px;font-weight:700">Scale Options</span></button>'
       +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="padding:8px 4px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:4px">'
         +'<span>🤖</span><span style="font-size:8px;font-weight:700">AI Detect</span></button>'
+      +'<button onclick="pmtShowManualEntry()" title="Type in a measurement directly — no clicking on the plan required" style="padding:8px 4px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:4px">'
+        +'<span>⌨️</span><span style="font-size:8px;font-weight:700">Type It In</span></button>'
       +[
         ['scale','📏','Set Scale'],
         ['linear','📐','Linear'],
@@ -14421,6 +14423,7 @@ async function showPlanMarkupTool(docId){
         +'<button onclick="pmtZoom(0.15)" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 10px;cursor:pointer">+</button>'
         +'<button onclick="pmtZoomReset()" style="background:#1a1d21;color:#fff;border:none;border-radius:4px;padding:6px 10px;cursor:pointer;font-size:11px">Reset</button>'
         +'<label style="display:flex;align-items:center;gap:4px;margin-left:8px;cursor:pointer"><input type="checkbox" id="pmt-legend-toggle" onchange="pmtToggleLegend()"> Legend</label>'
+        +'<label style="display:flex;align-items:center;gap:4px;margin-left:8px;cursor:pointer" title="Keep this tool active after each measurement, instead of returning to Select"><input type="checkbox" id="pmt-stay-in-tool"> Stay in Tool</label>'
       +'</div>'
       +'<div id="pmt-canvas-stack" style="position:relative;line-height:0"></div>'
       +'</div>'
@@ -14862,6 +14865,16 @@ function pmtAddItem(item){
   pmtActiveGroup().items.push(item);
   pmtLogHistory('added', item.label);
   pmtRenderSidebar();
+  // Auto-return to Select/Stop after ONE completed measurement, instead of
+  // silently staying armed for another — Count is the one exception, since
+  // counting multiple items in a row is the entire point of that tool.
+  // Found directly from Feishy: "it's gonna keep doing takeoffs till I press
+  // the next button... I'd like a stop... it should stop."
+  var stayToggle = document.getElementById('pmt-stay-in-tool');
+  var stayChecked = stayToggle && stayToggle.checked;
+  if(item.type !== 'count' && !stayChecked){
+    pmtSetTool(null);
+  }
 }
 function pmtLogHistory(action, detail){
   if(!PMT.history) PMT.history = [];
@@ -16191,8 +16204,15 @@ function pmtShowStampPicker(x,y){
   var stamps = ['APPROVED','FOR CONSTRUCTION','AS-BUILT','REJECTED','VERIFY IN FIELD'];
   el.innerHTML = stamps.map(function(s){
     return '<div onclick="pmtHandleStampClick('+x+','+y+',\''+s+'\');document.getElementById(\'pmt-stamp-ov\').remove()" style="padding:8px 12px;cursor:pointer;font-weight:700;font-size:12px;border-bottom:1px solid #eee">'+s+'</div>';
-  }).join('');
+  }).join('')
+  + '<div onclick="document.getElementById(\'pmt-stamp-ov\').remove();pmtSetTool(null)" style="padding:8px 12px;cursor:pointer;font-weight:600;font-size:12px;color:#dc2626">Cancel</div>';
   document.body.appendChild(el);
+  // Also close if the person clicks anywhere else, same as other menus in this tool
+  setTimeout(function(){
+    document.addEventListener('click', function closeOnce(ev){
+      if(!el.contains(ev.target)){ el.remove(); document.removeEventListener('click', closeOnce); }
+    });
+  }, 50);
 }
 
 function pmtDeleteAnnotation(id){
@@ -16401,6 +16421,7 @@ async function pmtShowAreaDetailsModal(points, areaFt, shapeType){
     +(s.matching_assembly ? '<div style="font-size:12px;background:#f0f5f4;border-radius:6px;padding:8px;margin-bottom:12px">\ud83e\udde9 AI suggests applying assembly: <b>'+uxEsc(s.matching_assembly)+'</b> — you can apply it after adding this from the right-click menu.</div>' : '')
     +'<button onclick="pmtConfirmAreaDetails()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add Measurement</button>'
     +'<button onclick="pmtSkipAreaDetails()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Skip — just add as plain area</button>'
+    +'<button onclick="pmtDiscardAreaDetails()" style="margin-top:4px;width:100%;padding:10px;background:transparent;border:none;color:#dc2626;cursor:pointer;font-weight:600">Discard — I didn\'t mean to measure this</button>'
     +'</div>';
   // Store off the HTML attribute entirely — embedding JSON.stringify(points)
   // directly into an onclick="..." string breaks the moment the array
@@ -16438,6 +16459,12 @@ function pmtSkipAreaDetails(){
   pmtAddItem({type:pending.shapeType, points:pending.points, value_sqft:pending.areaFt, label:pending.areaFt+' sqft'});
   pmtRedraw();
   window._pmtPendingArea = null;
+}
+function pmtDiscardAreaDetails(){
+  document.getElementById('pmt-areadetails-ov').remove();
+  window._pmtPendingArea = null;
+  pmtSetTool(null);
+  toast('Discarded — nothing was added','ok');
 }
 
 
@@ -16483,6 +16510,7 @@ async function pmtProposeAndConfirm(shapeType, valueSummary, points, extra){
     +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">'+valueSummary+'</div>'
     +'<div class="fr"><label>What this is</label><input id="pmt-propose-name" value="'+uxEsc((s&&s.guess_name)||'')+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px" autofocus></div>'
     +'<button onclick="pmtConfirmPropose()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add Measurement</button>'
+    +'<button onclick="pmtDiscardPropose()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:#dc2626;cursor:pointer;font-weight:600">Discard — I didn\'t mean to measure this</button>'
     +'</div>';
   document.body.appendChild(el);
   window._pmtPendingItem = Object.assign({type:shapeType, points:points}, extra);
@@ -16497,6 +16525,13 @@ function pmtConfirmPropose(){
   pmtAddItem(item);
   pmtRedraw();
   window._pmtPendingItem = null;
+}
+function pmtDiscardPropose(){
+  document.getElementById('pmt-propose-ov').remove();
+  window._pmtPendingItem = null;
+  window._pmtPendingBaseLabel = null;
+  pmtSetTool(null);
+  toast('Discarded — nothing was added','ok');
 }
 
 // AI batch-rename for Count items — per-click AI calls would make rapid
@@ -16524,6 +16559,91 @@ async function pmtAISuggestCountNames(groupId){
     pmtRenderSidebar(); pmtRedraw();
     toast('Named as "'+name+'" — rename any individually if needed','ok',5000);
   }catch(e){ toast('AI naming failed: '+e.message,'err'); }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// MANUAL/TYPED ENTRY — some quantities are known ahead of time (a spec
+// sheet says "12x15 room," a sub quotes "40 linear feet of fascia") and
+// shouldn't require clicking on the plan at all. Requested directly by
+// Feishy: "I wanted to be more flexible... entering calculations."
+// ═══════════════════════════════════════════════════════════════════════
+function pmtShowManualEntry(){
+  document.querySelectorAll('#pmt-manual-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-manual-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%">'
+    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Type In a Measurement</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:14px">No clicking on the plan needed — enter numbers directly.</div>'
+    +'<div class="fr"><label>Name (e.g. "Fascia — per sub quote")</label><input id="pmt-manual-name" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px"></div>'
+    +'<div class="fr"><label>Type</label><select id="pmt-manual-type" onchange="pmtManualTypeChanged()" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">'
+      +'<option value="linear">Linear (feet)</option>'
+      +'<option value="area_direct">Area (enter sqft directly)</option>'
+      +'<option value="area_dims">Area (enter length \u00d7 width)</option>'
+      +'<option value="volume">Volume (area \u00d7 depth \u2192 cubic yards)</option>'
+      +'<option value="count">Count (a quantity)</option>'
+    +'</select></div>'
+    +'<div id="pmt-manual-fields"></div>'
+    +'<button onclick="pmtSaveManualEntry()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;margin-top:8px">Add Measurement</button>'
+    +'<button onclick="document.getElementById(\'pmt-manual-ov\').remove()" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-weight:600">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  pmtManualTypeChanged();
+}
+function pmtManualTypeChanged(){
+  var type = document.getElementById('pmt-manual-type').value;
+  var fields = document.getElementById('pmt-manual-fields');
+  if(type==='linear'){
+    fields.innerHTML = '<div class="fr"><label>Length (feet)</label><input type="number" id="pmt-manual-ft" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px"></div>';
+  } else if(type==='area_direct'){
+    fields.innerHTML = '<div class="fr"><label>Area (sqft)</label><input type="number" id="pmt-manual-sqft" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px"></div>';
+  } else if(type==='area_dims'){
+    fields.innerHTML = '<div style="display:flex;gap:8px;margin-bottom:12px"><input type="number" id="pmt-manual-length" placeholder="Length ft" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px"><input type="number" id="pmt-manual-width" placeholder="Width ft" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px"></div>';
+  } else if(type==='volume'){
+    fields.innerHTML = '<div style="display:flex;gap:8px;margin-bottom:12px"><input type="number" id="pmt-manual-sqft-v" placeholder="Area sqft" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px"><input type="number" id="pmt-manual-depth" placeholder="Depth ft" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px"></div>';
+  } else if(type==='count'){
+    fields.innerHTML = '<div class="fr"><label>Quantity</label><input type="number" id="pmt-manual-qty" value="1" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px"></div>';
+  }
+}
+function pmtSaveManualEntry(){
+  var type = document.getElementById('pmt-manual-type').value;
+  var name = document.getElementById('pmt-manual-name').value.trim();
+  var prefix = name ? name+' — ' : '';
+  var item = null;
+  if(type==='linear'){
+    var ft = parseFloat(document.getElementById('pmt-manual-ft').value);
+    if(!ft || ft<=0){ toast('Enter a length greater than 0','err'); return; }
+    item = {type:'linear', points:[{x:0,y:0},{x:0,y:0}], value_ft:ft, label: prefix+ft+' ft', manual:true};
+  } else if(type==='area_direct'){
+    var sqft = parseFloat(document.getElementById('pmt-manual-sqft').value);
+    if(!sqft || sqft<=0){ toast('Enter an area greater than 0','err'); return; }
+    item = {type:'rect', points:[{x:0,y:0},{x:0,y:0}], value_sqft:sqft, label: prefix+sqft+' sqft', manual:true};
+  } else if(type==='area_dims'){
+    var len = parseFloat(document.getElementById('pmt-manual-length').value);
+    var wid = parseFloat(document.getElementById('pmt-manual-width').value);
+    if(!len || !wid || len<=0 || wid<=0){ toast('Enter length and width greater than 0','err'); return; }
+    var area = Math.round(len*wid*10)/10;
+    item = {type:'rect', points:[{x:0,y:0},{x:0,y:0}], value_sqft:area, label: prefix+area+' sqft ('+len+"'\u00d7"+wid+"')", manual:true};
+  } else if(type==='volume'){
+    var vsqft = parseFloat(document.getElementById('pmt-manual-sqft-v').value);
+    var vdepth = parseFloat(document.getElementById('pmt-manual-depth').value);
+    if(!vsqft || !vdepth || vsqft<=0 || vdepth<=0){ toast('Enter area and depth greater than 0','err'); return; }
+    var cy = Math.round((vsqft*vdepth/27)*100)/100;
+    item = {type:'rect', points:[{x:0,y:0},{x:0,y:0}], value_sqft:vsqft, value_cy:cy, label: prefix+vsqft+' sqft \u00d7 '+vdepth+'ft deep = '+cy+' CY', manual:true};
+  } else if(type==='count'){
+    var qty = parseInt(document.getElementById('pmt-manual-qty').value);
+    if(!qty || qty<=0){ toast('Enter a quantity greater than 0','err'); return; }
+    // Count is normally one click = one item; for a typed-in quantity, add
+    // that many count entries at once so totals/exports stay consistent.
+    for(var i=0;i<qty;i++){
+      pmtAddItem({type:'count', x:20+i*5, y:20, label:(prefix||'Item ')+(i+1), manual:true});
+    }
+    document.getElementById('pmt-manual-ov').remove();
+    return;
+  }
+  document.getElementById('pmt-manual-ov').remove();
+  pmtAddItem(item);
 }
 
 </script>
