@@ -16125,7 +16125,7 @@ function pmtApplyAssembly(index, groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
   var it = g ? g.items.find(function(i){return i.id===itemId;}) : null;
   if(!asm || !it) return;
-  var base = it.value_sqft !== undefined ? it.value_sqft : (it.value_ft || 0);
+  var base = it.value_sqft !== undefined ? it.value_sqft : (it.value_ft !== undefined ? it.value_ft : (it.type==='count' ? 1 : 0));
   it.assembly = asm.name;
   it.assembly_outputs = asm.formulas.map(function(f){
     return {name:f.name, qty: Math.round(base * f.multiplier * 100)/100, unit:f.unit};
