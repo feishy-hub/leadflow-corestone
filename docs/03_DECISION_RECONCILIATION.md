@@ -83,6 +83,16 @@ Despite this, the same live-source scan **did** confirm the presence of the spec
 
 ---
 
+## DR-005 — Open Question Cross-Reference Drift, and OQ-002's Apparent (Undocumented) Resolution
+
+**Finding A — numbering drift:** `CORESTONE_SUBSYSTEM_STATUS.md`'s Call Intelligence row cites "OQ-011 open" as the tracking item for callIntel persistence (only 4 of 12 fields saved). But `CORESTONE_OPEN.md`'s actual OQ-011 is titled "Supabase migration timing" — an unrelated topic. Either the callIntel issue was originally tracked under a different OQ number that was later renumbered without updating the cross-reference in Subsystem Status, or the citation was simply mistyped. **Status: Needs owner review** — not resolved, since it's not clear which OQ (if any) currently tracks callIntel persistence. The underlying issue itself (V1.07 in the Feature Inventory) is real regardless of which ID tracks it.
+
+**Finding B — OQ-002 appears resolved but isn't marked closed:** `CORESTONE_OPEN.md`'s OQ-002 states, as of its writing: *"Gatekeeper is non-functional... Every AI approval for the past several sessions changed a status field and did nothing else. Every 'approved' Gatekeeper action is a lie."* It's marked "Open — Fix B-001 is first action of Phase 1 foundation." However, `CORESTONE_REQUIREMENTS.md`'s REQ-001 ("Fix Gatekeeper execution") is marked Approved, and the much more recent `CORESTONE_SUBSYSTEM_STATUS.md` (July 10) rates the Gatekeeper Queue and Gatekeeper Executor both ✅ BUILT, with `gkExecuteAction` handling 15+ action types. This is strong evidence the fix landed — but `CORESTONE_OPEN.md` itself was not updated to close OQ-002. **Status: Likely resolved, flagged rather than assumed** — recommend Feishy or a future session explicitly close OQ-002 in `CORESTONE_OPEN.md` once confirmed, rather than this document silently declaring it closed.
+
+**Pattern note:** This is now the fifth instance (DR-001 through DR-005) of the same underlying issue — status/tracking documents not being updated at the same time as the narrative session notes that supersede them. This pattern itself is worth Feishy's attention as a process matter, independent of any single instance: see the Master Gap Analysis's "What This Means for the Rebuild" section.
+
+---
+
 ## Reconciliation entries pending (to be completed during the formal Decision & Conversation Reconciliation pass, after the Master Feature Inventory)
 
 - Full chronological pass through OS #1–#11 for additional forgotten/replaced/conflicting items beyond the two above
