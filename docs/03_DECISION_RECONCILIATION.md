@@ -93,6 +93,16 @@ Despite this, the same live-source scan **did** confirm the presence of the spec
 
 ---
 
+## DR-006 — Blueprint's 4-Phase Map vs. Subsystem Status's 3-Phase Map (Minor)
+
+**Finding:** `CORESTONE_BLUEPRINT.md` (OS #7/#8) specifies four implementation phases, ending with a Phase 4 ("Business Brain trained → predictive estimating, autonomous scheduling, AI-generated proposals, sub performance AI"). `CORESTONE_SUBSYSTEM_STATUS.md` (July 10, more recent, and the basis for `05_MASTER_GAP_ANALYSIS.md`) only describes three phases.
+
+**Assessment:** Not a true contradiction — Phase 4 isn't disputed anywhere, just not repeated in the shorter, more operationally-focused July 10 document. Does not meet the bar for a full stop (no business/architecture decision needed to resolve it).
+
+**Status:** ✅ Noted, not treated as a blocker. Full detail in `15_ARCHITECTURE_REFERENCE.md`. Recorded here specifically so Phase 4 — a real, previously-designed part of the roadmap — doesn't quietly disappear from the record.
+
+---
+
 ## Reconciliation entries pending (to be completed during the formal Decision & Conversation Reconciliation pass, after the Master Feature Inventory)
 
 - Full chronological pass through OS #1–#11 for additional forgotten/replaced/conflicting items beyond the two above
