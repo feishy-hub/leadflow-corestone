@@ -44,11 +44,10 @@ Every entry below follows the same format: **What was originally believed → Wh
 
 **Which version is most defensible right now:** **7 named AI Employees** (Estimator, Superintendent, Controller, CO Manager, Customer Service, Purchasing Manager, Scheduler), per the OS #11 Master Feature Inventory's explicit "All 7" — the most recent, most deliberate, and only place in the project's history where the count and the name list actually agree with each other.
 
-**Status:** 🟡 **Requires owner review — not resolved by assumption, per Feishy's explicit instruction.** Two specific open questions:
-1. Was **AI Permit Coordinator** (proposed OS #10, never mentioned again) intentionally dropped, or simply lost track of? Permit tracking and inspection scheduling for Ulster/Sullivan/Dutchess counties is independently identified elsewhere in the project's history as a real, valued, currently-unbuilt capability — so this isn't a redundant or clearly-obsolete role, which makes silent omission worth double-checking rather than assuming.
-2. Should the "10 AI Employees" language in `CORESTONE_MASTER.md` and `CORESTONE_RELEASES.md` be corrected to "7" (or 8, if Permit Coordinator is reinstated) going forward? No new employees are being invented to reach 10 — there is no evidence 10 were ever actually defined.
-
-**Recommendation pending your answer:** Use **7** as the working figure for the Knowledge Transfer Package (Master Context Document Section 7 has been updated to reflect this, with this open question flagged inline), and add AI Permit Coordinator to Volume 0 as an explicitly **Proposed, Not Confirmed** role rather than silently including or excluding it.
+**Status:** ✅ **Resolved by Feishy, July 15, 2026 (with ChatGPT review).** Ruling:
+- **Official current AI Employee roster: 7** — AI Estimator, AI Superintendent, AI Controller, AI CO Manager, AI Customer Service, AI Purchasing Manager, AI Scheduler.
+- **AI Permit Coordinator** is documented as: proposed during OS #10; never formally approved or implemented; **not** part of the current official roster; preserved here and in Volume 0 as a historical proposal and a possible future enhancement, not as a live or pending role.
+- The "10 AI Employees" language in `CORESTONE_MASTER.md` and `CORESTONE_RELEASES.md` is acknowledged as a documentation error that was never caught — no new employees were invented to justify it, and no evidence exists that 10 were ever actually defined. The two source files are left untouched (per the no-silent-overwrite rule); this entry is the permanent record of the correction for Knowledge Transfer purposes.
 
 ---
 
