@@ -64,9 +64,13 @@ The founding architectural mechanism — the single queue every AI-generated act
 
 ## 7. The AI Employees
 
-**⚠️ This section has a confirmed internal inconsistency across the project's own documents — flagged for your review rather than guessed at. See the companion Decision & Conversation Reconciliation document, entry DR-002, for the full trace.** The short version: one document claims "10 AI Employees," but no document anywhere names more than 8, and the most recent explicit reconciliation (OS #11, Master Feature Inventory entry V0.04) settles on **7**: AI Estimator, AI Superintendent, AI Controller, AI CO Manager, AI Customer Service, AI Purchasing Manager, AI Scheduler. An 8th role, **AI Permit Coordinator**, was proposed once (OS #10) and never confirmed dropped or kept — pending your decision.
+**Official current roster (7), confirmed by Feishy July 15, 2026 after a documentation inconsistency was found and traced — see `02_DECISION_RECONCILIATION.md`, entry DR-002 for the full history:**
+
+AI Estimator, AI Superintendent, AI Controller, AI CO Manager, AI Customer Service, AI Purchasing Manager, AI Scheduler.
 
 Each named employee is a functional AI role — not separate software — routing proposed actions through the same Gatekeeper and reasoning over the same Business Brain job context.
+
+*Historical note:* an 8th role, **AI Permit Coordinator**, was proposed during OS #10 alongside the others but was never formally approved or implemented, and is not part of the current official roster. It is preserved in the project record as a historical proposal and a possible future enhancement (permit/inspection tracking for Ulster/Sullivan/Dutchess counties is independently identified elsewhere as a real, currently-unbuilt capability), not as a live or pending role.
 
 ---
 
@@ -157,5 +161,6 @@ Complete the Knowledge Transfer Package foundation documents (Master Context →
 |---|---|---|---|
 | 1.0 | July 15, 2026 | Initial draft | Written before repo access; based on conversational history only |
 | 1.1 | July 15, 2026 | Corrected Sections 5, 6, 7, 8 | Cross-checked against actual GitHub source; found and preserved (not silently fixed) two material contradictions — see `02_DECISION_RECONCILIATION.md` |
+| 1.2 | July 15, 2026 | Section 7 finalized | Feishy ruled on the AI Employee count (DR-002): 7 official, AI Permit Coordinator preserved as historical proposal |
 
 *This document should be corrected, not replaced, if anything here is found wrong later — nothing about this project gets thrown away, only upgraded.*
