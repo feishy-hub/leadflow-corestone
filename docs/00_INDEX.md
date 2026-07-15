@@ -11,9 +11,15 @@
 6. `06_REQUIREMENTS_TRACEABILITY_MATRIX.md` ✅ — all 53 REQ-IDs mapped to current status and Feature Inventory IDs
 
 8. `08_VOLUME_1.md` ✅ — Lead, Estimating & Contract Pipeline (21 features)
-9. Volumes 2–5 — *(not yet started — Job Execution, Field Ops, Financial, People/Portals/Reports)*
-10. Master Screen Specification — *(not yet started)*
-11. Definition of Done — *(not yet started)*
+9. `09_VOLUME_2.md` ✅ — Job Execution (11 features)
+10. `10_VOLUME_3.md` ✅ — Field Operations (20 features)
+11. `11_VOLUME_4.md` ✅ — Financial (14 features)
+12. `12_VOLUME_5.md` ✅ — People, Portals & Reports (10 features)
+
+13. `13_MASTER_SCREEN_SPECIFICATION.md` ✅ — 37-page inventory + UI baseline standard (honest about needing a live browser walkthrough to become a true visual spec)
+14. `14_DEFINITION_OF_DONE.md` ✅ — final document; synthesizes the existing Testing Standard into one Done/Not-Done gate
+
+# ✅ KNOWLEDGE TRANSFER PACKAGE COMPLETE — 14 documents, all 108 features documented
 
 **Open items requiring Feishy's review (do not resolve by assumption):** DR-003 (CS_VERSION mismatch, 2.7 live vs. 2.10.4 documented); DR-005 (OQ-011 numbering drift; OQ-002 appears resolved but not marked closed); Feature Inventory entries V0.12, V1.07, V1.20, V1.21, V2.04, V2.07, V4.07, V4.10, V6.05, V6.06, V6.07; PO 3-stage Gatekeeper approval (BR-008/V4.07) confirmed not enforced despite being a locked rule (DEC-022); REQ-003/REQ-036 tax calculation needs live re-verification.
 
