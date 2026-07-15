@@ -6,14 +6,14 @@
 1. `01_MASTER_CONTEXT.md` ✅ — what this project is, why it exists, current verified status
 2. `02_MASTER_FEATURE_INVENTORY.md` ✅ — 108-feature complete checklist across Volumes 0–6
 3. `03_DECISION_RECONCILIATION.md` ✅ (living document, growing) — every contradiction found across the project's history, with resolution or an owner-review flag
-4. `04_BUSINESS_RULES_CONSTITUTION.md` — *(not yet started)*
-5. `05_MASTER_GAP_ANALYSIS.md` — *(not yet started)*
+4. `04_BUSINESS_RULES_CONSTITUTION.md` ✅ — indexed catalog of every business rule, architectural principle, engineering standard, and QA standard
+5. `05_MASTER_GAP_ANALYSIS.md` ✅ — built vs. vision, organized by phase gate
 6. `06_REQUIREMENTS_TRACEABILITY_MATRIX.md` — *(not yet started)*
 7. Volume 0 and Volumes 1–5 — *(not yet started)*
 8. Master Screen Specification — *(not yet started)*
 9. Definition of Done — *(not yet started)*
 
-**Open items requiring Feishy's review (do not resolve by assumption):** DR-003 (CS_VERSION mismatch, 2.7 live vs. 2.10.4 documented); Feature Inventory entries V0.12, V1.07, V1.20, V1.21, V2.04, V2.07, V4.07, V4.10, V6.05, V6.06, V6.07.
+**Open items requiring Feishy's review (do not resolve by assumption):** DR-003 (CS_VERSION mismatch, 2.7 live vs. 2.10.4 documented); Feature Inventory entries V0.12, V1.07, V1.20, V1.21, V2.04, V2.07, V4.07, V4.10, V6.05, V6.06, V6.07; PO 3-stage Gatekeeper approval (BR-008/V4.07) confirmed not enforced despite being a locked rule (DEC-022).
 
 ## Status legend used throughout this package
 
