@@ -17,10 +17,10 @@
 12. `12_VOLUME_5.md` ✅ — People, Portals & Reports (10 features)
 
 13. `13_MASTER_SCREEN_SPECIFICATION.md` ✅ — 37-page inventory + UI baseline standard (honest about needing a live browser walkthrough to become a true visual spec)
-14. `14_DEFINITION_OF_DONE.md` ✅
 15. `15_ARCHITECTURE_REFERENCE.md` ✅ — the 40-object Business Object Catalog, Event Catalog, Workflow Catalog (WF-01–10), Permission Model, and Financial Architecture from Blueprint Part 2 — the data-model reference Volume 0 was originally meant to include
+16. `16_UI_UX_DETAIL_ADDENDUM.md` ✅ — granular UI specifics from Complete Master (Modules 1–8 of ~30 sampled; remainder named honestly as unmined, not silently skipped)
 
-# ✅ KNOWLEDGE TRANSFER PACKAGE — 15 documents, all 108 features + full target architecture documented
+# ✅ KNOWLEDGE TRANSFER PACKAGE — 16 documents + index, 206KB, all 108 features + full target architecture + granular UI detail documented
 
 **Open items requiring Feishy's review (do not resolve by assumption):** DR-003 (CS_VERSION mismatch, 2.7 live vs. 2.10.4 documented); DR-005 (OQ-011 numbering drift; OQ-002 appears resolved but not marked closed); Feature Inventory entries V0.12, V1.07, V1.20, V1.21, V2.04, V2.07, V4.07, V4.10, V6.05, V6.06, V6.07; PO 3-stage Gatekeeper approval (BR-008/V4.07) confirmed not enforced despite being a locked rule (DEC-022); REQ-003/REQ-036 tax calculation needs live re-verification.
 
