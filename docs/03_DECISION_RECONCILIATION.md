@@ -69,6 +69,20 @@ Despite this, the same live-source scan **did** confirm the presence of the spec
 
 ---
 
+## DR-004 — Status Table Staleness Within `CORESTONE_SUBSYSTEM_STATUS.md` Itself
+
+**What was originally stated:** The "AI & Intelligence" module table in `CORESTONE_SUBSYSTEM_STATUS.md` lists **AI Photo Analysis: ❌ NOT BUILT** and **Notification Center: ❌ NOT BUILT ("Toast-only right now")**.
+
+**What later evidence in the same document found:** Further down the same file, the "corrected this session" section (July 10, Emergency Live-QA) states plainly that photo/video AI analysis existed and had a real bug fixed: *"Was silently auto-escalating; now shows a review checklist first, only acts on what's approved."* A live source-code scan independently confirms an `aiAnalyzePhoto` function and six distinct notification-related functions exist. So both features are real, at least partially — the module tables at the top of the document were not updated to reflect the session's own findings lower in the same file.
+
+**Why the understanding changed:** Same root cause as DR-001 — a status table not being refreshed at the same time as the narrative session notes below it, within a single document this time rather than across two documents.
+
+**Which version is current:** Treat AI Photo Analysis and the Notification Center as **Partially Implemented**, not Not Built — matching how they're now recorded in `02_MASTER_FEATURE_INVENTORY.md` (V3.08, V0.11).
+
+**Status:** ✅ Resolved for Knowledge Transfer purposes — noted here, not silently edited into the source file. Recommended follow-up (separate from this package): a full internal-consistency pass on `CORESTONE_SUBSYSTEM_STATUS.md`'s own tables the next time it's updated.
+
+---
+
 ## Reconciliation entries pending (to be completed during the formal Decision & Conversation Reconciliation pass, after the Master Feature Inventory)
 
 - Full chronological pass through OS #1–#11 for additional forgotten/replaced/conflicting items beyond the two above
