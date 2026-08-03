@@ -14510,38 +14510,49 @@ async function showPlanMarkupTool(docId){
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
       +'<button onclick="pmtSaveAndClose()" style="padding:7px 14px;background:#fff;color:#1a1d21;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💾 Save & Close</button>'
       +'</div></div>'
-    +'<div style="flex:1;display:flex;overflow:hidden">'
-      // Toolbar
-      +'<div style="width:64px;background:#22262b;display:flex;flex-direction:column;gap:6px;padding:10px 8px;border-right:1px solid rgba(255,255,255,0.08)">'
-      +'<button data-pmt-tool="select" onclick="pmtSetTool(null)" title="Select / Stop — exit whatever tool is active" style="padding:10px 4px;background:#0d7a70;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;margin-bottom:2px">'
-        +pmtSvgIcon('select')+'<span style="font-size:8px;font-weight:700">Stop</span></button>'
-      +'<button onclick="pmtShowScaleEntryModal(0)" title="Ratio or numeric scale (no clicking required)" style="padding:8px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px">'
-        +pmtSvgIcon('scaleopt')+'<span style="font-size:8px;font-weight:700">Scale Options</span></button>'
-      +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="padding:8px 4px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;margin-bottom:4px">'
-        +pmtSvgIcon('aidetect')+'<span style="font-size:8px;font-weight:700">AI Detect</span></button>'
-      +'<button onclick="pmtShowManualEntry()" title="Type in a measurement directly — no clicking on the plan required" style="padding:8px 4px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;margin-bottom:4px">'
-        +pmtSvgIcon('manual')+'<span style="font-size:8px;font-weight:700">Type It In</span></button>'
+    +'<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#22262b;border-bottom:1px solid rgba(255,255,255,0.08);flex-wrap:wrap;font-family:inherit">'
+      +'<button data-pmt-tool="select" onclick="pmtSetTool(null)" title="Stop — exit whatever tool is active" style="padding:8px 12px;background:#0d7a70;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;white-space:nowrap">'
+        +pmtSvgIcon('select')+'Stop</button>'
+      +'<div style="width:1px;height:26px;background:rgba(255,255,255,0.12)"></div>'
+      // Step 1 — one single place to set the scale, no matter how you want to do it
+      +'<div style="display:flex;align-items:center;gap:8px">'
+      +'<span style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:10px;font-weight:800">1</span>'
+      +'<button onclick="pmtShowScaleEntryModal(0)" title="Set the scale — required before measuring" style="padding:8px 12px;background:#2d323a;color:#fff;border:1px solid '+(PMT.scalePxPerFt?'rgba(13,122,112,0.5)':'rgba(255,255,255,0.15)')+';border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;white-space:nowrap">'
+        +pmtSvgIcon('scale')+'Set Scale'+(PMT.scalePxPerFt?' ✓':'')+'</button>'
+      +'</div>'
+      +'<div style="width:1px;height:26px;background:rgba(255,255,255,0.12)"></div>'
+      // Step 2 — every measuring tool, laid out in one row, in the order you'd actually use them
+      +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      +'<span style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:10px;font-weight:800">2</span>'
+      +'<span style="color:rgba(255,255,255,0.45);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-right:2px">Pick what to measure</span>'
       +[
-        ['scale','Set Scale'],
-        ['linear','Linear'],
+        ['linear','Length'],
         ['rect','Rectangle'],
-        ['poly','Polygon Area'],
-        ['count','Count Items'],
+        ['poly','Area'],
+        ['count','Count'],
         ['wall','Wall'],
         ['perimeter','Perimeter'],
         ['freehand','Freehand'],
-        ['volume','Volume'],
-        ['text','Note'],
-        ['callout','Callout'],
-        ['cloud','Cloud'],
-        ['stamp','Stamp']
+        ['volume','Volume']
       ].map(function(t){
-        return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[1]+'" style="padding:10px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px">'
-          +pmtSvgIcon(t[0])+'<span style="font-size:8px;font-weight:700">'+t[1].split(' ')[0]+'</span></button>';
+        return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[1]+'" style="padding:8px 10px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;white-space:nowrap">'
+          +pmtSvgIcon(t[0])+t[1]+'</button>';
       }).join('')
-      +'<button onclick="pmtUndo()" title="Undo last item" style="padding:10px 4px;background:#3a2d2d;color:#fca5a5;border:none;border-radius:6px;cursor:pointer;font-size:16px">↩️</button>'
-      +'<button onclick="pmtShowHistory()" title="Markup history" style="margin-top:auto;padding:8px 4px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">🕐</button>'
       +'</div>'
+      +'<div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+      +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="padding:7px 10px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;white-space:nowrap">'
+        +pmtSvgIcon('aidetect')+'AI Detect</button>'
+      +'<button onclick="pmtShowManualEntry()" title="Type in a measurement directly — no clicking on the plan required" style="padding:7px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;white-space:nowrap">'
+        +pmtSvgIcon('manual')+'Type It In</button>'
+      +'<div style="width:1px;height:26px;background:rgba(255,255,255,0.12)"></div>'
+      +[['text','Note'],['callout','Callout'],['cloud','Cloud'],['stamp','Stamp']].map(function(t){
+        return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[1]+'" style="padding:7px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer" >'+pmtSvgIcon(t[0])+'</button>';
+      }).join('')
+      +'<button onclick="pmtUndo()" title="Undo last item" style="padding:7px;background:#3a2d2d;color:#fca5a5;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">↩️</button>'
+      +'<button onclick="pmtShowHistory()" title="Markup history" style="padding:7px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">🕐</button>'
+      +'</div>'
+    +'</div>'
+    +'<div style="flex:1;display:flex;overflow:hidden">'
       // Canvas area
       +'<div id="pmt-canvas-wrap" style="flex:1;overflow:auto;background:#0d0f11;position:relative;display:flex;justify-content:center;padding:20px">'
       +'<div id="pmt-count-badge" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#0d7a70;color:#fff;padding:8px 20px;border-radius:20px;font-weight:800;font-size:14px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.3)">Count: 0</div>'
@@ -14699,6 +14710,7 @@ function pmtShowScaleEntryModal(pxDist){
   el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%">'
     +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Set Scale</div>'
     +'<div style="font-size:13px;color:var(--muted);margin-bottom:16px">You measured a line on the plan. How long is that line in real life?</div>'
+    +'<button onclick="document.getElementById(\'pmt-scale-ov\').remove();pmtSetTool(\'scale\')" style="width:100%;padding:12px;margin-bottom:14px;background:var(--card-2,#f0f2f6);border:1.5px dashed var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:13px">📍 Click two points on the plan instead</button>'
     +'<div style="display:flex;gap:8px;margin-bottom:16px">'
     +'<input type="number" id="pmt-scale-ft-input" placeholder="e.g. 12" style="flex:1;padding:14px;font-size:16px;border:1px solid var(--border);border-radius:8px" autofocus>'
     +'<span style="align-self:center;font-weight:700;color:var(--muted)">feet</span>'
