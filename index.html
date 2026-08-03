@@ -14505,6 +14505,7 @@ async function showPlanMarkupTool(docId){
       +'<span id="pmt-grand-total" style="color:#fff;font-weight:800;font-size:15px">$0.00</span>'
       +'</div>'
       +'<div style="display:flex;gap:8px">'
+      +'<button onclick="pmtShowResultsSummary()" style="padding:7px 14px;background:#0d7a70;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">📋 Results Summary</button>'
       +'<button onclick="pmtExportCSV()" style="padding:7px 14px;background:#374151;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">⬇️ Export CSV</button>'
       +'<button onclick="pmtGenerateSchedules()" style="padding:7px 14px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">📄 Generate All Schedules</button>'
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
@@ -14526,17 +14527,19 @@ async function showPlanMarkupTool(docId){
       +'<span style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:10px;font-weight:800">2</span>'
       +'<span style="color:rgba(255,255,255,0.45);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-right:2px">Pick what to measure</span>'
       +[
-        ['linear','Length'],
-        ['rect','Rectangle'],
-        ['poly','Area'],
-        ['count','Count'],
-        ['wall','Wall'],
-        ['perimeter','Perimeter'],
-        ['freehand','Freehand'],
-        ['volume','Volume']
+        ['roof','Roof'],
+        ['siding','Siding'],
+        ['flooring','Flooring'],
+        ['framing','Wall Framing'],
+        ['foundation','Foundation'],
+        ['openings','Windows & Doors'],
+        ['concrete','Concrete'],
+        ['length','Length'],
+        ['custom','Custom Shape']
       ].map(function(t){
-        return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[1]+'" style="padding:8px 10px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;white-space:nowrap">'
-          +pmtSvgIcon(t[0])+t[1]+'</button>';
+        var cat = MEASURE_CATEGORIES.find(function(c){return c.id===t[0];});
+        return '<button data-pmt-tool="'+cat.tool+'" onclick="pmtPickCategory(\''+t[0]+'\')" title="'+t[1]+(cat.unit?' ('+cat.unit+')':'')+'" style="padding:8px 10px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;white-space:nowrap">'
+          +pmtSvgIcon(cat.tool)+t[1]+'</button>';
       }).join('')
       +'</div>'
       +'<div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
@@ -14706,9 +14709,12 @@ function pmtShowScaleEntryModal(pxDist){
   ];
   var el = document.createElement('div');
   el.id = 'pmt-scale-ov';
-  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
-  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:90%">'
-    +'<div style="font-weight:800;font-size:16px;margin-bottom:4px">Set Scale</div>'
+  el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;width:360px;max-height:80vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:4px">Set Scale</div>'
+    +'<span onclick="document.getElementById(\'pmt-scale-ov\').remove()" style="cursor:pointer;color:var(--muted);font-size:18px;line-height:1;margin-top:-2px">×</span>'
+    +'</div>'
     +'<div style="font-size:13px;color:var(--muted);margin-bottom:16px">You measured a line on the plan. How long is that line in real life?</div>'
     +'<button onclick="document.getElementById(\'pmt-scale-ov\').remove();pmtSetTool(\'scale\')" style="width:100%;padding:12px;margin-bottom:14px;background:var(--card-2,#f0f2f6);border:1.5px dashed var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:13px">📍 Click two points on the plan instead</button>'
     +'<div style="display:flex;gap:8px;margin-bottom:16px">'
@@ -15018,12 +15024,142 @@ function pmtCanvasDblClick(e){
   pmtRedraw();
 }
 
+// Construction-aware measuring categories — the actual fix for "why do I
+// have to know which raw geometry tool means what." Pick what you're
+// building, not a shape; the system already knows the right tool, the
+// right unit, and (for Roof) asks the one question it needs — pitch —
+// before you start clicking, not after.
+var MEASURE_CATEGORIES = [
+  {id:'roof', label:'Roof', tool:'poly', unit:'squares', needsPitch:true},
+  {id:'siding', label:'Siding', tool:'rect', unit:'sqft'},
+  {id:'flooring', label:'Flooring', tool:'poly', unit:'sqft'},
+  {id:'framing', label:'Wall Framing', tool:'wall', unit:'lf'},
+  {id:'foundation', label:'Foundation', tool:'perimeter', unit:'lf'},
+  {id:'openings', label:'Windows & Doors', tool:'count', unit:'ea'},
+  {id:'concrete', label:'Concrete', tool:'volume', unit:'cf'},
+  {id:'length', label:'Length', tool:'linear', unit:'lf'},
+  {id:'custom', label:'Custom Shape', tool:'freehand', unit:''}
+];
+
+function pmtPickCategory(catId){
+  var cat = MEASURE_CATEGORIES.find(function(c){return c.id===catId;});
+  if(!cat) return;
+  PMT.activeCategory = cat.id;
+  PMT.pendingPitch = null;
+  if(cat.needsPitch){ pmtAskPitchThenActivate(); }
+  else { pmtSetTool(cat.tool); }
+}
+
+// Asked once, up front, exactly the way it should be — not discovered
+// after the fact that a roof was measured wrong.
+function pmtAskPitchThenActivate(){
+  document.querySelectorAll('#pmt-pitch-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-pitch-ov';
+  el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;width:300px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:4px">Roof Pitch</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Needed to turn the flat plan area into real roof surface area, measured in squares (1 square = 100 sqft).</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">'
+    +'<input type="number" id="pmt-pitch-input" placeholder="e.g. 6" style="width:70px;padding:10px;font-size:14px;border:1px solid var(--border);border-radius:8px" autofocus>'
+    +'<span style="font-weight:700;color:var(--muted)">/ 12 pitch</span>'
+    +'</div>'
+    +'<button onclick="pmtConfirmPitch()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Continue — Draw the Roof</button>'
+    +'<button onclick="document.getElementById(\'pmt-pitch-ov\').remove()" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  setTimeout(function(){ var inp=document.getElementById('pmt-pitch-input'); if(inp) inp.focus(); }, 50);
+}
+function pmtConfirmPitch(){
+  var v = parseFloat(document.getElementById('pmt-pitch-input').value);
+  PMT.pendingPitch = (v>=0 && !isNaN(v)) ? v : 0;
+  var ov = document.getElementById('pmt-pitch-ov'); if(ov) ov.remove();
+  pmtSetTool('poly');
+}
+
+// The actual math: standard roof-pitch surface multiplier
+// (sqrt(1 + (rise/12)^2)), applied to the flat plan area, then converted
+// to squares (100 sqft = 1 square, the standard roofing unit).
+function pmtApplyCategoryMath(item){
+  if(item.category==='roof' && item.value_sqft!==undefined){
+    var pitchFactor = Math.sqrt(1 + Math.pow((item.pitch||0)/12, 2));
+    var trueSqft = Math.round(item.value_sqft * pitchFactor * 10)/10;
+    var squares = Math.round((trueSqft/100)*100)/100;
+    item.value_squares = squares;
+    item.value_true_sqft = trueSqft;
+    var namePrefix = '';
+    var dashIdx = (item.label||'').indexOf(' — ');
+    if(dashIdx>-1) namePrefix = item.label.slice(0, dashIdx+3);
+    item.label = namePrefix + squares+' squares ('+trueSqft+' sqft @ '+(item.pitch||0)+'/12 pitch)';
+  }
+}
+
+// A proper "here's everything I measured" screen — organized, one glance,
+// correct units for each category (squares for roof, not raw sqft).
+function pmtShowResultsSummary(){
+  document.querySelectorAll('#pmt-results-ov').forEach(function(el){el.remove();});
+
+  var rowsHtml = PMT.groups.map(function(g){
+    if(!g.items.length) return '';
+    var itemRows = g.items.map(function(it){
+      var qty, unit;
+      if(it.category==='roof' && it.value_squares!==undefined){ qty = it.value_squares; unit = 'squares'; }
+      else if(it.type==='count'){ qty = 1; unit = 'ea'; }
+      else if(it.value_sqft!==undefined){ qty = it.value_sqft; unit = 'sqft'; }
+      else if(it.value_ft!==undefined){ qty = it.value_ft; unit = 'lf'; }
+      else if(it.value_cy!==undefined){ qty = it.value_cy; unit = 'cy'; }
+      else { qty = ''; unit=''; }
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f2f6;font-size:12.5px">'
+        +'<span style="color:#374151">'+uxEsc((it.label||'').split(' — ').pop())+'</span>'
+        +'<span style="font-weight:700;color:#111827;white-space:nowrap;margin-left:12px">'+qty+' '+unit+'</span>'
+        +'</div>';
+    }).join('');
+    var totalLinear = g.items.filter(function(i){return i.type==='linear'||i.type==='wall'||i.type==='perimeter';}).reduce(function(s,i){return s+i.value_ft;},0);
+    var totalArea = g.items.filter(function(i){return i.type==='rect'||i.type==='poly';}).reduce(function(s,i){return s+i.value_sqft;},0);
+    var totalCount = g.items.filter(function(i){return i.type==='count';}).length;
+    var groupCost = (totalLinear+totalArea+totalCount)*(g.costPerUnit||0);
+    return '<div style="margin-bottom:18px">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+      +'<span style="width:10px;height:10px;border-radius:50%;background:'+g.color+'"></span>'
+      +'<span style="font-weight:800;font-size:13.5px;color:#111827">'+uxEsc(g.name)+'</span>'
+      +(g.classification?'<span style="font-size:10px;color:#9ca3af;background:#f3f4f6;padding:2px 8px;border-radius:10px">'+g.classification+'</span>':'')
+      +'<span style="margin-left:auto;font-weight:800;color:'+g.color+';font-size:13px">$'+groupCost.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>'
+      +'</div>'
+      +itemRows
+      +'</div>';
+  }).join('');
+
+  var el = document.createElement('div');
+  el.id = 'pmt-results-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3200;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:520px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:18px 22px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">'
+    +'<div><div style="font-weight:800;font-size:16px">📋 Takeoff Results</div>'
+    +'<div style="font-size:12px;color:#6b7280">Everything measured on this plan, grouped and priced</div></div>'
+    +'<span onclick="document.getElementById(\'pmt-results-ov\').remove()" style="cursor:pointer;color:#9ca3af;font-size:20px">×</span>'
+    +'</div>'
+    +'<div style="padding:18px 22px;overflow-y:auto;flex:1">'
+    +(rowsHtml || '<div style="text-align:center;color:#9ca3af;padding:30px 0;font-size:13px">No measurements yet — pick a category above and start measuring.</div>')
+    +'</div>'
+    +'<div style="padding:16px 22px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#f9fafb">'
+    +'<span style="font-weight:700;font-size:13px;color:#374151">Grand Total</span>'
+    +'<span style="font-weight:800;font-size:19px;color:#0d7a70">$'+pmtGrandTotal().toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+
 function pmtActiveGroup(){
   return PMT.groups.find(function(g){return g.id===PMT.activeGroupId;}) || PMT.groups[0];
 }
 function pmtAddItem(item){
   item.id = 'i'+Date.now()+Math.floor(Math.random()*1000);
   item.page = PMT.currentPage || 1;
+  if(PMT.activeCategory){
+    item.category = PMT.activeCategory;
+    if(PMT.pendingPitch !== null && PMT.pendingPitch !== undefined) item.pitch = PMT.pendingPitch;
+  }
+  pmtApplyCategoryMath(item);
   pmtActiveGroup().items.push(item);
   pmtLogHistory('added', item.label);
   pmtRenderSidebar();
@@ -16148,6 +16284,7 @@ function pmtRecalcItemValue(it){
       for(var i=0;i<it.points.length;i++){ var j=(i+1)%it.points.length; areaPx += it.points[i].x*it.points[j].y - it.points[j].x*it.points[i].y; }
       it.value_sqft = Math.round((Math.abs(areaPx/2)/(PMT.scalePxPerFt*PMT.scalePxPerFt))*10)/10;
       it.label = namePrefix + it.value_sqft+' sqft';
+      pmtApplyCategoryMath(it);
     } else {
       var per=0;
       for(var k=0;k<it.points.length;k++){ var j2=(k+1)%it.points.length; per += Math.hypot(it.points[j2].x-it.points[k].x, it.points[j2].y-it.points[k].y); }
