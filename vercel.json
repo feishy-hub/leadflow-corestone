@@ -4,12 +4,20 @@
     "api/claude.js": {
       "memory": 256,
       "maxDuration": 30
+    },
+    "api/data.js": {
+      "memory": 256,
+      "maxDuration": 30
     }
   },
   "routes": [
     {
       "src": "/api/claude",
       "dest": "/api/claude.js"
+    },
+    {
+      "src": "/api/data",
+      "dest": "/api/data.js"
     },
     {
       "src": "/(.*)",
