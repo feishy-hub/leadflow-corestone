@@ -14522,25 +14522,13 @@ async function showPlanMarkupTool(docId){
         +pmtSvgIcon('scale')+'Set Scale'+(PMT.scalePxPerFt?' ✓':'')+'</button>'
       +'</div>'
       +'<div style="width:1px;height:26px;background:rgba(255,255,255,0.12)"></div>'
-      // Step 2 — every measuring tool, laid out in one row, in the order you'd actually use them
-      +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      // Step 2 — one place to add any measurement, searchable, scales to
+      // any number of item types instead of a permanent row of buttons
+      +'<div style="display:flex;align-items:center;gap:8px">'
       +'<span style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:10px;font-weight:800">2</span>'
-      +'<span style="color:rgba(255,255,255,0.45);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-right:2px">Pick what to measure</span>'
-      +[
-        ['roof','Roof'],
-        ['siding','Siding'],
-        ['flooring','Flooring'],
-        ['framing','Wall Framing'],
-        ['foundation','Foundation'],
-        ['openings','Windows & Doors'],
-        ['concrete','Concrete'],
-        ['length','Length'],
-        ['custom','Custom Shape']
-      ].map(function(t){
-        var cat = MEASURE_CATEGORIES.find(function(c){return c.id===t[0];});
-        return '<button data-pmt-tool="'+cat.tool+'" onclick="pmtPickCategory(\''+t[0]+'\')" title="'+t[1]+(cat.unit?' ('+cat.unit+')':'')+'" style="padding:8px 10px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;white-space:nowrap">'
-          +pmtSvgIcon(cat.tool)+t[1]+'</button>';
-      }).join('')
+      +'<button id="pmt-add-measurement-btn" onclick="pmtToggleCategoryMenu(event)" style="padding:8px 12px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;white-space:nowrap">'
+      +'<span style="font-size:15px;line-height:1">+</span> Add Measurement<span style="opacity:0.5;font-size:9px">▾</span></button>'
+      +'<span id="pmt-active-item-label" style="color:rgba(255,255,255,0.5);font-size:11px"></span>'
       +'</div>'
       +'<div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
       +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="padding:7px 10px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;white-space:nowrap">'
@@ -15019,7 +15007,8 @@ function pmtCanvasDblClick(e){
   }
   areaPx = Math.abs(areaPx/2);
   var areaFt = Math.round((areaPx/(PMT.scalePxPerFt*PMT.scalePxPerFt))*10)/10;
-  pmtShowAreaDetailsModal(pts.slice(), areaFt, 'poly');
+  if(PMT.activeCategory === 'roof'){ pmtNameRoofSection(pts.slice(), areaFt); }
+  else { pmtShowAreaDetailsModal(pts.slice(), areaFt, 'poly'); }
   PMT.clickPoints = [];
   pmtRedraw();
 }
@@ -15041,11 +15030,49 @@ var MEASURE_CATEGORIES = [
   {id:'custom', label:'Custom Shape', tool:'freehand', unit:''}
 ];
 
+function pmtToggleCategoryMenu(e){
+  e.stopPropagation();
+  var existing = document.getElementById('pmt-category-menu');
+  if(existing){ existing.remove(); return; }
+  var btn = document.getElementById('pmt-add-measurement-btn');
+  var r = btn.getBoundingClientRect();
+  var el = document.createElement('div');
+  el.id = 'pmt-category-menu';
+  el.style.cssText = 'position:fixed;top:'+(r.bottom+6)+'px;left:'+r.left+'px;width:260px;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.3);z-index:3100;overflow:hidden';
+  el.innerHTML = '<div style="padding:10px"><input id="pmt-category-search" placeholder="Search item types…" oninput="pmtFilterCategoryMenu(this.value)" style="width:100%;padding:9px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;box-sizing:border-box"></div>'
+    +'<div id="pmt-category-list" style="max-height:280px;overflow-y:auto;border-top:1px solid #f0f0f0"></div>';
+  document.body.appendChild(el);
+  pmtFilterCategoryMenu('');
+  setTimeout(function(){ var s=document.getElementById('pmt-category-search'); if(s) s.focus(); }, 30);
+  // close when clicking anywhere else
+  setTimeout(function(){
+    document.addEventListener('click', function closeMenu(ev){
+      var m = document.getElementById('pmt-category-menu');
+      if(m && !m.contains(ev.target)){ m.remove(); document.removeEventListener('click', closeMenu); }
+    });
+  }, 0);
+}
+function pmtFilterCategoryMenu(q){
+  var list = document.getElementById('pmt-category-list');
+  if(!list) return;
+  q = (q||'').toLowerCase();
+  var matches = MEASURE_CATEGORIES.filter(function(c){ return c.label.toLowerCase().indexOf(q) > -1; });
+  list.innerHTML = matches.length ? matches.map(function(c){
+    return '<div onclick="pmtPickCategory(\''+c.id+'\')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;color:#1a1d21;font-size:13px" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">'
+      +'<span style="color:#0d7a70">'+pmtSvgIcon(c.tool)+'</span>'
+      +'<span style="flex:1;font-weight:600">'+c.label+'</span>'
+      +(c.unit?'<span style="color:#9ca3af;font-size:11px">'+c.unit+'</span>':'')
+      +'</div>';
+  }).join('') : '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">No matching item type</div>';
+}
 function pmtPickCategory(catId){
+  var m = document.getElementById('pmt-category-menu'); if(m) m.remove();
   var cat = MEASURE_CATEGORIES.find(function(c){return c.id===catId;});
   if(!cat) return;
   PMT.activeCategory = cat.id;
   PMT.pendingPitch = null;
+  var lbl = document.getElementById('pmt-active-item-label');
+  if(lbl) lbl.textContent = 'Now drawing: '+cat.label;
   if(cat.needsPitch){ pmtAskPitchThenActivate(); }
   else { pmtSetTool(cat.tool); }
 }
@@ -15109,9 +15136,15 @@ function pmtShowResultsSummary(){
       else if(it.value_ft!==undefined){ qty = it.value_ft; unit = 'lf'; }
       else if(it.value_cy!==undefined){ qty = it.value_cy; unit = 'cy'; }
       else { qty = ''; unit=''; }
-      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f2f6;font-size:12.5px">'
-        +'<span style="color:#374151">'+uxEsc((it.label||'').split(' — ').pop())+'</span>'
-        +'<span style="font-weight:700;color:#111827;white-space:nowrap;margin-left:12px">'+qty+' '+unit+'</span>'
+      var dashIdx = (it.label||'').indexOf(' — ');
+      var itemName = dashIdx>-1 ? it.label.slice(0,dashIdx) : 'Untitled';
+      var itemDetail = dashIdx>-1 ? it.label.slice(dashIdx+3) : '';
+      return '<div style="padding:7px 0;border-bottom:1px solid #f0f2f6">'
+        +'<div style="display:flex;justify-content:space-between;align-items:baseline">'
+        +'<span style="color:#111827;font-weight:600;font-size:12.5px">'+uxEsc(itemName)+'</span>'
+        +'<span style="font-weight:700;color:#111827;white-space:nowrap;margin-left:12px;font-size:12.5px">'+qty+' '+unit+'</span>'
+        +'</div>'
+        +(itemDetail?'<div style="font-size:10.5px;color:#9ca3af;margin-top:1px">'+uxEsc(itemDetail)+'</div>':'')
         +'</div>';
     }).join('');
     var totalLinear = g.items.filter(function(i){return i.type==='linear'||i.type==='wall'||i.type==='perimeter';}).reduce(function(s,i){return s+i.value_ft;},0);
@@ -15147,6 +15180,42 @@ function pmtShowResultsSummary(){
     +'</div>'
     +'</div>';
   document.body.appendChild(el);
+}
+
+// Roof gets its own simple naming step — it already asked the one
+// question it actually needs (pitch) before you started drawing, so it
+// shouldn't also ask the generic "does this need a depth" question that
+// only makes sense for concrete/excavation.
+function pmtNameRoofSection(points, areaFt){
+  document.querySelectorAll('#pmt-roofname-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-roofname-ov';
+  el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;width:300px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:10px">What roof section is this?</div>'
+    +'<input id="pmt-roofname-input" placeholder="e.g. Front Roof, Garage Roof" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;box-sizing:border-box" autofocus>'
+    +'<button onclick="pmtConfirmRoofName()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add Roof Section</button>'
+    +'<button onclick="pmtDiscardRoofName()" style="margin-top:8px;width:100%;padding:8px;background:transparent;border:none;color:#dc2626;cursor:pointer;font-size:12px">Discard — I didn\'t mean to measure this</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  window._pmtPendingRoof = {points: points, areaFt: areaFt};
+  setTimeout(function(){ var inp=document.getElementById('pmt-roofname-input'); if(inp) inp.focus(); }, 50);
+}
+function pmtConfirmRoofName(){
+  var pending = window._pmtPendingRoof;
+  if(!pending){ toast('Something went wrong — try measuring again','err'); return; }
+  var name = document.getElementById('pmt-roofname-input').value.trim();
+  var item = {type:'poly', points: pending.points, value_sqft: pending.areaFt, label: (name?name+' — ':'')+pending.areaFt+' sqft'};
+  document.getElementById('pmt-roofname-ov').remove();
+  pmtAddItem(item);
+  pmtRedraw();
+  window._pmtPendingRoof = null;
+}
+function pmtDiscardRoofName(){
+  document.getElementById('pmt-roofname-ov').remove();
+  window._pmtPendingRoof = null;
+  pmtSetTool(null);
+  toast('Discarded — nothing was added','ok');
 }
 
 function pmtActiveGroup(){
@@ -15303,12 +15372,16 @@ function pmtRenameGroup(id, newName){
   if(g && newName){ g.name = newName; }
   pmtRenderSidebar();
 }
-function pmtRenameItem(groupId, itemId, newLabel){
+function pmtRenameItem(groupId, itemId, newName){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
-  newLabel = (newLabel||'').trim();
-  if(g && newLabel){
+  newName = (newName||'').trim();
+  if(g && newName){
     var item = g.items.find(function(i){return i.id===itemId;});
-    if(item) item.label = newLabel;
+    if(item){
+      var dashIdx = (item.label||'').indexOf(' — ');
+      var detail = dashIdx>-1 ? item.label.slice(dashIdx+3) : item.label;
+      item.label = newName+' — '+detail;
+    }
   }
   pmtRenderSidebar();
   pmtRedraw();
@@ -15458,10 +15531,18 @@ function pmtRenderSidebar(){
         +'<span style="margin-left:auto;color:'+g.color+';font-weight:700;font-size:11px">$'+((totalLinear+totalArea+totalCount)*(g.costPerUnit||0)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>'
         +'</div>'
         + g.items.map(function(it){
-            return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.75);padding:2px 0;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
-              +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(it.label)+'</span>'
-              +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;margin-left:6px" title="Edit the number">✏️</span>' : '')
-              +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5;margin-left:6px">✕</span></div>';
+            var dashIdx = (it.label||'').indexOf(' — ');
+            var itemName = dashIdx>-1 ? it.label.slice(0,dashIdx) : 'Untitled';
+            var itemDetail = dashIdx>-1 ? it.label.slice(dashIdx+3) : it.label;
+            return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:7px 8px;margin-bottom:5px;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
+              +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">'
+              +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;font-size:12px;font-weight:700;color:#fff;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(itemName)+'</span>'
+              +'<span style="display:flex;gap:6px;flex-shrink:0">'
+              +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
+              +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
+              +'</span></div>'
+              +'<div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-top:2px">'+uxEsc(itemDetail)+'</div>'
+              +'</div>';
           }).join('')
         +'</div>';
     }).join('');
