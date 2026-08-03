@@ -15007,38 +15007,217 @@ function pmtCanvasDblClick(e){
   }
   areaPx = Math.abs(areaPx/2);
   var areaFt = Math.round((areaPx/(PMT.scalePxPerFt*PMT.scalePxPerFt))*10)/10;
-  if(PMT.activeCategory === 'roof'){ pmtNameRoofSection(pts.slice(), areaFt); }
-  else { pmtShowAreaDetailsModal(pts.slice(), areaFt, 'poly'); }
+  pmtShowAreaDetailsModal(pts.slice(), areaFt, 'poly');
   PMT.clickPoints = [];
   pmtRedraw();
 }
 
-// Construction-aware measuring categories — the actual fix for "why do I
-// have to know which raw geometry tool means what." Pick what you're
-// building, not a shape; the system already knows the right tool, the
-// right unit, and (for Roof) asks the one question it needs — pitch —
-// before you start clicking, not after.
-var MEASURE_CATEGORIES = [
-  {id:'roof', label:'Roof', tool:'poly', unit:'squares', needsPitch:true},
-  {id:'siding', label:'Siding', tool:'rect', unit:'sqft'},
-  {id:'flooring', label:'Flooring', tool:'poly', unit:'sqft'},
-  {id:'framing', label:'Wall Framing', tool:'wall', unit:'lf'},
-  {id:'foundation', label:'Foundation', tool:'perimeter', unit:'lf'},
-  {id:'openings', label:'Windows & Doors', tool:'count', unit:'ea'},
-  {id:'concrete', label:'Concrete', tool:'volume', unit:'cf'},
-  {id:'length', label:'Length', tool:'linear', unit:'lf'},
-  {id:'custom', label:'Custom Shape', tool:'freehand', unit:''}
+// Real Item Library — stored for real (same database as everything else,
+// via lsAll/lsSave), not a hardcoded list. Every item can have more than
+// one way to measure it (Concrete: a linear footing run with width+depth,
+// OR a slab area with depth, OR a perimeter run) — each method asks
+// exactly the questions it needs before you start drawing, not after.
+// This is editable — add, edit, or remove items from the Item Library
+// panel; nothing here is fixed by the code.
+var DEFAULT_ITEM_LIBRARY = [
+  {id:'roof', name:'Roof', methods:[
+    {label:'Draw the roof area', tool:'poly', outputUnit:'squares', questions:[{key:'pitch',label:'Roof Pitch',suffix:'/12'}]}
+  ]},
+  {id:'siding', name:'Siding', methods:[
+    {label:'Draw the wall area', tool:'rect', outputUnit:'sqft', questions:[]}
+  ]},
+  {id:'flooring', name:'Flooring', methods:[
+    {label:'Draw the room area', tool:'poly', outputUnit:'sqft', questions:[]}
+  ]},
+  {id:'framing', name:'Wall Framing', methods:[
+    {label:'Draw the wall length', tool:'wall', outputUnit:'lf', questions:[]}
+  ]},
+  {id:'foundation', name:'Foundation', methods:[
+    {label:'Trace the perimeter', tool:'perimeter', outputUnit:'lf', questions:[]}
+  ]},
+  {id:'openings', name:'Windows & Doors', methods:[
+    {label:'Click to count', tool:'count', outputUnit:'ea', questions:[]}
+  ]},
+  {id:'concrete', name:'Concrete', methods:[
+    {label:'Linear run (footing)', tool:'linear', outputUnit:'cy', questions:[{key:'width',label:'Width',suffix:'ft'},{key:'depth',label:'Depth',suffix:'ft'}]},
+    {label:'Slab area', tool:'poly', outputUnit:'cy', questions:[{key:'depth',label:'Depth',suffix:'ft'}]},
+    {label:'Perimeter run (curb/footing loop)', tool:'perimeter', outputUnit:'cy', questions:[{key:'width',label:'Width',suffix:'ft'},{key:'depth',label:'Depth',suffix:'ft'}]}
+  ]},
+  {id:'length', name:'Length', methods:[
+    {label:'Draw a line', tool:'linear', outputUnit:'lf', questions:[]}
+  ]},
+  {id:'custom', name:'Custom Shape', methods:[
+    {label:'Freehand sketch', tool:'freehand', outputUnit:'', questions:[]}
+  ]}
 ];
+function pmtGetItemLibrary(){
+  var items = lsAll('item_library');
+  if(!items || !items.length){ items = DEFAULT_ITEM_LIBRARY; lsSave('item_library', items); }
+  return items;
+}
+function pmtSaveItemLibrary(items){ lsSave('item_library', items); }
+
+function pmtShowItemLibrary(){
+  var menu = document.getElementById('pmt-category-menu'); if(menu) menu.remove();
+  document.querySelectorAll('#pmt-lib-ov').forEach(function(el){el.remove();});
+  var items = pmtGetItemLibrary();
+  var el = document.createElement('div');
+  el.id = 'pmt-lib-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3300;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:480px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:18px 22px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">'
+    +'<div><div style="font-weight:800;font-size:16px">📚 Item Library</div>'
+    +'<div style="font-size:12px;color:#6b7280">Every item you can measure with, and how it\'s calculated. Add your own.</div></div>'
+    +'<span onclick="document.getElementById(\'pmt-lib-ov\').remove()" style="cursor:pointer;color:#9ca3af;font-size:20px">×</span>'
+    +'</div>'
+    +'<div id="pmt-lib-list" style="padding:14px 22px;overflow-y:auto;flex:1">'
+    + items.map(function(it){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f3f4f6">'
+          +'<div><div style="font-weight:700;font-size:13px">'+uxEsc(it.name)+'</div>'
+          +'<div style="font-size:11px;color:#9ca3af">'+it.methods.map(function(m){return m.label+' \u2192 '+(m.outputUnit||m.tool);}).join(' · ')+'</div></div>'
+          +'<span onclick="pmtDeleteLibraryItem(\''+it.id+'\')" style="cursor:pointer;color:#dc2626;font-size:12px">Delete</span>'
+          +'</div>';
+      }).join('')
+    +'</div>'
+    +'<div style="padding:16px 22px;border-top:1px solid #eee;background:#f9fafb">'
+    +'<div style="font-weight:700;font-size:12.5px;margin-bottom:8px">+ Add a new item</div>'
+    +'<input id="pmt-lib-name" placeholder="Item name (e.g. Gutters)" style="width:100%;padding:9px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;margin-bottom:8px;box-sizing:border-box">'
+    +'<div style="display:flex;gap:8px;margin-bottom:8px">'
+    +'<select id="pmt-lib-tool" style="flex:1;padding:9px;border:1px solid #e5e7eb;border-radius:7px;font-size:12.5px">'
+    + ['linear','rect','poly','count','wall','perimeter','freehand','volume'].map(function(t){return '<option value="'+t+'">'+t+'</option>';}).join('')
+    +'</select>'
+    +'<input id="pmt-lib-unit" placeholder="unit (sqft, lf, ea…)" style="flex:1;padding:9px;border:1px solid #e5e7eb;border-radius:7px;font-size:12.5px">'
+    +'</div>'
+    +'<input id="pmt-lib-question" placeholder="Extra question needed before measuring? (optional, e.g. Pitch)" style="width:100%;padding:9px;border:1px solid #e5e7eb;border-radius:7px;font-size:12.5px;margin-bottom:10px;box-sizing:border-box">'
+    +'<button onclick="pmtAddLibraryItem()" style="width:100%;padding:9px;background:#0d7a70;color:#fff;border:none;border-radius:7px;font-weight:700;cursor:pointer;font-size:12.5px">Add to Library</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+function pmtAddLibraryItem(){
+  var name = document.getElementById('pmt-lib-name').value.trim();
+  var tool = document.getElementById('pmt-lib-tool').value;
+  var unit = document.getElementById('pmt-lib-unit').value.trim();
+  var q = document.getElementById('pmt-lib-question').value.trim();
+  if(!name){ toast('Give this item a name first','err'); return; }
+  var items = pmtGetItemLibrary();
+  var method = {label:'Draw it', tool:tool, outputUnit:unit, questions: q ? [{key:'value1', label:q, suffix:''}] : []};
+  items.push({id:'custom_'+Date.now(), name:name, methods:[method]});
+  pmtSaveItemLibrary(items);
+  toast(name+' added to your Item Library','ok');
+  pmtShowItemLibrary();
+}
+function pmtDeleteLibraryItem(id){
+  var items = pmtGetItemLibrary().filter(function(i){return i.id!==id;});
+  pmtSaveItemLibrary(items);
+  pmtShowItemLibrary();
+}
+function pmtPickCategory(itemId){
+  var m = document.getElementById('pmt-category-menu'); if(m) m.remove();
+  var item = pmtGetItemLibrary().find(function(i){return i.id===itemId;});
+  if(!item) return;
+  if(item.methods.length > 1){ pmtShowMethodPicker(item); return; }
+  pmtStartLibraryItem(item, item.methods[0]);
+}
+function pmtShowMethodPicker(item){
+  document.querySelectorAll('#pmt-method-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-method-ov';
+  el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:16px;width:280px">'
+    +'<div style="font-weight:800;font-size:14px;margin-bottom:10px">How are you measuring this '+item.name+'?</div>'
+    + item.methods.map(function(m,i){
+        return '<div onclick="pmtPickMethod(\''+item.id+'\','+i+')" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:12.5px;font-weight:600" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">'+m.label+'</div>';
+      }).join('')
+    +'<button onclick="document.getElementById(\'pmt-method-ov\').remove()" style="width:100%;margin-top:4px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+function pmtPickMethod(itemId, methodIdx){
+  document.getElementById('pmt-method-ov').remove();
+  var item = pmtGetItemLibrary().find(function(i){return i.id===itemId;});
+  pmtStartLibraryItem(item, item.methods[methodIdx]);
+}
+function pmtStartLibraryItem(item, method){
+  var lbl = document.getElementById('pmt-active-item-label');
+  if(lbl) lbl.textContent = 'Now drawing: '+item.name+(item.methods.length>1?' ('+method.label+')':'');
+  if(method.questions && method.questions.length){ pmtAskQuestionsThenActivate(item, method); }
+  else { PMT.activeLibItem = item; PMT.activeLibMethod = method; PMT.pendingAnswers = {}; pmtSetTool(method.tool); }
+}
+// Every question a method needs, asked once, up front — before drawing,
+// not discovered as a problem after the fact.
+function pmtAskQuestionsThenActivate(item, method){
+  document.querySelectorAll('#pmt-questions-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-questions-ov';
+  el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;width:300px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:4px">'+item.name+'</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">A couple numbers before you draw.</div>'
+    + method.questions.map(function(q,i){
+        return '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">'+q.label+(q.suffix?' ('+q.suffix+')':'')+'</label>'
+          +'<input type="number" id="pmt-q-'+i+'" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box"></div>';
+      }).join('')
+    +'<button onclick="pmtConfirmQuestions()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Continue — Start Measuring</button>'
+    +'<button onclick="document.getElementById(\'pmt-questions-ov\').remove()" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  window._pmtPendingQItem = item; window._pmtPendingQMethod = method;
+  setTimeout(function(){ var inp=document.getElementById('pmt-q-0'); if(inp) inp.focus(); }, 50);
+}
+function pmtConfirmQuestions(){
+  var item = window._pmtPendingQItem, method = window._pmtPendingQMethod;
+  var answers = {};
+  method.questions.forEach(function(q,i){
+    var v = parseFloat(document.getElementById('pmt-q-'+i).value);
+    answers[q.key] = isNaN(v) ? 0 : v;
+  });
+  PMT.activeLibItem = item; PMT.activeLibMethod = method; PMT.pendingAnswers = answers;
+  var ov = document.getElementById('pmt-questions-ov'); if(ov) ov.remove();
+  pmtSetTool(method.tool);
+}
+
+// The math: applies whatever formula the active method/answers call for.
+// Squares (roof pitch), or cubic yards from linear/area/perimeter x
+// width/depth — covers the "sometimes linear+width+height, sometimes
+// perimeter, sometimes area+depth" cases directly.
+function pmtApplyCategoryMath(item){
+  if(!item.libMethod) return;
+  var m = item.libMethod, a = item.answers || {};
+  var namePrefix = '';
+  var dashIdx = (item.label||'').indexOf(' — ');
+  if(dashIdx>-1) namePrefix = item.label.slice(0, dashIdx+3);
+
+  if(m.outputUnit === 'squares' && item.value_sqft!==undefined){
+    var pitchFactor = Math.sqrt(1 + Math.pow((a.pitch||0)/12, 2));
+    var trueSqft = Math.round(item.value_sqft * pitchFactor * 10)/10;
+    var squares = Math.round((trueSqft/100)*100)/100;
+    item.value_squares = squares;
+    item.value_true_sqft = trueSqft;
+    item.label = namePrefix + squares+' squares ('+trueSqft+' sqft @ '+(a.pitch||0)+'/12 pitch)';
+  } else if(m.outputUnit === 'cy'){
+    var cy = 0, desc = '';
+    if(item.value_ft!==undefined && a.width!==undefined && a.depth!==undefined){
+      cy = Math.round((item.value_ft*a.width*a.depth/27)*100)/100;
+      desc = item.value_ft+' ft \u00d7 '+a.width+'ft wide \u00d7 '+a.depth+'ft deep';
+    } else if(item.value_sqft!==undefined && a.depth!==undefined){
+      cy = Math.round((item.value_sqft*a.depth/27)*100)/100;
+      desc = item.value_sqft+' sqft \u00d7 '+a.depth+'ft deep';
+    }
+    item.value_cy = cy;
+    item.label = namePrefix + cy+' CY ('+desc+')';
+  }
+}
 
 function pmtToggleCategoryMenu(e){
   e.stopPropagation();
   var existing = document.getElementById('pmt-category-menu');
   if(existing){ existing.remove(); return; }
-  var btn = document.getElementById('pmt-add-measurement-btn');
+  var btn = e.currentTarget || document.getElementById('pmt-add-measurement-btn');
   var r = btn.getBoundingClientRect();
   var el = document.createElement('div');
   el.id = 'pmt-category-menu';
-  el.style.cssText = 'position:fixed;top:'+(r.bottom+6)+'px;left:'+r.left+'px;width:260px;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.3);z-index:3100;overflow:hidden';
+  el.style.cssText = 'position:fixed;top:'+(r.bottom+6)+'px;right:'+(window.innerWidth-r.right)+'px;width:260px;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.3);z-index:3100;overflow:hidden';
   el.innerHTML = '<div style="padding:10px"><input id="pmt-category-search" placeholder="Search item types…" oninput="pmtFilterCategoryMenu(this.value)" style="width:100%;padding:9px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;box-sizing:border-box"></div>'
     +'<div id="pmt-category-list" style="max-height:280px;overflow-y:auto;border-top:1px solid #f0f0f0"></div>';
   document.body.appendChild(el);
@@ -15056,71 +15235,16 @@ function pmtFilterCategoryMenu(q){
   var list = document.getElementById('pmt-category-list');
   if(!list) return;
   q = (q||'').toLowerCase();
-  var matches = MEASURE_CATEGORIES.filter(function(c){ return c.label.toLowerCase().indexOf(q) > -1; });
+  var matches = pmtGetItemLibrary().filter(function(c){ return c.name.toLowerCase().indexOf(q) > -1; });
   list.innerHTML = matches.length ? matches.map(function(c){
     return '<div onclick="pmtPickCategory(\''+c.id+'\')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;color:#1a1d21;font-size:13px" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">'
-      +'<span style="color:#0d7a70">'+pmtSvgIcon(c.tool)+'</span>'
-      +'<span style="flex:1;font-weight:600">'+c.label+'</span>'
-      +(c.unit?'<span style="color:#9ca3af;font-size:11px">'+c.unit+'</span>':'')
+      +'<span style="color:#0d7a70">'+pmtSvgIcon(c.methods[0].tool)+'</span>'
+      +'<span style="flex:1;font-weight:600">'+c.name+'</span>'
+      +(c.methods.length>1?'<span style="color:#9ca3af;font-size:10px">'+c.methods.length+' ways</span>':(c.methods[0].outputUnit?'<span style="color:#9ca3af;font-size:11px">'+c.methods[0].outputUnit+'</span>':''))
       +'</div>';
   }).join('') : '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">No matching item type</div>';
+  list.innerHTML += '<div onclick="pmtShowItemLibrary()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;color:#0d7a70;font-size:12.5px;font-weight:700;border-top:1px solid #f0f0f0" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">📚 Manage Item Library…</div>';
 }
-function pmtPickCategory(catId){
-  var m = document.getElementById('pmt-category-menu'); if(m) m.remove();
-  var cat = MEASURE_CATEGORIES.find(function(c){return c.id===catId;});
-  if(!cat) return;
-  PMT.activeCategory = cat.id;
-  PMT.pendingPitch = null;
-  var lbl = document.getElementById('pmt-active-item-label');
-  if(lbl) lbl.textContent = 'Now drawing: '+cat.label;
-  if(cat.needsPitch){ pmtAskPitchThenActivate(); }
-  else { pmtSetTool(cat.tool); }
-}
-
-// Asked once, up front, exactly the way it should be — not discovered
-// after the fact that a roof was measured wrong.
-function pmtAskPitchThenActivate(){
-  document.querySelectorAll('#pmt-pitch-ov').forEach(function(el){el.remove();});
-  var el = document.createElement('div');
-  el.id = 'pmt-pitch-ov';
-  el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
-  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;width:300px">'
-    +'<div style="font-weight:800;font-size:15px;margin-bottom:4px">Roof Pitch</div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Needed to turn the flat plan area into real roof surface area, measured in squares (1 square = 100 sqft).</div>'
-    +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">'
-    +'<input type="number" id="pmt-pitch-input" placeholder="e.g. 6" style="width:70px;padding:10px;font-size:14px;border:1px solid var(--border);border-radius:8px" autofocus>'
-    +'<span style="font-weight:700;color:var(--muted)">/ 12 pitch</span>'
-    +'</div>'
-    +'<button onclick="pmtConfirmPitch()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Continue — Draw the Roof</button>'
-    +'<button onclick="document.getElementById(\'pmt-pitch-ov\').remove()" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
-    +'</div>';
-  document.body.appendChild(el);
-  setTimeout(function(){ var inp=document.getElementById('pmt-pitch-input'); if(inp) inp.focus(); }, 50);
-}
-function pmtConfirmPitch(){
-  var v = parseFloat(document.getElementById('pmt-pitch-input').value);
-  PMT.pendingPitch = (v>=0 && !isNaN(v)) ? v : 0;
-  var ov = document.getElementById('pmt-pitch-ov'); if(ov) ov.remove();
-  pmtSetTool('poly');
-}
-
-// The actual math: standard roof-pitch surface multiplier
-// (sqrt(1 + (rise/12)^2)), applied to the flat plan area, then converted
-// to squares (100 sqft = 1 square, the standard roofing unit).
-function pmtApplyCategoryMath(item){
-  if(item.category==='roof' && item.value_sqft!==undefined){
-    var pitchFactor = Math.sqrt(1 + Math.pow((item.pitch||0)/12, 2));
-    var trueSqft = Math.round(item.value_sqft * pitchFactor * 10)/10;
-    var squares = Math.round((trueSqft/100)*100)/100;
-    item.value_squares = squares;
-    item.value_true_sqft = trueSqft;
-    var namePrefix = '';
-    var dashIdx = (item.label||'').indexOf(' — ');
-    if(dashIdx>-1) namePrefix = item.label.slice(0, dashIdx+3);
-    item.label = namePrefix + squares+' squares ('+trueSqft+' sqft @ '+(item.pitch||0)+'/12 pitch)';
-  }
-}
-
 // A proper "here's everything I measured" screen — organized, one glance,
 // correct units for each category (squares for roof, not raw sqft).
 function pmtShowResultsSummary(){
@@ -15141,10 +15265,10 @@ function pmtShowResultsSummary(){
       var itemDetail = dashIdx>-1 ? it.label.slice(dashIdx+3) : '';
       return '<div style="padding:7px 0;border-bottom:1px solid #f0f2f6">'
         +'<div style="display:flex;justify-content:space-between;align-items:baseline">'
-        +'<span style="color:#111827;font-weight:600;font-size:12.5px">'+uxEsc(itemName)+'</span>'
-        +'<span style="font-weight:700;color:#111827;white-space:nowrap;margin-left:12px;font-size:12.5px">'+qty+' '+unit+'</span>'
+        +'<span style="color:#111827;font-weight:800;font-size:13px">'+uxEsc(itemName)+'</span>'
+        +'<span style="font-weight:800;color:'+g.color+';white-space:nowrap;margin-left:12px;font-size:13.5px">'+qty+' '+unit+'</span>'
         +'</div>'
-        +(itemDetail?'<div style="font-size:10.5px;color:#9ca3af;margin-top:1px">'+uxEsc(itemDetail)+'</div>':'')
+        +(itemDetail?'<div style="font-size:10px;color:#9ca3af;margin-top:1px">'+uxEsc(itemDetail)+'</div>':'')
         +'</div>';
     }).join('');
     var totalLinear = g.items.filter(function(i){return i.type==='linear'||i.type==='wall'||i.type==='perimeter';}).reduce(function(s,i){return s+i.value_ft;},0);
@@ -15186,34 +15310,39 @@ function pmtShowResultsSummary(){
 // question it actually needs (pitch) before you started drawing, so it
 // shouldn't also ask the generic "does this need a depth" question that
 // only makes sense for concrete/excavation.
-function pmtNameRoofSection(points, areaFt){
-  document.querySelectorAll('#pmt-roofname-ov').forEach(function(el){el.remove();});
+// Any library item measured as an area (poly/rect) gets this simple
+// naming step — it already asked whatever question it needed (pitch,
+// depth) before drawing started, so it shouldn't also ask the generic
+// AI "does this need a depth" question meant for un-typed measurements.
+function pmtNameLibraryAreaMeasurement(shapeType, points, areaFt){
+  document.querySelectorAll('#pmt-libname-ov').forEach(function(el){el.remove();});
+  var itemName = PMT.activeLibItem ? PMT.activeLibItem.name : 'Measurement';
   var el = document.createElement('div');
-  el.id = 'pmt-roofname-ov';
+  el.id = 'pmt-libname-ov';
   el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
   el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;width:300px">'
-    +'<div style="font-weight:800;font-size:15px;margin-bottom:10px">What roof section is this?</div>'
-    +'<input id="pmt-roofname-input" placeholder="e.g. Front Roof, Garage Roof" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;box-sizing:border-box" autofocus>'
-    +'<button onclick="pmtConfirmRoofName()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add Roof Section</button>'
-    +'<button onclick="pmtDiscardRoofName()" style="margin-top:8px;width:100%;padding:8px;background:transparent;border:none;color:#dc2626;cursor:pointer;font-size:12px">Discard — I didn\'t mean to measure this</button>'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:10px">Which '+itemName+' is this?</div>'
+    +'<input id="pmt-libname-input" placeholder="e.g. Front '+itemName+', Kitchen" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;box-sizing:border-box" autofocus>'
+    +'<button onclick="pmtConfirmLibraryAreaName()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add '+itemName+'</button>'
+    +'<button onclick="pmtDiscardLibraryAreaName()" style="margin-top:8px;width:100%;padding:8px;background:transparent;border:none;color:#dc2626;cursor:pointer;font-size:12px">Discard — I didn\'t mean to measure this</button>'
     +'</div>';
   document.body.appendChild(el);
-  window._pmtPendingRoof = {points: points, areaFt: areaFt};
-  setTimeout(function(){ var inp=document.getElementById('pmt-roofname-input'); if(inp) inp.focus(); }, 50);
+  window._pmtPendingLibArea = {shapeType: shapeType, points: points, areaFt: areaFt};
+  setTimeout(function(){ var inp=document.getElementById('pmt-libname-input'); if(inp) inp.focus(); }, 50);
 }
-function pmtConfirmRoofName(){
-  var pending = window._pmtPendingRoof;
+function pmtConfirmLibraryAreaName(){
+  var pending = window._pmtPendingLibArea;
   if(!pending){ toast('Something went wrong — try measuring again','err'); return; }
-  var name = document.getElementById('pmt-roofname-input').value.trim();
-  var item = {type:'poly', points: pending.points, value_sqft: pending.areaFt, label: (name?name+' — ':'')+pending.areaFt+' sqft'};
-  document.getElementById('pmt-roofname-ov').remove();
+  var name = document.getElementById('pmt-libname-input').value.trim();
+  var item = {type:pending.shapeType, points: pending.points, value_sqft: pending.areaFt, label: (name?name+' — ':'')+pending.areaFt+' sqft'};
+  document.getElementById('pmt-libname-ov').remove();
   pmtAddItem(item);
   pmtRedraw();
-  window._pmtPendingRoof = null;
+  window._pmtPendingLibArea = null;
 }
-function pmtDiscardRoofName(){
-  document.getElementById('pmt-roofname-ov').remove();
-  window._pmtPendingRoof = null;
+function pmtDiscardLibraryAreaName(){
+  document.getElementById('pmt-libname-ov').remove();
+  window._pmtPendingLibArea = null;
   pmtSetTool(null);
   toast('Discarded — nothing was added','ok');
 }
@@ -15224,9 +15353,11 @@ function pmtActiveGroup(){
 function pmtAddItem(item){
   item.id = 'i'+Date.now()+Math.floor(Math.random()*1000);
   item.page = PMT.currentPage || 1;
-  if(PMT.activeCategory){
-    item.category = PMT.activeCategory;
-    if(PMT.pendingPitch !== null && PMT.pendingPitch !== undefined) item.pitch = PMT.pendingPitch;
+  if(PMT.activeLibItem && PMT.activeLibMethod){
+    item.libItem = PMT.activeLibItem.id;
+    item.libItemName = PMT.activeLibItem.name;
+    item.libMethod = PMT.activeLibMethod;
+    item.answers = PMT.pendingAnswers || {};
   }
   pmtApplyCategoryMath(item);
   pmtActiveGroup().items.push(item);
@@ -15496,7 +15627,9 @@ function pmtDeleteItem(groupId, itemId){
 function pmtRenderSidebar(){
   var el = document.getElementById('pmt-sidebar');
   if(!el) return;
-  el.innerHTML = '<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">Measurement Groups'
+  el.innerHTML = '<button id="pmt-add-measurement-btn-2" onclick="pmtToggleCategoryMenu(event)" style="width:100%;padding:9px;background:#0d7a70;color:#fff;border:none;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:700;margin-bottom:12px">'
+    +'<span style="font-size:16px;line-height:1">+</span> Add Measurement</button>'
+    +'<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">Measurement Groups'
     +'<span><button onclick="pmtShowTemplatePicker()" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px">Templates</button>'
     +'<button onclick="pmtAddGroup()" style="background:var(--teal);border:none;color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer">+ Group</button></span></div>'
     + PMT.groups.map(function(g){
@@ -15534,14 +15667,22 @@ function pmtRenderSidebar(){
             var dashIdx = (it.label||'').indexOf(' — ');
             var itemName = dashIdx>-1 ? it.label.slice(0,dashIdx) : 'Untitled';
             var itemDetail = dashIdx>-1 ? it.label.slice(dashIdx+3) : it.label;
-            return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:7px 8px;margin-bottom:5px;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
-              +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">'
-              +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;font-size:12px;font-weight:700;color:#fff;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(itemName)+'</span>'
+            var qty, unit;
+            if(it.value_squares!==undefined){ qty = it.value_squares; unit = 'squares'; }
+            else if(it.value_cy!==undefined){ qty = it.value_cy; unit = 'CY'; }
+            else if(it.type==='count'){ qty = 1; unit = 'ea'; }
+            else if(it.value_sqft!==undefined){ qty = it.value_sqft; unit = 'sqft'; }
+            else if(it.value_ft!==undefined){ qty = it.value_ft; unit = 'ft'; }
+            else { qty = ''; unit=''; }
+            return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px;margin-bottom:5px;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
+              +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+              +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;font-size:12.5px;font-weight:800;color:#fff;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(itemName)+'</span>'
+              +'<span style="font-size:13.5px;font-weight:800;color:'+g.color+';white-space:nowrap">'+qty+' '+unit+'</span>'
               +'<span style="display:flex;gap:6px;flex-shrink:0">'
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
               +'</span></div>'
-              +'<div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-top:2px">'+uxEsc(itemDetail)+'</div>'
+              +'<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:3px">'+uxEsc(itemDetail)+'</div>'
               +'</div>';
           }).join('')
         +'</div>';
@@ -16788,6 +16929,7 @@ async function pmtRenderThumbnail(pageNum, containerDiv){
 // exact gap: "it should ask me many things... calculate one to the other."
 // ═══════════════════════════════════════════════════════════════════════
 async function pmtShowAreaDetailsModal(points, areaFt, shapeType){
+  if(PMT.activeLibItem && PMT.activeLibMethod){ pmtNameLibraryAreaMeasurement(shapeType, points, areaFt); return; }
   document.querySelectorAll('#pmt-areadetails-ov').forEach(function(el){el.remove();});
   var el = document.createElement('div');
   el.id = 'pmt-areadetails-ov';
@@ -16895,8 +17037,43 @@ function pmtDiscardAreaDetails(){
 // AI calls would make rapid counting unusable). Volume already had a depth
 // prompt — upgraded to also propose a name.
 // ═══════════════════════════════════════════════════════════════════════
+function pmtNameLibraryLinearMeasurement(shapeType, valueSummary, points, extra){
+  document.querySelectorAll('#pmt-liblinname-ov').forEach(function(el){el.remove();});
+  var itemName = PMT.activeLibItem ? PMT.activeLibItem.name : 'Measurement';
+  var el = document.createElement('div');
+  el.id = 'pmt-liblinname-ov';
+  el.style.cssText = 'position:fixed;top:70px;right:296px;z-index:3000;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
+  el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;width:300px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:4px">Which '+itemName+' is this?</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">'+valueSummary+'</div>'
+    +'<input id="pmt-liblinname-input" placeholder="e.g. North '+itemName+'" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;box-sizing:border-box" autofocus>'
+    +'<button onclick="pmtConfirmLibraryLinearName()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Add '+itemName+'</button>'
+    +'<button onclick="pmtDiscardLibraryLinearName()" style="margin-top:8px;width:100%;padding:8px;background:transparent;border:none;color:#dc2626;cursor:pointer;font-size:12px">Discard — I didn\'t mean to measure this</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  window._pmtPendingLibLinear = {type:shapeType, points:points, extra:extra, valueSummary:valueSummary};
+  setTimeout(function(){ var inp=document.getElementById('pmt-liblinname-input'); if(inp) inp.focus(); }, 50);
+}
+function pmtConfirmLibraryLinearName(){
+  var pending = window._pmtPendingLibLinear;
+  if(!pending){ toast('Something went wrong — try measuring again','err'); return; }
+  var name = document.getElementById('pmt-liblinname-input').value.trim();
+  var item = Object.assign({type:pending.type, points:pending.points, label:(name?name+' — ':'')+pending.valueSummary}, pending.extra);
+  document.getElementById('pmt-liblinname-ov').remove();
+  pmtAddItem(item);
+  pmtRedraw();
+  window._pmtPendingLibLinear = null;
+}
+function pmtDiscardLibraryLinearName(){
+  document.getElementById('pmt-liblinname-ov').remove();
+  window._pmtPendingLibLinear = null;
+  pmtSetTool(null);
+  toast('Discarded — nothing was added','ok');
+}
+
 async function pmtProposeAndConfirm(shapeType, valueSummary, points, extra){
   extra = extra || {};
+  if(PMT.activeLibItem && PMT.activeLibMethod){ pmtNameLibraryLinearMeasurement(shapeType, valueSummary, points, extra); return; }
   document.querySelectorAll('#pmt-propose-ov').forEach(function(el){el.remove();});
   var loading = document.createElement('div');
   loading.id = 'pmt-propose-ov';
