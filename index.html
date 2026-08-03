@@ -543,6 +543,7 @@ const StorageAdapter = {
     try {
       localStorage.setItem(this._prefix + table, JSON.stringify(rows));
       this._writeAudit(table);
+      this._syncToServer(table, rows);
     } catch(e) {
       if(e.name === 'QuotaExceededError') {
         console.error('[Storage] QUOTA EXCEEDED — export data immediately');
@@ -559,6 +560,40 @@ const StorageAdapter = {
       meta[table] = { last_write: new Date().toISOString(), version: this._version };
       localStorage.setItem('cs__meta', JSON.stringify(meta));
     } catch(e) {}
+  },
+  // Real persistence, added without touching any business logic call site.
+  // Fire-and-forget: the UI already saved instantly to localStorage above,
+  // so a slow or failed network call here never blocks or breaks anything
+  // the person is doing. DEC-018 realized: this is the "swap for real
+  // storage with zero business logic changes" the original design intended.
+  _syncToServer(table, rows) {
+    try {
+      fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ table, rows }),
+      }).catch((e) => { console.warn('[Storage] Background sync failed (data is still safe locally):', table, e); });
+    } catch(e) { /* never let a sync attempt break the UI */ }
+  },
+  // Pulls real data down from the server and merges it into localStorage.
+  // Called once at startup, before the app renders anything, so opening
+  // the app on a different device/browser shows the real, current data —
+  // the actual gap that made V1 "can't be used from another device."
+  async hydrateFromServer() {
+    const tables = ['leads','jobs','estimates','proposals','documents','gatekeeper_queue',
+      'subcontractors','bills','invoices','purchase_orders','change_orders',
+      'daily_logs','photos','requirements','survey_responses','schedule',
+      'todos','punch_list','rfis','lien_waivers','messages'];
+    await Promise.all(tables.map(async (t) => {
+      try {
+        const res = await fetch('/api/data?table=' + encodeURIComponent(t));
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.rows) && data.rows.length > 0) {
+          localStorage.setItem(this._prefix + t, JSON.stringify(data.rows));
+        }
+      } catch(e) { console.warn('[Storage] Hydration skipped for', t, '(offline or server unreachable — using local data)'); }
+    }));
   },
   export() {
     // Full backup — all tables + meta
@@ -7637,13 +7672,28 @@ seedExtraData();
 
 
 
-// Pre-load API key if not set
-if(!localStorage.getItem('cs_ai_key')){
-  try{localStorage.setItem('cs_ai_key',atob('c2stYW50LWFwaTAzLWEwcGI2SlVNeXBxbTdOX29qUTRRR1FwdFo1REZUam1OQjYtVjFOOW0w'+'YXlNNll4OFVmNE1FR2JqYi1vNkNwdDZCRXpjQXdOejBvY1g2c0V2TWNnQnpBLV91bklwZ0FB'));}catch(e){}
-}
-loadSidebar();
-// Small delay to ensure DOM is ready before rendering dashboard
-setTimeout(function(){ goTab('dashboard'); updateStorageWidget(); }, 100);
+// (Removed: previously pre-loaded a hardcoded API key into localStorage here.
+// That key was exposed to anyone viewing the page source and was not
+// actually used by any AI call in this app — every real AI call goes
+// through /api/claude.js, which reads the key server-side only. Deleted
+// as a pure security liability with zero functional purpose.)
+
+// Pull real, current data from the database before rendering anything.
+// This is the actual moment the app stops being "only this browser" —
+// on a slow/offline connection this safely times out and falls back to
+// whatever is already in localStorage, so it never blocks the app open.
+(async function boot() {
+  try {
+    await Promise.race([
+      StorageAdapter.hydrateFromServer(),
+      new Promise((resolve) => setTimeout(resolve, 2500)),
+    ]);
+  } catch(e) { console.warn('[Storage] Startup hydration skipped:', e); }
+
+  loadSidebar();
+  // Small delay to ensure DOM is ready before rendering dashboard
+  setTimeout(function(){ goTab('dashboard'); updateStorageWidget(); }, 100);
+})();
 // Storage widget — update every 30 seconds
 setInterval(updateStorageWidget, 30000);
 // AI startup checks — run in background
