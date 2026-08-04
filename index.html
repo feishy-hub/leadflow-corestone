@@ -15680,6 +15680,20 @@ function pmtCanvasDblClick(e){
   }
   if(pts.length < 3){ PMT.clickPoints = []; pmtRedraw(); return; }
 
+  if(PMT.cutoutTarget){
+    var cutAreaPx = 0;
+    for(var ci=0;ci<pts.length;ci++){
+      var cj=(ci+1)%pts.length;
+      cutAreaPx += pts[ci].x*pts[cj].y - pts[cj].x*pts[ci].y;
+    }
+    cutAreaPx = Math.abs(cutAreaPx/2);
+    var cutAreaFt = Math.round((cutAreaPx/(PMT.scalePxPerFt*PMT.scalePxPerFt))*10)/10;
+    pmtFinishCutout(pts.slice(), cutAreaFt);
+    PMT.clickPoints = [];
+    pmtRedraw();
+    return;
+  }
+
   if(PMT.tool === 'perimeter'){
     var perimeterPx = 0;
     for(var k=0;k<pts.length;k++){
@@ -16598,18 +16612,21 @@ function pmtRenderSidebar(){
             else if(it.value_sqft!==undefined){ qty = it.value_sqft; unit = 'sqft'; }
             else if(it.value_ft!==undefined){ qty = it.value_ft; unit = 'ft'; }
             else { qty = ''; unit=''; }
-            return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px;margin-bottom:5px;cursor:pointer" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
+            return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px;margin-bottom:5px;cursor:pointer;opacity:'+(it.hidden?'0.4':'1')+'" onclick="event.stopPropagation();pmtHighlightItem(\''+g.id+'\',\''+it.id+'\')">'
               +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+              +'<input type="color" value="'+(it.color||g.color)+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();pmtSetItemColor(\''+g.id+'\',\''+it.id+'\',this.value)" title="Color for this measurement" style="width:14px;height:14px;padding:0;border:none;border-radius:50%;cursor:pointer;flex-shrink:0">'
               +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;font-size:12.5px;font-weight:800;color:#fff;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(itemName)+'</span>'
-              +'<span style="font-size:13.5px;font-weight:800;color:'+g.color+';white-space:nowrap">'+qty+' '+unit+'</span>'
+              +'<span style="font-size:13.5px;font-weight:800;color:'+(it.color||g.color)+';white-space:nowrap">'+qty+' '+unit+'</span>'
               +'<span style="display:flex;gap:6px;flex-shrink:0">'
+              +'<span onclick="event.stopPropagation();pmtToggleItemVisible(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.hidden?'Show on plan':'Hide from plan')+'">'+(it.hidden?'🚫':'👁')+'</span>'
               +'<span onclick="event.stopPropagation();pmtGenerateMaterialList(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.materials&&it.materials.length?'View materials ('+it.materials.length+')':'Generate material list')+'">'+(it.materials&&it.materials.length?'📦':'🤖')+'</span>'
               +(it.libMethod ? '<span onclick="event.stopPropagation();pmtEditItemAnswers(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit details (pitch, waste, etc.)">📐</span>' : '')
               +(it.type!=='count' ? '<span onclick="event.stopPropagation();pmtAssignItemToMeasurement(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.libItemName?'Change item ('+it.libItemName+')':'Assign an item')+'">🏷️</span>' : '')
+              +((it.type==='rect'||it.type==='poly') ? '<span onclick="event.stopPropagation();pmtStartCutout(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Cut out an area (window, door, skylight, etc.)">✂️</span>' : '')
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
               +'</span></div>'
-              +'<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:3px">'+uxEsc(itemDetail)+'</div>'
+              +'<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:3px">'+uxEsc(itemDetail)+(it.cutouts&&it.cutouts.length?' \u2022 '+it.cutouts.length+' cutout'+(it.cutouts.length===1?'':'s')+' deducted':'')+'</div>'
               +'</div>';
           }).join('')
         +'</div>';
@@ -16628,39 +16645,52 @@ function pmtRedraw(){
     ctx.strokeStyle = g.color; ctx.fillStyle = g.color; ctx.lineWidth = g.lineWidth||2;
     g.items.forEach(function(it){
       if((it.page||1) !== (PMT.currentPage||1)) return; // only draw items measured on the page currently shown
+      if(it.hidden) return; // per-item hide/unhide
+      var itemColor = it.color || g.color;
+      ctx.strokeStyle = itemColor; ctx.fillStyle = itemColor;
       var isHighlighted = it.id === pmtHighlightedItemId;
       if(isHighlighted){ ctx.save(); ctx.strokeStyle='#ffeb3b'; ctx.fillStyle='#ffeb3b'; ctx.lineWidth=(g.lineWidth||2)+3; }
       if(it.type==='linear'){
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y); ctx.lineTo(it.points[1].x,it.points[1].y); ctx.stroke();
-        pmtLabel(ctx, it.label, it.points[1].x, it.points[1].y, isHighlighted?'#ffeb3b':g.color);
+        pmtLabel(ctx, it.label, it.points[1].x, it.points[1].y, isHighlighted?'#ffeb3b':itemColor);
       } else if(it.type==='rect'){
         var p0=it.points[0],p1=it.points[1];
         ctx.globalAlpha=0.25; ctx.fillRect(Math.min(p0.x,p1.x),Math.min(p0.y,p1.y),Math.abs(p1.x-p0.x),Math.abs(p1.y-p0.y)); ctx.globalAlpha=1;
         ctx.strokeRect(Math.min(p0.x,p1.x),Math.min(p0.y,p1.y),Math.abs(p1.x-p0.x),Math.abs(p1.y-p0.y));
-        pmtLabel(ctx, it.label, p1.x, p1.y, isHighlighted?'#ffeb3b':g.color);
+        pmtLabel(ctx, it.label, p1.x, p1.y, isHighlighted?'#ffeb3b':itemColor);
       } else if(it.type==='poly'){
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y);
         it.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.closePath();
         ctx.globalAlpha=0.25; ctx.fill(); ctx.globalAlpha=1; ctx.stroke();
-        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':g.color);
+        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':itemColor);
       } else if(it.type==='count'){
         ctx.beginPath(); ctx.arc(it.x,it.y,7,0,2*Math.PI); ctx.fill();
-        ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.fillText((g.items.indexOf(it)+1)+'', it.x-3, it.y+3); ctx.fillStyle=isHighlighted?'#ffeb3b':g.color;
+        ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.fillText((g.items.indexOf(it)+1)+'', it.x-3, it.y+3); ctx.fillStyle=isHighlighted?'#ffeb3b':itemColor;
       } else if(it.type==='wall'){
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y); ctx.lineTo(it.points[1].x,it.points[1].y); ctx.stroke();
-        pmtLabel(ctx, it.label, it.points[1].x, it.points[1].y, isHighlighted?'#ffeb3b':g.color);
+        pmtLabel(ctx, it.label, it.points[1].x, it.points[1].y, isHighlighted?'#ffeb3b':itemColor);
       } else if(it.type==='perimeter'){
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y);
         it.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.closePath(); ctx.stroke();
-        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':g.color);
+        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':itemColor);
       } else if(it.type==='freehand'){
         ctx.setLineDash([5,3]);
         ctx.beginPath(); ctx.moveTo(it.points[0].x,it.points[0].y);
         it.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.stroke();
         ctx.setLineDash([]);
-        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':g.color);
+        pmtLabel(ctx, it.label, it.points[0].x, it.points[0].y, isHighlighted?'#ffeb3b':itemColor);
       }
       if(isHighlighted) ctx.restore();
+      if(it.cutouts && it.cutouts.length){
+        ctx.save();
+        it.cutouts.forEach(function(cut){
+          ctx.beginPath(); ctx.moveTo(cut.points[0].x, cut.points[0].y);
+          cut.points.slice(1).forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.closePath();
+          ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+          ctx.strokeStyle = '#dc2626'; ctx.setLineDash([4,3]); ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+        });
+        ctx.restore();
+      }
     });
   });
   // Annotations (text/callout/cloud/stamp) — separate from measurement groups
@@ -17566,6 +17596,51 @@ function pmtDuplicateItem(groupId, itemId){
   pmtRenderSidebar(); pmtRedraw();
   toast('Duplicated — drag it to the right spot','ok');
 }
+// Cutout — draw a shape inside an existing rectangle/polygon measurement
+// (a window, door, skylight, etc.) and its area is deducted from the
+// parent. Every cutout is tracked on the item so it can be reviewed,
+// listed, or removed later — not just silently subtracted.
+function pmtStartCutout(groupId, itemId){
+  PMT.cutoutTarget = {groupId: groupId, itemId: itemId};
+  pmtSetTool('poly');
+  var status = document.getElementById('pmt-status');
+  if(status) status.textContent = 'Draw the cutout shape (window, door, skylight, etc.) — it will be subtracted from the measurement. Double-click to close.';
+  toast('Draw the area to cut out — it will be subtracted','ok',4000);
+}
+function pmtFinishCutout(points, cutAreaFt){
+  var target = PMT.cutoutTarget;
+  PMT.cutoutTarget = null;
+  if(!target) return;
+  var g = PMT.groups.find(function(x){return x.id===target.groupId;});
+  var it = g && g.items.find(function(x){return x.id===target.itemId;});
+  if(!it){ toast('The measurement this cutout belonged to is gone','err'); return; }
+  if(it.value_sqft===undefined){ toast('Cutouts only work on area measurements','err'); return; }
+  it.cutouts = it.cutouts || [];
+  it.cutouts.push({points: points, area: cutAreaFt, at: new Date().toISOString()});
+  // Capture the baseline area BEFORE any cutout, only once — every
+  // recalculation subtracts the running total of cutouts from that same
+  // baseline, instead of compounding against an already-reduced number.
+  if(it.value_sqft_original===undefined) it.value_sqft_original = it.value_sqft;
+  var totalCutout = it.cutouts.reduce(function(s,c){return s+c.area;},0);
+  it.value_sqft = Math.max(0, Math.round((it.value_sqft_original - totalCutout)*10)/10);
+  pmtApplyCategoryMath(it);
+  pmtRenderSidebar();
+  pmtAutoSave();
+  toast(cutAreaFt+' sqft cut out — '+it.cutouts.length+' cutout'+(it.cutouts.length===1?'':'s')+' total','ok');
+}
+function pmtRemoveCutout(groupId, itemId, cutoutIdx){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  if(!it || !it.cutouts) return;
+  it.cutouts.splice(cutoutIdx,1);
+  var totalCutout = it.cutouts.reduce(function(s,c){return s+c.area;},0);
+  it.value_sqft = Math.max(0, Math.round(((it.value_sqft_original!==undefined?it.value_sqft_original:it.value_sqft) - totalCutout)*10)/10);
+  pmtApplyCategoryMath(it);
+  pmtRenderSidebar();
+  pmtAutoSave();
+  toast('Cutout removed','ok');
+}
+
 function pmtToggleItemLock(groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
   var it = g.items.find(function(i){return i.id===itemId;});
@@ -17573,6 +17648,26 @@ function pmtToggleItemLock(groupId, itemId){
   it.locked = !it.locked;
   pmtRenderSidebar(); pmtRedraw();
   toast(it.locked?'Locked':'Unlocked','ok');
+}
+// Per-item hide/unhide — independent of the group's own visibility, so a
+// single measurement can be tucked out of the way without hiding the
+// whole group it belongs to.
+function pmtToggleItemVisible(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g.items.find(function(i){return i.id===itemId;});
+  if(!it) return;
+  it.hidden = !it.hidden;
+  pmtRenderSidebar(); pmtRedraw();
+}
+// Per-item color — overrides the group color for just this one
+// measurement. Clearing it (via the "reset" swatch) goes back to
+// inheriting the group's color.
+function pmtSetItemColor(groupId, itemId, color){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g.items.find(function(i){return i.id===itemId;});
+  if(!it) return;
+  it.color = color || null;
+  pmtRenderSidebar(); pmtRedraw();
 }
 function pmtReorderItem(groupId, itemId, dir){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
