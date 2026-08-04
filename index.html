@@ -11904,12 +11904,34 @@ async function showBidComparison(leadOrJobId){
     html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase;margin-bottom:8px">'+trade+'</div><table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:var(--teal);color:#fff"><th style="padding:7px;text-align:left">Sub</th><th style="padding:7px;text-align:right">Amount</th><th style="padding:7px;text-align:center">Status</th><th style="padding:7px">Notes</th><th style="padding:7px;text-align:center">Award</th></tr>';
     tb.forEach(function(b,i){
       var low=i===0&&b.amount>0;
-      html+='<tr style="border-bottom:1px solid var(--border)'+(low?';background:rgba(134,239,172,0.08)':'')+'"><td style="padding:7px;font-weight:600">'+(low?'⭐ ':'')+(b.subs||'TBD')+'</td><td style="padding:7px;text-align:right;font-weight:700;color:'+(low?'var(--green)':'inherit')+'">'+(b.amount?fmt$(b.amount):'Pending')+'</td><td style="padding:7px;text-align:center"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:'+(b.status==='received'?'var(--green-bg)':'rgba(0,0,0,0.05)')+'">'+(b.status||'sent')+'</span></td><td style="padding:7px;color:var(--muted)">'+(b.notes||'—')+'</td><td style="padding:7px;text-align:center">'+(b.awarded?'<span style="color:var(--green);font-weight:700;font-size:11px">Awarded</span>':'<button onclick="awardBid(\''+b.id+'\')" style="background:var(--teal);color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit">Award</button>')+'</td></tr>';
+      html+='<tr style="border-bottom:1px solid var(--border)'+(low?';background:rgba(134,239,172,0.08)':'')+'"><td style="padding:7px;font-weight:600">'+(low?'⭐ ':'')+(b.subs||'TBD')+'</td><td style="padding:7px;text-align:right;font-weight:700;color:'+(low?'var(--green)':'inherit')+'">'+(b.amount?fmt$(b.amount):'Pending')+'</td><td style="padding:7px;text-align:center"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:'+(b.status==='received'?'var(--green-bg)':'rgba(0,0,0,0.05)')+'">'+(b.status||'sent')+'</span></td><td style="padding:7px;color:var(--muted)">'+(b.notes||'—')+'</td><td style="padding:7px;text-align:center">'+(b.awarded?'<span style="color:var(--green);font-weight:700;font-size:11px">Awarded</span>':'<button onclick="pmtConfirmAwardBid(\''+b.id+'\',\''+uxEsc(b.subs||'TBD')+'\','+(b.amount||0)+',\''+uxEsc(b.trade||'')+'\')" style="background:var(--teal);color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit">Award</button>')+'</td></tr>';
     });
     html+='</table></div>';
   });
   html+='<button onclick="aiRankAllBids(\''+leadOrJobId+'\')" class="btn btn-p" style="width:100%;margin-top:8px">🤖 AI Rank All Bids & Flag Overpriced</button></div></div>';
   el.innerHTML=html;document.body.appendChild(el);
+}
+
+// A financial commitment shouldn't be one click — same review-before-
+// commit pattern already built for Send-for-Bid.
+function pmtConfirmAwardBid(bidId, subName, amount, trade){
+  document.querySelectorAll('#award-confirm-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'award-confirm-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:22px;width:340px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:10px">Award this bid?</div>'
+    +'<div style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:14px">'
+    +'<div style="font-size:13px;font-weight:700">'+uxEsc(subName)+'</div>'
+    +(trade?'<div style="font-size:11.5px;color:var(--muted)">'+uxEsc(trade)+'</div>':'')
+    +'<div style="font-size:18px;font-weight:800;color:var(--teal);margin-top:6px">'+fmt$(amount)+'</div>'
+    +'</div>'
+    +'<div style="font-size:11.5px;color:var(--muted);margin-bottom:14px">This will mark the bid awarded and create a Gatekeeper item to generate the PO — the PO itself still requires your separate approval, it is not created automatically.</div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="document.getElementById(\'award-confirm-ov\').remove()" style="flex:1;padding:9px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer">Cancel</button>'
+    +'<button onclick="document.getElementById(\'award-confirm-ov\').remove();awardBid(\''+bidId+'\')" style="flex:2;padding:9px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Confirm Award</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
 }
 
 async function awardBid(bidId){
