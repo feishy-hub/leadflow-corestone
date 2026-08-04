@@ -3061,6 +3061,16 @@ async function saveSub(){
   }catch(e){toast(e.message,'err');}
 }
 
+// Click the W-9 badge to flip between Requested and Received — a real,
+// simple status you can update the moment a sub actually sends it back.
+async function pmtToggleW9Received(subId){
+  var subs = await dbGet('subcontractors','?id=eq.'+subId);
+  var sub = subs[0]; if(!sub) return;
+  var newStatus = sub.w9_status==='Received' ? 'Requested' : 'Received';
+  await dbUpd('subcontractors', subId, {w9_status: newStatus});
+  toast('W-9 marked '+newStatus,'ok');
+  pgSubsV2();
+}
 async function autoRequestSubDocs(companyName, email, contactName, trade){
   try{
     // AI drafts the W9 + COI request email
@@ -3072,12 +3082,15 @@ async function autoRequestSubDocs(companyName, email, contactName, trade){
     if(d){
       // Log the email to gatekeeper for review
       await dbIns('gatekeeper_queue',{
-        type:'Document Request',
+        action_type:'w9_coi_request',
         title:'W9 + COI Request: '+companyName,
         description:'AI drafted email to '+email+':\n\nSUBJECT: '+d.subject+'\n\n'+d.body,
         status:'pending',
         priority:'normal',
-        auto_action:'Send email to '+email
+        email_to: email,
+        email_subject: d.subject,
+        email_body: d.body,
+        auto_action:'Opens a pre-filled email to send — this app has no automated email sending, so approving opens your own email client ready to go'
       });
       toast('✅ W9 + COI request drafted — review in Gatekeeper','ok');
     }
@@ -3573,6 +3586,19 @@ async function gkExecuteAction(item) {
   console.log('[Gatekeeper] Executing:', type, 'for item:', item.id);
 
   switch(type) {
+    case 'w9_coi_request':
+      // No automated email sending exists in this app — this honestly
+      // opens the owner's own email client, pre-filled with the AI
+      // draft, ready to send. One real click, not a silent no-op.
+      if(item.email_to){
+        var mailtoUrl = 'mailto:'+encodeURIComponent(item.email_to)
+          +'?subject='+encodeURIComponent(item.email_subject||'Documents needed')
+          +'&body='+encodeURIComponent(item.email_body||'');
+        window.open(mailtoUrl, '_blank');
+        toast('Opening your email client to send the W-9/COI request','ok',4000);
+      }
+      break;
+
     case 'estimate_review':
       // Estimate approved — mark estimate status as reviewed
       if(item.reference_id) {
@@ -6104,6 +6130,11 @@ async function pgSubsV2(){
           render:function(s){
             var st=certStatus(s.coi_expiry);
             return '<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+st.bg+';color:'+st.color+'">'+st.label+'</span>';}},
+        {key:'w9_status',label:'W-9',flex:1,
+          render:function(s){
+            var status = s.w9_status || 'Not Requested';
+            var color = status==='Received' ? {bg:'#dcfce7',color:'#166534'} : status==='Requested' ? {bg:'#fef3c7',color:'#92400e'} : {bg:'#f3f4f6',color:'#6b7280'};
+            return '<span onclick="event.stopPropagation();pmtToggleW9Received(\''+s.id+'\')" title="Click to mark received/waiting" style="cursor:pointer;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+color.bg+';color:'+color.color+'">'+status+'</span>';}},
         {key:'workers_comp_expiry',label:'W.Comp',flex:1,hide_mobile:true,
           render:function(s){
             var st=certStatus(s.workers_comp_expiry);
@@ -7827,10 +7858,38 @@ async function duplicateProposal(id){
 
 
 
+// Checks for bids past their due date that haven't gotten a response yet,
+// and flags them to Gatekeeper for the owner to decide on — never sends
+// anything automatically, just surfaces what's gone quiet.
+async function pmtCheckOverdueBids(bids){
+  try{
+    var today = new Date().toISOString().slice(0,10);
+    var overdue = bids.filter(function(b){
+      return b.status==='sent' && b.due_date && b.due_date < today;
+    });
+    if(!overdue.length) return;
+    var existing = await dbGet('gatekeeper_queue', '?action_type=eq.bid_overdue&status=eq.pending');
+    var alreadyFlagged = existing.map(function(g){return g.reference_id;});
+    for(var i=0;i<overdue.length;i++){
+      var b = overdue[i];
+      if(alreadyFlagged.indexOf(b.id) > -1) continue; // already flagged, don't duplicate
+      await dbIns('gatekeeper_queue', {
+        action_type: 'bid_overdue',
+        title: 'Bid overdue: '+b.trade+' — '+(b.subs||'sub')+' has not responded',
+        description: 'Due '+b.due_date+', for '+(b.job_name||'job')+'. No response recorded yet.',
+        status: 'pending',
+        priority: 'normal',
+        reference_id: b.id
+      });
+    }
+  }catch(e){ console.warn('Overdue bid check skipped:', e); }
+}
+
 async function pgBids(){
   var bids=await dbGet('bids','?order=created_at.desc');
   var jobs=await dbGet('jobs','?order=job_name.asc');
   var subs=await dbGet('subcontractors','?order=company_name.asc');
+  await pmtCheckOverdueBids(bids);
   var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
     +'<div><div style="font-size:20px;font-weight:800">Bidding</div>'
     +'<div style="font-size:12px;color:var(--muted)">'+bids.length+' bid packages &nbsp;·&nbsp; AI-ranked when received</div></div>'
@@ -8678,6 +8737,7 @@ async function openEstimate(id){
     '<div style="padding:12px;border-top:2px solid var(--border);display:flex;gap:8px">',
     '<button class="btn btn-p" onclick="addLine(\''+id+'\')">+ Add Line Item</button>',
     '<button class="btn btn-g" onclick="pmtShowTakeoffImportPicker(\''+id+'\')">📐 From Takeoff</button>',
+    '<button class="btn btn-g" onclick="showEstimateVersionHistory(\''+id+'\')">🕐 Version History</button>',
     '<button class="btn btn-g" onclick="addLineAI(\''+id+'\',this)">🤖 AI Suggest Lines</button>',
     '</div></div></div>',
     
@@ -8814,6 +8874,24 @@ function showBidCheckModal(bid, subAmount, aiResult, aiFailed){
 // The first real piece of the draw-first-assign-after flow: any
 // measurement, however it was created, can have an item assigned or
 // changed afterward — no need to redraw.
+// Confirms an AI-detected room is actually correct — removes the
+// "unverified" marker. This is the real, working version of "missed room
+// detection": AI-detected rooms are already real measurements the moment
+// they're created, so the useful check is "has every one been confirmed
+// correct yet," not a separate parallel count.
+function pmtVerifyAiRoom(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  if(!it) return;
+  it.label = it.label.replace(' (AI guess, verify)','').replace(', verify','').replace(' — verify','');
+  it.aiVerified = true;
+  pmtRenderSidebar();
+  pmtAutoSave();
+  var group = PMT.groups.find(function(x){return x.id===groupId;});
+  var stillUnverified = group ? group.items.filter(function(i){return (i.label||'').indexOf('AI guess, verify')>-1;}).length : 0;
+  toast(stillUnverified ? stillUnverified+' room'+(stillUnverified===1?'':'s')+' still need verifying' : 'All AI-detected rooms verified','ok');
+}
+
 function pmtAssignItemToMeasurement(groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
   var it = g && g.items.find(function(x){return x.id===itemId;});
@@ -9523,6 +9601,63 @@ async function autoMarkEstimateRevised(estId){
     await dbUpd('estimates',estId,{status:'revised',revised_at:new Date().toISOString()});
     await auditLog('estimates',estId,'status_changed',{old_value:'sent',new_value:'revised'});
   }
+  // Real version history — every line change (this function is already
+  // the one choke point every line-mutating action calls through) saves
+  // a timestamped snapshot, so nothing is ever silently overwritten.
+  if(est){
+    await dbIns('estimate_versions', {
+      estimate_id: estId,
+      line_items: est.line_items || [],
+      grand_total: (function(){ var l=est.line_items; if(typeof l==='string'){try{l=JSON.parse(l);}catch(e){l=[];}} return calcEstTotal(l||[], est.job_id).grand_total; })(),
+      saved_at: new Date().toISOString()
+    });
+  }
+}
+async function showEstimateVersionHistory(estId){
+  var versions = await dbGet('estimate_versions', '?estimate_id=eq.'+estId+'&order=saved_at.desc');
+  document.querySelectorAll('#est-version-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'est-version-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:0;width:420px;max-height:75vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--border)"><div style="font-weight:800;font-size:15px">Version History</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-top:2px">'+versions.length+' saved version'+(versions.length===1?'':'s')+'</div></div>'
+    +'<div style="padding:12px 20px;overflow-y:auto;flex:1">'
+    + (versions.length ? versions.map(function(v,i){
+        var lc = v.line_items; if(typeof lc==='string'){try{lc=JSON.parse(lc);}catch(e){lc=[];}}
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">'
+          +'<div><div style="font-size:12.5px;font-weight:700">'+new Date(v.saved_at).toLocaleString()+(i===0?' <span style="color:var(--teal);font-weight:800;font-size:10px">CURRENT</span>':'')+'</div>'
+          +'<div style="font-size:11px;color:var(--muted)">'+(Array.isArray(lc)?lc.length:0)+' line'+(Array.isArray(lc)&&lc.length===1?'':'s')+' \u00b7 '+fmt$(v.grand_total||0)+'</div></div>'
+          +(i>0?'<button onclick="pmtViewEstimateVersion(\''+v.id+'\')" style="padding:5px 10px;font-size:11px;border:1px solid var(--teal);color:var(--teal);background:transparent;border-radius:6px;cursor:pointer">View</button>':'')
+          +'</div>';
+      }).join('') : '<div style="color:var(--dim);font-size:12px;text-align:center;padding:20px 0">No history yet — versions save automatically as you edit.</div>')
+    +'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid var(--border)"><button onclick="document.getElementById(\'est-version-ov\').remove()" style="width:100%;padding:9px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer">Close</button></div>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+async function pmtViewEstimateVersion(versionId){
+  var versions = await dbGet('estimate_versions', '?id=eq.'+versionId);
+  var v = versions[0]; if(!v) return;
+  var lc = v.line_items; if(typeof lc==='string'){try{lc=JSON.parse(lc);}catch(e){lc=[];}}
+  document.querySelectorAll('#est-version-view-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'est-version-view-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3600;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:0;width:460px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--border)"><div style="font-weight:800;font-size:15px">Version from '+new Date(v.saved_at).toLocaleString()+'</div>'
+    +'<div style="font-size:12px;color:var(--muted)">Read-only \u2014 this is a snapshot, not editable</div></div>'
+    +'<div style="padding:12px 20px;overflow-y:auto;flex:1">'
+    + (lc||[]).map(function(l){
+        return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">'
+          +'<span>'+uxEsc(l.description||'')+'</span><span style="font-weight:700">'+fmt$((l.qty||0)*(l.unit_cost||0))+'</span></div>';
+      }).join('')
+    +'<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:6px;font-weight:800">'
+    +'<span>Total</span><span>'+fmt$(v.grand_total||0)+'</span></div>'
+    +'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid var(--border)"><button onclick="document.getElementById(\'est-version-view-ov\').remove()" style="width:100%;padding:9px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Close</button></div>'
+    +'</div>';
+  document.body.appendChild(el);
 }
 
 // BUG-2 FIX: validates every AI-returned line item, rejects undefined/malformed
@@ -16875,7 +17010,8 @@ function pmtRenderSidebar(){
               +'<span onclick="event.stopPropagation();pmtToggleItemVisible(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.hidden?'Show on plan':'Hide from plan')+'">'+(it.hidden?'🚫':'👁')+'</span>'
               +'<span onclick="event.stopPropagation();pmtGenerateMaterialList(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.materials&&it.materials.length?'View materials ('+it.materials.length+')':'Generate material list')+'">'+(it.materials&&it.materials.length?'📦':'🤖')+'</span>'
               +(it.libMethod ? '<span onclick="event.stopPropagation();pmtEditItemAnswers(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit details (pitch, waste, etc.)">📐</span>' : '')
-              +(it.type!=='count' ? '<span onclick="event.stopPropagation();pmtAssignItemToMeasurement(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.libItemName?'Change item ('+it.libItemName+')':'Assign an item')+'">🏷️</span>' : '')
+              +(it.type!=='count' ? '<span onclick="event.stopPropagation();pmtAssignItemToMeasurement(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.libItemName?'Change item ('+it.libItemName+')':'Assign an item')+'">🏷️</span>'
+              +((it.label||'').indexOf('AI guess, verify')>-1 ? '<span onclick="event.stopPropagation();pmtVerifyAiRoom(\''+g.id+'\',\''+it.id+'\')" title="Confirm this AI-detected room is correct" style="cursor:pointer;color:#7c3aed;font-weight:800">✓</span>' : '') : '')
               +((it.type==='rect'||it.type==='poly') ? '<span onclick="event.stopPropagation();pmtStartCutout(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Cut out an area (window, door, skylight, etc.)">✂️</span>' : '')
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
@@ -17538,7 +17674,7 @@ async function pmtAIAutoDetect(){
     pmtLogHistory('ai-auto-detect', rooms.length+' room(s) detected');
     pmtRenderSidebar();
     pmtRedraw();
-    toast('🤖 '+rooms.length+' room(s) detected — check each one, adjust or delete any that are wrong','ok',7000);
+    toast('🤖 '+rooms.length+' room(s) detected \u2014 all unverified. Click ✓ on each one in the sidebar once you\'ve confirmed it\'s right, or delete it if wrong.','ok',9000);
   }catch(e){
     toast('AI auto-detect failed: '+e.message,'err');
   }
