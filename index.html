@@ -15787,6 +15787,13 @@ function pmtApplyCategoryMath(item){
   var dashIdx = (item.label||'').indexOf(' — ');
   if(dashIdx>-1) namePrefix = item.label.slice(0, dashIdx+3);
 
+  // Clear any calculated fields left over from a PREVIOUS item assignment
+  // (e.g. switching this measurement from Roof to Flooring) — otherwise
+  // the old unit (squares) sticks around even though the new item is sqft.
+  delete item.value_squares;
+  delete item.value_true_sqft;
+  delete item.value_cy;
+
   if(m.outputUnit === 'squares' && item.value_sqft!==undefined){
     var pitchFactor = Math.sqrt(1 + Math.pow((a.pitch||0)/12, 2));
     var trueSqft = Math.round(item.value_sqft * pitchFactor * 10)/10;
@@ -15805,6 +15812,10 @@ function pmtApplyCategoryMath(item){
     }
     item.value_cy = cy;
     item.label = namePrefix + cy+' CY ('+desc+')';
+  } else if(item.value_sqft!==undefined){
+    item.label = namePrefix + item.value_sqft+' sqft';
+  } else if(item.value_ft!==undefined){
+    item.label = namePrefix + item.value_ft+' ft';
   }
 }
 
