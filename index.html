@@ -11512,6 +11512,7 @@ var SURVEY_CATS = {
 function showClientSurvey(leadId){
   var el=document.createElement('div');
   el.className='ov';el.id='survey-ov';el.style.zIndex='1000';
+  window._pmtSurveyLeadId = leadId;
   var tierColors={'Standard':'#6b7280','Premium':'#0d7a70','Luxury':'#8b5cf6'};
   var tierBgs={'Standard':'rgba(107,114,128,0.06)','Premium':'var(--teal-bg,#f0faf9)','Luxury':'rgba(139,92,246,0.08)'};
 
@@ -11519,18 +11520,36 @@ function showClientSurvey(leadId){
     +'<div><div class="mt">Client Selection Survey</div>'
     +'<div style="font-size:11px;color:var(--muted);margin-top:2px">Choose the option that best fits your vision for each item below</div></div>'
     +'<button class="mc" onclick="closeOv(this)">&#x2715;</button></div>'
-    +'<div class="mb" style="max-height:75vh;overflow-y:auto">'
+    +'<div class="mb" style="max-height:75vh;overflow-y:auto" id="survey-scroll-body">'
+    +'<div id="survey-progress-bar" style="position:sticky;top:0;background:#fff;z-index:5;padding:8px 0;margin-bottom:10px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted)"></div>'
     +'<div style="background:var(--teal-bg,#f0faf9);border:1px solid var(--teal);border-radius:8px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--text)">'
     +'<strong>How this works:</strong> For each item, pick Standard, Premium, or Luxury based on your preference and budget. There are no wrong answers \u2014 this simply helps us build an accurate estimate and source the right materials for your project.'
+    +'</div>'
+    +'<div style="margin-bottom:18px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">'
+    +'<div style="font-size:13px;font-weight:800;margin-bottom:6px">Inspiration Photos (optional)</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Upload photos of styles you like — this helps us understand your taste beyond the specific selections below.</div>'
+    +'<input type="file" id="survey-inspiration-file" accept="image/*" multiple onchange="pmtHandleInspirationUpload(this)" style="font-size:12px">'
+    +'<div id="survey-inspiration-preview" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"></div>'
     +'</div>';
 
+  var ROOM_MAP = {
+    'Cabinets':'Kitchen','Countertops':'Kitchen','Appliances':'Kitchen',
+    'Tile':'Bathroom','Shower':'Bathroom',
+    'Flooring':'Whole Home','Interior Doors':'Whole Home'
+  };
   Object.keys(SURVEY_CATS).forEach(function(cat){
     var catData = SURVEY_CATS[cat];
     html+='<div style="margin-bottom:24px">'
       +'<div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid var(--teal)">'
       +'<span style="font-size:20px">'+catData.icon+'</span>'+cat+'</div>';
 
-    Object.keys(catData.items).forEach(function(item){
+    var itemKeys = Object.keys(catData.items);
+    var lastRoom = null;
+    itemKeys.forEach(function(item){
+      if(cat==='Interior' && ROOM_MAP[item] && ROOM_MAP[item]!==lastRoom){
+        lastRoom = ROOM_MAP[item];
+        html += '<div style="font-size:11px;font-weight:800;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 8px 2px">'+lastRoom+'</div>';
+      }
       var itemData = catData.items[item];
       html+='<div style="margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">'
         +'<div style="font-size:13px;font-weight:800;margin-bottom:3px">'+item+'</div>'
@@ -11559,6 +11578,12 @@ function showClientSurvey(leadId){
         +'<div style="font-size:10px;color:var(--muted);line-height:1.4">Have something specific in mind? Upload a photo and notes.</div>'
         +'</div>';
 
+      html+='<div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'
+        +'<label style="font-size:11px;color:var(--muted);font-weight:600">Budget allowance (optional):</label>'
+        +'<span style="font-size:12px;color:var(--muted)">$</span>'
+        +'<input type="number" id="sv_'+cat+'_'+item+'_allowance" oninput="pmtSurveyPartialSave(\''+cat+'\',\''+item+'\')" style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px" placeholder="0">'
+        +'</div>';
+
       html+='</div></div>';
     });
     html+='</div>';
@@ -11570,12 +11595,33 @@ function showClientSurvey(leadId){
     +'<textarea id="survey-notes" style="width:100%;min-height:70px;padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;box-sizing:border-box" placeholder="Type any additional notes here..."></textarea></div>';
 
   html+='<div style="display:flex;gap:8px;margin-top:16px;position:sticky;bottom:0;background:#fff;padding-top:10px">'
-    +'<button class="btn btn-p" onclick="saveSurveyResults(\''+leadId+'\',this)" style="flex:1;font-weight:800;padding:12px">Submit Selections</button>'
+    +'<button class="btn btn-p" onclick="pmtShowSurveyReview(\''+leadId+'\')" style="flex:1;font-weight:800;padding:12px">Review & Submit</button>'
     +'<button class="btn btn-g" onclick="closeOv(this)">Cancel</button></div>'
     +'</div></div>';
 
   el.innerHTML=html;
   document.body.appendChild(el);
+  pmtUpdateSurveyProgress();
+  // Restore a partial save if the client is resuming
+  (async function(){
+    try{
+      var leads = await dbGet('leads','?id=eq.'+leadId);
+      var lead = leads[0];
+      if(lead && lead.survey_selections_draft){
+        var draft = JSON.parse(lead.survey_selections_draft);
+        Object.keys(draft).forEach(function(fieldName){
+          var inp = document.getElementById(fieldName);
+          if(inp){
+            inp.value = draft[fieldName];
+            var opt = document.querySelector('.sv-opt[data-field="'+fieldName+'"][data-value="'+draft[fieldName].replace(/"/g,'\\"')+'"]');
+            if(opt){ opt.classList.add('sv-selected'); opt.style.outline='2.5px solid #111827'; var chk=opt.querySelector('.sv-check'); if(chk) chk.innerHTML='✓'; }
+          }
+        });
+        pmtUpdateSurveyProgress();
+        toast('Restored your previous selections','ok',4000);
+      }
+    }catch(e){ console.warn('Draft restore skipped:', e); }
+  })();
 }
 
 // Fully custom, deterministic selection — click an option to select it,
@@ -11592,6 +11638,7 @@ function pmtToggleSurveyOption(el, cat, item){
   if(alreadySelected){
     hiddenInput.value = '';
     group.forEach(function(g){ g.classList.remove('sv-selected'); g.querySelector('.sv-check').innerHTML=''; g.style.outline='none'; });
+    pmtSurveyPartialSave(cat, item);
     return;
   }
 
@@ -11609,7 +11656,97 @@ function pmtToggleSurveyOption(el, cat, item){
     g.style.outline = isThis ? '2.5px solid #111827' : 'none';
     g.querySelector('.sv-check').innerHTML = isThis ? '✓' : '';
   });
+  pmtSurveyPartialSave(cat, item);
 }
+// Every tap saves immediately to the lead record — closing the browser
+// mid-survey no longer loses anything. Also keeps the progress bar live.
+var _pmtSurveySaveTimer = null;
+async function pmtSurveyPartialSave(){
+  clearTimeout(_pmtSurveySaveTimer);
+  pmtUpdateSurveyProgress();
+  _pmtSurveySaveTimer = setTimeout(async function(){
+    var leadId = window._pmtSurveyLeadId;
+    if(!leadId) return;
+    var sels = {};
+    document.querySelectorAll('#survey-ov input[type=hidden][id^="sv_"]').forEach(function(inp){
+      if(inp.value) sels[inp.name] = inp.value;
+    });
+    try{ await dbUpd('leads', leadId, {survey_selections_draft: JSON.stringify(sels)}); }
+    catch(e){ console.warn('Partial save skipped:', e); }
+  }, 600);
+}
+function pmtUpdateSurveyProgress(){
+  var bar = document.getElementById('survey-progress-bar');
+  if(!bar) return;
+  var parts = [];
+  var totalDone = 0, totalAll = 0;
+  Object.keys(SURVEY_CATS).forEach(function(cat){
+    var items = Object.keys(SURVEY_CATS[cat].items);
+    var done = 0;
+    items.forEach(function(item){
+      var inp = document.getElementById('sv_'+cat+'_'+item);
+      if(inp && inp.value) done++;
+    });
+    totalDone += done; totalAll += items.length;
+    parts.push(cat+' '+done+'/'+items.length+(done===items.length?' \u2713':''));
+  });
+  var pct = totalAll ? Math.round((totalDone/totalAll)*100) : 0;
+  bar.innerHTML = parts.join(' \u00b7 ')+' \u2014 '+pct+'% complete'
+    +'<div style="height:4px;background:#e5e7eb;border-radius:2px;margin-top:5px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--teal);transition:width 0.3s"></div></div>';
+}
+window._pmtSurveyInspirationPhotos = [];
+function pmtHandleInspirationUpload(input){
+  var preview = document.getElementById('survey-inspiration-preview');
+  Array.from(input.files).forEach(function(file){
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      window._pmtSurveyInspirationPhotos.push(ev.target.result);
+      var img = document.createElement('img');
+      img.src = ev.target.result;
+      img.style.cssText = 'width:60px;height:60px;object-fit:cover;border-radius:6px';
+      preview.appendChild(img);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Review-Before-Submit — shows everything picked, one screen, before it
+// actually commits. Closing this screen goes back to editing; nothing is
+// lost either way since partial save already has it.
+function pmtShowSurveyReview(leadId){
+  var picks = [];
+  Object.keys(SURVEY_CATS).forEach(function(cat){
+    Object.keys(SURVEY_CATS[cat].items).forEach(function(item){
+      var inp = document.getElementById('sv_'+cat+'_'+item);
+      var allowInp = document.getElementById('sv_'+cat+'_'+item+'_allowance');
+      if(inp && inp.value){
+        var parts = inp.value.split(':');
+        picks.push({cat:cat, item:item, tier:parts[0], name:parts.slice(1).join(':'), allowance: allowInp?allowInp.value:''});
+      }
+    });
+  });
+  document.querySelectorAll('#survey-review-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'survey-review-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1100;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:460px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:18px 22px;border-bottom:1px solid var(--border)"><div style="font-weight:800;font-size:16px">Review Your Selections</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-top:2px">'+picks.length+' item'+(picks.length===1?'':'s')+' selected. Check everything looks right before submitting.</div></div>'
+    +'<div style="padding:14px 22px;overflow-y:auto;flex:1">'
+    + (picks.length ? picks.map(function(p){
+        return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
+          +'<div><div style="font-size:12.5px;font-weight:700">'+p.item+'</div><div style="font-size:11px;color:var(--muted)">'+p.tier+' — '+uxEsc(p.name)+'</div></div>'
+          +(p.allowance?'<div style="font-size:12px;font-weight:700;color:#d97706">$'+p.allowance+'</div>':'')
+          +'</div>';
+      }).join('') : '<div style="color:var(--dim);text-align:center;padding:20px 0;font-size:12.5px">Nothing selected yet — go back and pick a few things first.</div>')
+    +'</div>'
+    +'<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px">'
+    +'<button onclick="document.getElementById(\'survey-review-ov\').remove()" style="flex:1;padding:10px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer">Back to Edit</button>'
+    +(picks.length?'<button onclick="document.getElementById(\'survey-review-ov\').remove();saveSurveyResults(\''+leadId+'\',this)" style="flex:2;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer">Submit Survey</button>':'')
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+
 function pmtShowEnlargedPhoto(url, name){
   document.querySelectorAll('#survey-photo-ov').forEach(function(el){el.remove();});
   var el = document.createElement('div');
@@ -11685,6 +11822,10 @@ async function saveSurveyResults(leadId,btnEl){
   document.querySelectorAll('#survey-ov input[type=hidden][id^="sv_"]').forEach(function(inp){
     if(inp.value) sels[inp.name] = inp.value;
   });
+  var allowances={};
+  document.querySelectorAll('#survey-ov input[type=number][id$="_allowance"]').forEach(function(inp){
+    if(inp.value) allowances[inp.id] = inp.value;
+  });
   if(window._pmtSurveyCustomData){
     Object.keys(window._pmtSurveyCustomData).forEach(function(k){
       var origName = k.replace('sv_custom_','sv_');
@@ -11694,7 +11835,7 @@ async function saveSurveyResults(leadId,btnEl){
   var notes=document.getElementById('survey-notes')?document.getElementById('survey-notes').value:'';
   if(Object.keys(sels).length===0&&!notes.trim()){toast('Make at least one selection before saving','err');if(btnEl)releaseAction(idemKey,btnEl,false);return;}
   try{
-    await dbUpd('leads', leadId, {survey_selections: JSON.stringify(sels), survey_notes: notes, survey_completed: new Date().toISOString()});
+    await dbUpd('leads', leadId, {survey_selections: JSON.stringify(sels), survey_allowances: JSON.stringify(allowances), survey_inspiration_photos: JSON.stringify(window._pmtSurveyInspirationPhotos||[]), survey_selections_draft: null, survey_notes: notes, survey_completed: new Date().toISOString()});
     var prefs = Object.values(sels); if(notes) prefs.push(notes);
     await dbUpd('leads', leadId, {client_preferences: JSON.stringify(prefs)});
 
