@@ -15548,6 +15548,100 @@ function pmtHighlightItem(groupId, itemId){
   pmtRedraw();
   setTimeout(function(){ pmtHighlightedItemId=null; pmtRedraw(); }, 1500);
 }
+// The actual "better than Kreo" idea: instead of building formulas
+// yourself item by item, tell it what you measured and it works out the
+// real materials and quantities needed to build it — using the same AI
+// connection already wired into this app (api/claude.js), not a new
+// no-code formula language you'd have to learn.
+async function pmtGenerateMaterialList(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  if(!it) return;
+  var dashIdx = (it.label||'').indexOf(' — ');
+  var itemName = dashIdx>-1 ? it.label.slice(0,dashIdx) : (it.libItemName||'this item');
+
+  if(it.materials && it.materials.length){
+    pmtShowMaterialListModal(itemName, it.materials, it.materialsNotes||'', groupId, itemId);
+    return;
+  }
+
+  var qty, unit;
+  if(it.value_squares!==undefined){ qty=it.value_squares; unit='squares'; }
+  else if(it.value_cy!==undefined){ qty=it.value_cy; unit='CY'; }
+  else if(it.type==='count'){ qty=1; unit='ea'; }
+  else if(it.value_sqft!==undefined){ qty=it.value_sqft; unit='sqft'; }
+  else if(it.value_ft!==undefined){ qty=it.value_ft; unit='lf'; }
+  else { qty=''; unit=''; }
+
+  pmtShowMaterialLoading(itemName);
+  try{
+    var context = itemName+': '+qty+' '+unit+(it.answers && Object.keys(it.answers).length ? ' (details: '+JSON.stringify(it.answers)+')' : '');
+    var resp = await fetch('/api/claude', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6', max_tokens:1000,
+        system:'You are a construction estimator for a residential builder in the Hudson Valley, NY. Given one measured takeoff item, break it into the real materials needed to build/install it, with realistic quantities and standard waste factored in. Return ONLY valid JSON, no markdown fences, no text outside the JSON: {"materials":[{"name":"","qty":0,"unit":""}],"notes":""}. "notes" is one short practical sentence or empty string.',
+        messages:[{role:'user', content:'Measured item: '+context+'. List the real materials needed to build/install this, with quantities.'}]
+      })
+    });
+    var data = await resp.json();
+    if(data.error) throw new Error(data.error.message || data.error);
+    var text = (data.content && data.content[0] && data.content[0].text) || '';
+    var parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
+    it.materials = parsed.materials || [];
+    it.materialsNotes = parsed.notes || '';
+    pmtHideMaterialLoading();
+    pmtShowMaterialListModal(itemName, it.materials, it.materialsNotes, groupId, itemId);
+    pmtAutoSave();
+  }catch(e){
+    pmtHideMaterialLoading();
+    console.error('Material breakdown failed:', e);
+    toast('Could not generate a material list right now — try again','err');
+  }
+}
+function pmtShowMaterialLoading(itemName){
+  document.querySelectorAll('#pmt-material-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-material-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:26px 30px;text-align:center">'
+    +'<div style="font-size:13px;color:#6b7280">Working out the materials for <b>'+uxEsc(itemName)+'</b>…</div></div>';
+  document.body.appendChild(el);
+}
+function pmtHideMaterialLoading(){
+  var el = document.getElementById('pmt-material-ov'); if(el) el.remove();
+}
+function pmtShowMaterialListModal(itemName, materials, notes, groupId, itemId){
+  document.querySelectorAll('#pmt-material-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-material-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:420px;max-height:78vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">'
+    +'<div><div style="font-weight:800;font-size:15px">🤖 Materials — '+uxEsc(itemName)+'</div>'
+    +(notes?'<div style="font-size:11.5px;color:#6b7280;margin-top:2px">'+uxEsc(notes)+'</div>':'')+'</div>'
+    +'<span onclick="document.getElementById(\'pmt-material-ov\').remove()" style="cursor:pointer;color:#9ca3af;font-size:18px">×</span>'
+    +'</div>'
+    +'<div style="padding:12px 20px;overflow-y:auto;flex:1">'
+    + (materials.length ? materials.map(function(m){
+        return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:12.5px">'
+          +'<span style="color:#374151">'+uxEsc(m.name)+'</span>'
+          +'<span style="font-weight:700;color:#111827">'+m.qty+' '+uxEsc(m.unit||'')+'</span></div>';
+      }).join('') : '<div style="color:#9ca3af;font-size:12.5px;padding:10px 0">No materials returned.</div>')
+    +'</div>'
+    +'<div style="padding:14px 20px;border-top:1px solid #eee;background:#f9fafb;display:flex;gap:8px">'
+    +'<button onclick="pmtRegenerateMaterialList(\''+groupId+'\',\''+itemId+'\')" style="flex:1;padding:10px;background:#fff;color:#374151;border:1px solid #e5e7eb;border-radius:8px;font-weight:700;cursor:pointer;font-size:12px">🔄 Regenerate</button>'
+    +'<button onclick="document.getElementById(\'pmt-material-ov\').remove()" style="flex:2;padding:10px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:12.5px">Done</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+function pmtRegenerateMaterialList(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  if(it){ it.materials = null; }
+  pmtGenerateMaterialList(groupId, itemId);
+}
+
 function pmtEditItemValue(groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
   var it = g ? g.items.find(function(i){return i.id===itemId;}) : null;
@@ -15696,6 +15790,7 @@ function pmtRenderSidebar(){
               +'<span class="pmt-item-label" contenteditable="true" onclick="event.stopPropagation()" onblur="pmtRenameItem(\''+g.id+'\',\''+it.id+'\',this.textContent)" style="outline:none;flex:1;font-size:12.5px;font-weight:800;color:#fff;border-bottom:1px dashed transparent" onfocus="this.style.borderBottomColor=\'rgba(255,255,255,0.3)\'">'+(it.locked?'🔒 ':'')+uxEsc(itemName)+'</span>'
               +'<span style="font-size:13.5px;font-weight:800;color:'+g.color+';white-space:nowrap">'+qty+' '+unit+'</span>'
               +'<span style="display:flex;gap:6px;flex-shrink:0">'
+              +'<span onclick="event.stopPropagation();pmtGenerateMaterialList(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.materials&&it.materials.length?'View materials ('+it.materials.length+')':'Generate material list')+'">'+(it.materials&&it.materials.length?'📦':'🤖')+'</span>'
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
               +'</span></div>'
