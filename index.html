@@ -8699,15 +8699,21 @@ async function checkBidPrice(bidId, subId, btnEl){
 
     btnEl && (btnEl.textContent='🔍 Checking...');
 
-    var prompt = 'Trade: '+bid.trade+'.\nScope of work:\n'+(bid.scope_of_work||'General scope')
-      + '\n\nGive a realistic total price range for a subcontractor to complete this scope in Hudson Valley, NY residential construction. '
-      + 'Return ONLY valid JSON: {"expected_low":0,"expected_high":0,"reasoning":"one short sentence"}';
-    var r = await ai(prompt, 'You are a construction cost estimator for Hudson Valley, NY. Return only valid JSON.', 300);
-    var aiResult = safeJSON(r);
+    var aiResult = null, aiFailed = false;
+    try{
+      var prompt = 'Trade: '+bid.trade+'.\nScope of work:\n'+(bid.scope_of_work||'General scope')
+        + '\n\nGive a realistic total price range for a subcontractor to complete this scope in Hudson Valley, NY residential construction. '
+        + 'Return ONLY valid JSON: {"expected_low":0,"expected_high":0,"reasoning":"one short sentence"}';
+      var r = await ai(prompt, 'You are a construction cost estimator for Hudson Valley, NY. Return only valid JSON.', 300);
+      aiResult = safeJSON(r);
+    }catch(aiErr){
+      console.warn('AI bid check unavailable:', aiErr);
+      aiFailed = true;
+    }
 
     btnEl && (btnEl.textContent='🔍 Sanity Check');
     releaseAction(idemKey,btnEl,true);
-    showBidCheckModal(bid, resp.amount, aiResult);
+    showBidCheckModal(bid, resp.amount, aiResult, aiFailed);
   }catch(e){
     btnEl && (btnEl.textContent='🔍 Sanity Check');
     if(btnEl) releaseAction(idemKey,btnEl,false);
@@ -8715,7 +8721,7 @@ async function checkBidPrice(bidId, subId, btnEl){
   }
 }
 
-function showBidCheckModal(bid, subAmount, aiResult){
+function showBidCheckModal(bid, subAmount, aiResult, aiFailed){
   document.querySelectorAll('#bid-check-ov').forEach(function(el){el.remove();});
   var low = aiResult && aiResult.expected_low;
   var high = aiResult && aiResult.expected_high;
@@ -8735,7 +8741,9 @@ function showBidCheckModal(bid, subAmount, aiResult){
     +'</div>'
     +'<div style="padding:16px 22px">'
     +'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12.5px;color:#374151">Sub\'s bid</span><span style="font-weight:800;font-size:15px">'+fmt$(subAmount)+'</span></div>'
-    +(low!=null ? '<div style="display:flex;justify-content:space-between;padding:8px 0"><span style="font-size:12.5px;color:#374151">AI expected range</span><span style="font-weight:700;font-size:13px">'+fmt$(low)+' – '+fmt$(high)+'</span></div>' : '<div style="color:#9ca3af;font-size:12px;padding:8px 0">AI estimate unavailable</div>')
+    +(aiFailed
+      ? '<div style="color:#d97706;font-size:12px;padding:10px 0">AI estimate unavailable — check your API setup/credits. You can still compare this manually against your own historical bids for '+uxEsc(bid.trade)+'.</div>'
+      : (low!=null ? '<div style="display:flex;justify-content:space-between;padding:8px 0"><span style="font-size:12.5px;color:#374151">AI expected range</span><span style="font-weight:700;font-size:13px">'+fmt$(low)+' – '+fmt$(high)+'</span></div>' : '<div style="color:#9ca3af;font-size:12px;padding:8px 0">AI estimate unavailable</div>'))
     +'<div style="margin-top:6px">'+verdict+'</div>'
     +(aiResult && aiResult.reasoning ? '<div style="font-size:11.5px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:10px;margin-top:10px">'+uxEsc(aiResult.reasoning)+'</div>' : '')
     +'</div>'
@@ -8778,16 +8786,24 @@ async function checkLinePrice(estId, idx, btnEl){
     });
     var histAvg = matches.length ? Math.round((matches.reduce(function(s,m){return s+m.unit_cost;},0)/matches.length)*100)/100 : null;
 
-    // AI estimate for current market pricing
-    var prompt = 'Line item: "'+line.description+'" — quantity '+line.qty+' '+line.unit+'. '
-      + (histAvg ? 'Corestone\'s own historical average for similar items: $'+histAvg+' per '+line.unit+' (from '+matches.length+' past job'+(matches.length===1?'':'s')+'). ' : 'No historical data available for this item. ')
-      + 'Give a realistic current unit cost for this in Hudson Valley, NY residential construction. Return ONLY valid JSON: {"estimated_unit_cost":0,"reasoning":"one short sentence"}';
-    var r = await ai(prompt, 'You are a construction cost estimator for Hudson Valley, NY. Return only valid JSON.', 300);
-    var aiResult = safeJSON(r);
+    // AI estimate for current market pricing — isolated so a failure here
+    // (no API key configured, no credits, network issue) never loses the
+    // historical comparison, which doesn't depend on AI at all.
+    var aiResult = null, aiFailed = false;
+    try{
+      var prompt = 'Line item: "'+line.description+'" — quantity '+line.qty+' '+line.unit+'. '
+        + (histAvg ? 'Corestone\'s own historical average for similar items: $'+histAvg+' per '+line.unit+' (from '+matches.length+' past job'+(matches.length===1?'':'s')+'). ' : 'No historical data available for this item. ')
+        + 'Give a realistic current unit cost for this in Hudson Valley, NY residential construction. Return ONLY valid JSON: {"estimated_unit_cost":0,"reasoning":"one short sentence"}';
+      var r = await ai(prompt, 'You are a construction cost estimator for Hudson Valley, NY. Return only valid JSON.', 300);
+      aiResult = safeJSON(r);
+    }catch(aiErr){
+      console.warn('AI price estimate unavailable:', aiErr);
+      aiFailed = true;
+    }
 
     btnEl && (btnEl.textContent='🔍 Check');
     releaseAction(idemKey,btnEl,true);
-    showPriceCheckModal(estId, idx, line, histAvg, matches.length, aiResult);
+    showPriceCheckModal(estId, idx, line, histAvg, matches.length, aiResult, aiFailed);
   }catch(e){
     btnEl && (btnEl.textContent='🔍 Check');
     if(btnEl) releaseAction(idemKey,btnEl,false);
@@ -8795,7 +8811,7 @@ async function checkLinePrice(estId, idx, btnEl){
   }
 }
 
-function showPriceCheckModal(estId, idx, line, histAvg, matchCount, aiResult){
+function showPriceCheckModal(estId, idx, line, histAvg, matchCount, aiResult, aiFailed){
   document.querySelectorAll('#price-check-ov').forEach(function(el){el.remove();});
   var currentCost = line.unit_cost||0;
   var aiCost = aiResult && aiResult.estimated_unit_cost;
@@ -8823,20 +8839,32 @@ function showPriceCheckModal(estId, idx, line, histAvg, matchCount, aiResult){
       ? '<span style="text-align:right"><span style="font-weight:800;font-size:14px">'+fmt$(histAvg)+'/'+line.unit+'</span><br>'+diffLabel(histAvg)+'</span>'
       : '<span style="color:#9ca3af;font-size:12px">No matching history</span>')
     +'</div>'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0'+(aiFailed?'':'')+'">'
     +'<span style="font-size:12.5px;color:#374151">AI estimate (current market)</span>'
-    +(aiCost
-      ? '<span style="text-align:right"><span style="font-weight:800;font-size:14px">'+fmt$(aiCost)+'/'+line.unit+'</span><br>'+diffLabel(aiCost)+'</span>'
-      : '<span style="color:#9ca3af;font-size:12px">Unavailable</span>')
+    +(aiFailed
+      ? '<span style="color:#d97706;font-size:11px;text-align:right">AI unavailable<br><span style="font-size:10px">(check API setup/credits)</span></span>'
+      : (aiCost
+        ? '<span style="text-align:right"><span style="font-weight:800;font-size:14px">'+fmt$(aiCost)+'/'+line.unit+'</span><br>'+diffLabel(aiCost)+'</span>'
+        : '<span style="color:#9ca3af;font-size:12px">Unavailable</span>'))
     +'</div>'
     +(aiResult && aiResult.reasoning ? '<div style="font-size:11.5px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:10px;margin-top:8px">'+uxEsc(aiResult.reasoning)+'</div>' : '')
+    +'<div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #f3f4f6">'
+    +'<span style="font-size:12.5px;color:#374151;flex:1">Or enter a price yourself:</span>'
+    +'<input type="number" id="price-check-manual" placeholder="$/'+line.unit+'" style="width:90px;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12.5px">'
     +'</div>'
-    +'<div style="padding:14px 22px;border-top:1px solid #eee;background:#f9fafb;display:flex;gap:8px">'
+    +'</div>'
+    +'<div style="padding:14px 22px;border-top:1px solid #eee;background:#f9fafb;display:flex;gap:8px;flex-wrap:wrap">'
     +(histAvg ? '<button onclick="applyCheckedPrice(\''+estId+'\','+idx+','+histAvg+')" style="flex:1;padding:9px;background:#fff;border:1px solid #0d7a70;color:#0d7a70;border-radius:8px;font-weight:700;cursor:pointer;font-size:11.5px">Use Historical</button>' : '')
     +(aiCost ? '<button onclick="applyCheckedPrice(\''+estId+'\','+idx+','+aiCost+')" style="flex:1;padding:9px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:11.5px">Use AI Estimate</button>' : '')
+    +'<button onclick="applyManualCheckedPrice(\''+estId+'\','+idx+')" style="flex:1;padding:9px;background:#374151;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:11.5px">Use My Price</button>'
     +'<button onclick="document.getElementById(\'price-check-ov\').remove()" style="flex:1;padding:9px;background:transparent;border:1px solid #e5e7eb;color:#6b7280;border-radius:8px;cursor:pointer;font-size:11.5px">Keep Current</button>'
     +'</div></div>';
   document.body.appendChild(el);
+}
+function applyManualCheckedPrice(estId, idx){
+  var v = parseFloat(document.getElementById('price-check-manual').value);
+  if(isNaN(v)){ toast('Enter a price first','err'); return; }
+  applyCheckedPrice(estId, idx, v);
 }
 
 async function applyCheckedPrice(estId, idx, newCost){
@@ -10827,20 +10855,27 @@ function showClientSurvey(leadId){
       html+='<div style="margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">'
         +'<div style="font-size:13px;font-weight:800;margin-bottom:3px">'+item+'</div>'
         +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">'+itemData.desc+'</div>'
-        +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">';
+        +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
 
       itemData.opts.forEach(function(opt){
         var tc = tierColors[opt.tier], tb = tierBgs[opt.tier];
         html+='<label style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:'+tb+';border:1.5px solid '+tc+';cursor:pointer;position:relative">'
-          +'<input type="radio" name="sv_'+cat+'_'+item+'" value="'+opt.tier+':'+opt.name+'" style="position:absolute;top:8px;right:8px;margin:0">'
+          +'<input type="radio" name="sv_'+cat+'_'+item+'" value="'+opt.tier+':'+opt.name+'" onmousedown="this._wasChecked=this.checked" onclick="if(this._wasChecked){this.checked=false;event.preventDefault();}" style="position:absolute;top:8px;right:8px;margin:0">'
           +(opt.img && opt.img.indexOf('http')===0
-            ? '<img src="'+opt.img+'" style="width:100%;height:72px;object-fit:cover;border-radius:6px" loading="lazy" onerror="this.style.display=\'none\'">'
+            ? '<img src="'+opt.img+'" onclick="event.preventDefault();event.stopPropagation();pmtShowEnlargedPhoto(\''+opt.img+'\',\''+uxEsc(opt.name)+'\')" style="width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:zoom-in" loading="lazy" onerror="this.style.display=\'none\'">'
             : '<div style="font-size:18px">'+opt.img+'</div>')
           +'<div style="font-size:9px;font-weight:800;color:'+tc+';text-transform:uppercase;letter-spacing:0.05em">'+opt.tier+'</div>'
           +'<div style="font-size:11px;font-weight:700;color:var(--text)">'+opt.name+'</div>'
           +'<div style="font-size:10px;color:var(--muted);line-height:1.4">'+opt.desc+'</div>'
           +'</label>';
       });
+      html+='<label style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:#f9fafb;border:1.5px dashed #9ca3af;cursor:pointer;position:relative">'
+        +'<input type="radio" name="sv_'+cat+'_'+item+'" value="Custom:Uploaded" onmousedown="this._wasChecked=this.checked" onclick="if(this._wasChecked){this.checked=false;event.preventDefault();}else{pmtShowCustomUploadPrompt(this,\''+cat+'\',\''+item+'\')}" style="position:absolute;top:8px;right:8px;margin:0">'
+        +'<div style="width:100%;height:72px;border-radius:6px;background:#fff;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;font-size:22px">📤</div>'
+        +'<div style="font-size:9px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Custom</div>'
+        +'<div style="font-size:11px;font-weight:700;color:var(--text)">Upload Your Own</div>'
+        +'<div style="font-size:10px;color:var(--muted);line-height:1.4">Have something specific in mind? Upload a photo and notes.</div>'
+        +'</label>';
 
       html+='</div></div>';
     });
@@ -10861,11 +10896,75 @@ function showClientSurvey(leadId){
   document.body.appendChild(el);
 }
 
+// Click any survey option photo to see it full size
+function pmtShowEnlargedPhoto(url, name){
+  document.querySelectorAll('#survey-photo-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'survey-photo-ov';
+  el.onclick = function(){ el.remove(); };
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:4000;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out';
+  el.innerHTML = '<img src="'+url+'" style="max-width:88vw;max-height:80vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,0.5)">'
+    +'<div style="color:#fff;font-weight:700;margin-top:14px;font-size:14px">'+uxEsc(name||'')+'</div>'
+    +'<div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:4px">Click anywhere to close</div>';
+  document.body.appendChild(el);
+}
+
+// The 4th tier — client uploads their own reference photo and notes
+// instead of picking one of the three preset options.
+function pmtShowCustomUploadPrompt(radioEl, cat, item){
+  document.querySelectorAll('#survey-custom-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'survey-custom-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:4000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:340px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:10px">Upload your own — '+uxEsc(item)+'</div>'
+    +'<input type="file" id="survey-custom-file" accept="image/*" style="width:100%;margin-bottom:10px;font-size:12px">'
+    +'<div id="survey-custom-preview" style="display:none;margin-bottom:10px"><img id="survey-custom-preview-img" style="width:100%;height:120px;object-fit:cover;border-radius:8px"></div>'
+    +'<textarea id="survey-custom-notes" placeholder="Describe what you want (brand, color, style, etc.)" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;min-height:70px;font-family:inherit;font-size:12.5px"></textarea>'
+    +'<button onclick="pmtConfirmCustomUpload(\''+cat+'\',\''+item+'\')" style="width:100%;margin-top:10px;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Save This Selection</button>'
+    +'<button onclick="pmtCancelCustomUpload()" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  window._pmtCustomUploadRadio = radioEl;
+  document.getElementById('survey-custom-file').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      document.getElementById('survey-custom-preview').style.display='block';
+      document.getElementById('survey-custom-preview-img').src = ev.target.result;
+      window._pmtCustomUploadDataUrl = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function pmtConfirmCustomUpload(cat, item){
+  var notes = document.getElementById('survey-custom-notes').value.trim();
+  var photo = window._pmtCustomUploadDataUrl || '';
+  if(!notes && !photo){ toast('Add a photo or notes before saving','err'); return; }
+  var key = 'sv_custom_'+cat+'_'+item;
+  window._pmtSurveyCustomData = window._pmtSurveyCustomData || {};
+  window._pmtSurveyCustomData[key] = {photo: photo, notes: notes};
+  if(window._pmtCustomUploadRadio){ window._pmtCustomUploadRadio.checked = true; }
+  document.getElementById('survey-custom-ov').remove();
+  toast('Custom selection saved for '+item,'ok');
+}
+function pmtCancelCustomUpload(){
+  document.getElementById('survey-custom-ov').remove();
+  window._pmtCustomUploadDataUrl = null;
+}
+
 async function saveSurveyResults(leadId,btnEl){
   var idemKey='save_survey_'+leadId;
   if(btnEl && !guardAction(idemKey,btnEl)) return;
   var sels={};
   document.querySelectorAll('#survey-ov input[type=radio]:checked').forEach(function(r){sels[r.name]=r.value;});
+  if(window._pmtSurveyCustomData){
+    Object.keys(window._pmtSurveyCustomData).forEach(function(k){
+      var origName = k.replace('sv_custom_','sv_');
+      sels[origName+'_custom'] = window._pmtSurveyCustomData[k];
+    });
+  }
   var notes=document.getElementById('survey-notes')?document.getElementById('survey-notes').value:'';
   if(Object.keys(sels).length===0&&!notes.trim()){toast('Make at least one selection before saving','err');if(btnEl)releaseAction(idemKey,btnEl,false);return;}
   try{
@@ -15266,10 +15365,17 @@ var DEFAULT_ITEM_LIBRARY = [
     {label:'Draw the roof area', tool:'poly', outputUnit:'squares', questions:[{key:'pitch',label:'Roof Pitch',suffix:'/12'}]}
   ]},
   {id:'siding', name:'Siding', methods:[
-    {label:'Draw the wall area', tool:'rect', outputUnit:'sqft', questions:[]}
+    {label:'Vinyl Siding',tool:'rect', outputUnit:'sqft', questions:[]},
+    {label:'Stucco',tool:'rect', outputUnit:'sqft', questions:[]},
+    {label:'Stone Veneer',tool:'rect', outputUnit:'sqft', questions:[]},
+    {label:'Fiber Cement (Hardie)',tool:'rect', outputUnit:'sqft', questions:[]}
   ]},
   {id:'flooring', name:'Flooring', methods:[
-    {label:'Draw the room area', tool:'poly', outputUnit:'sqft', questions:[]}
+    {label:'LVP / Vinyl Plank',tool:'poly', outputUnit:'sqft', questions:[]},
+    {label:'Engineered Hardwood',tool:'poly', outputUnit:'sqft', questions:[]},
+    {label:'Solid Hardwood',tool:'poly', outputUnit:'sqft', questions:[]},
+    {label:'Tile',tool:'poly', outputUnit:'sqft', questions:[]},
+    {label:'Carpet',tool:'poly', outputUnit:'sqft', questions:[]}
   ]},
   {id:'framing', name:'Wall Framing', methods:[
     {label:'Draw the wall length', tool:'wall', outputUnit:'lf', questions:[]}
@@ -15294,7 +15400,21 @@ var DEFAULT_ITEM_LIBRARY = [
 ];
 function pmtGetItemLibrary(){
   var items = lsAll('item_library');
-  if(!items || !items.length){ items = DEFAULT_ITEM_LIBRARY; lsSave('item_library', items); }
+  if(!items || !items.length){ items = DEFAULT_ITEM_LIBRARY; lsSave('item_library', items); return items; }
+  // One-time upgrade: items created before material-choice support only
+  // had one generic method (just "draw the area") — bring them up to the
+  // real multi-material version, but never touch an item whose name the
+  // user has changed or whose methods they've already customized past 1.
+  var upgraded = false;
+  ['siding','flooring'].forEach(function(id){
+    var existing = items.find(function(i){return i.id===id;});
+    var fresh = DEFAULT_ITEM_LIBRARY.find(function(i){return i.id===id;});
+    if(existing && fresh && existing.methods.length===1 && existing.methods[0].label.indexOf('Draw the')===0){
+      existing.methods = fresh.methods;
+      upgraded = true;
+    }
+  });
+  if(upgraded){ lsSave('item_library', items); toast('Your Item Library was upgraded — Siding and Flooring now ask which material','ok',6000); }
   return items;
 }
 function pmtSaveItemLibrary(items){ lsSave('item_library', items); }
@@ -15884,6 +16004,50 @@ function pmtRegenerateMaterialList(groupId, itemId){
   pmtGenerateMaterialList(groupId, itemId);
 }
 
+// The actual "editable" fix — pitch, depth, width, or any other answer
+// tied to a measurement can be changed after the fact, and the number
+// recalculates immediately. No need to delete and remeasure.
+function pmtEditItemAnswers(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  if(!it || !it.libMethod || !it.libMethod.questions || !it.libMethod.questions.length){
+    toast('This item has no editable answers','err');
+    return;
+  }
+  document.querySelectorAll('#pmt-editans-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-editans-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:300px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:12px">Edit — '+uxEsc(it.libItemName||'Measurement')+'</div>'
+    + it.libMethod.questions.map(function(q,i){
+        var val = (it.answers && it.answers[q.key]!==undefined) ? it.answers[q.key] : '';
+        return '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">'+q.label+(q.suffix?' ('+q.suffix+')':'')+'</label>'
+          +'<input type="number" id="pmt-ea-'+i+'" value="'+val+'" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box"></div>';
+      }).join('')
+    +'<button onclick="pmtSaveItemAnswers(\''+groupId+'\',\''+itemId+'\')" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Save & Recalculate</button>'
+    +'<button onclick="document.getElementById(\'pmt-editans-ov\').remove()" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+  window._pmtEditAnsCtx = {groupId:groupId, itemId:itemId};
+}
+function pmtSaveItemAnswers(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  if(!it) return;
+  var answers = {};
+  it.libMethod.questions.forEach(function(q,i){
+    var v = parseFloat(document.getElementById('pmt-ea-'+i).value);
+    answers[q.key] = isNaN(v) ? 0 : v;
+  });
+  it.answers = answers;
+  pmtApplyCategoryMath(it);
+  document.getElementById('pmt-editans-ov').remove();
+  pmtRenderSidebar();
+  pmtAutoSave();
+  toast('Recalculated','ok');
+}
+
 function pmtEditItemValue(groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
   var it = g ? g.items.find(function(i){return i.id===itemId;}) : null;
@@ -16033,6 +16197,7 @@ function pmtRenderSidebar(){
               +'<span style="font-size:13.5px;font-weight:800;color:'+g.color+';white-space:nowrap">'+qty+' '+unit+'</span>'
               +'<span style="display:flex;gap:6px;flex-shrink:0">'
               +'<span onclick="event.stopPropagation();pmtGenerateMaterialList(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.materials&&it.materials.length?'View materials ('+it.materials.length+')':'Generate material list')+'">'+(it.materials&&it.materials.length?'📦':'🤖')+'</span>'
+              +(it.libMethod && it.libMethod.questions && it.libMethod.questions.length ? '<span onclick="event.stopPropagation();pmtEditItemAnswers(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit '+it.libMethod.questions.map(function(q){return q.label;}).join('/')+'">📐</span>' : '')
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
               +'</span></div>'
