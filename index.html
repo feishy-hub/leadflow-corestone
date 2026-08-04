@@ -8798,6 +8798,12 @@ function pmtDoAssignItem(groupId, itemId, libItemId){
   function apply(method){
     var dashIdx = (it.label||'').indexOf(' — ');
     var namePart = dashIdx>-1 ? it.label.slice(0,dashIdx) : libItem.name;
+    // Clear anything the PREVIOUS item's math attached — otherwise
+    // reassigning Roofing (squares) to Flooring (sqft) leaves the old
+    // value_squares field sitting there and it wins the display check.
+    delete it.value_squares;
+    delete it.value_true_sqft;
+    delete it.value_cy;
     it.libItem = libItem.id; it.libItemName = libItem.name; it.libMethod = method;
     if(method.questions && method.questions.length){
       // Ask the questions now, then recalculate with the answers
