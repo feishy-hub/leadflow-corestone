@@ -8753,6 +8753,103 @@ function showBidCheckModal(bid, subAmount, aiResult, aiFailed){
   document.body.appendChild(el);
 }
 
+// The first real piece of the draw-first-assign-after flow: any
+// measurement, however it was created, can have an item assigned or
+// changed afterward — no need to redraw.
+function pmtAssignItemToMeasurement(groupId, itemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  if(!it) return;
+  document.querySelectorAll('#pmt-assign-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-assign-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:320px;max-height:70vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eee">'
+    +'<div style="font-weight:800;font-size:14px">Assign an item to this measurement</div>'
+    +'<input id="pmt-assign-search" placeholder="Search item types…" oninput="pmtFilterAssignList(\''+groupId+'\',\''+itemId+'\',this.value)" style="width:100%;padding:9px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;margin-top:10px;box-sizing:border-box">'
+    +'</div>'
+    +'<div id="pmt-assign-list" style="overflow-y:auto;flex:1"></div>'
+    +'<div style="padding:12px 20px;border-top:1px solid #eee"><button onclick="document.getElementById(\'pmt-assign-ov\').remove()" style="width:100%;padding:9px;background:transparent;border:1px solid #e5e7eb;color:#6b7280;border-radius:8px;cursor:pointer;font-size:12px">Cancel</button></div>'
+    +'</div>';
+  document.body.appendChild(el);
+  pmtFilterAssignList(groupId, itemId, '');
+  setTimeout(function(){ var s=document.getElementById('pmt-assign-search'); if(s) s.focus(); }, 30);
+}
+function pmtFilterAssignList(groupId, itemId, q){
+  var list = document.getElementById('pmt-assign-list');
+  if(!list) return;
+  q = (q||'').toLowerCase();
+  var matches = pmtGetItemLibrary().filter(function(c){ return c.name.toLowerCase().indexOf(q) > -1; });
+  list.innerHTML = matches.length ? matches.map(function(c){
+    return '<div onclick="pmtDoAssignItem(\''+groupId+'\',\''+itemId+'\',\''+c.id+'\')" style="display:flex;align-items:center;gap:10px;padding:10px 20px;cursor:pointer;color:#1a1d21;font-size:13px" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">'
+      +'<span style="color:#0d7a70">'+pmtSvgIcon(c.methods[0].tool)+'</span>'
+      +'<span style="flex:1;font-weight:600">'+c.name+'</span>'
+      +(c.methods.length>1?'<span style="color:#9ca3af;font-size:10px">'+c.methods.length+' ways</span>':'')
+      +'</div>';
+  }).join('') : '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">No matching item type</div>';
+}
+function pmtDoAssignItem(groupId, itemId, libItemId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  var it = g && g.items.find(function(x){return x.id===itemId;});
+  var libItem = pmtGetItemLibrary().find(function(i){return i.id===libItemId;});
+  if(!it || !libItem) return;
+  document.getElementById('pmt-assign-ov').remove();
+  function apply(method){
+    var dashIdx = (it.label||'').indexOf(' — ');
+    var namePart = dashIdx>-1 ? it.label.slice(0,dashIdx) : libItem.name;
+    it.libItem = libItem.id; it.libItemName = libItem.name; it.libMethod = method;
+    if(method.questions && method.questions.length){
+      // Ask the questions now, then recalculate with the answers
+      window._pmtPendingAssignTarget = {groupId:groupId, itemId:itemId};
+      pmtAskQuestionsThenActivate(libItem, method);
+      // Override the confirm behavior for this one-off assignment case:
+      var origConfirm = pmtConfirmQuestions;
+      pmtConfirmQuestions = function(){
+        var answers = {};
+        method.questions.forEach(function(q,i){
+          var v = parseFloat(document.getElementById('pmt-q-'+i).value);
+          answers[q.key] = isNaN(v) ? 0 : v;
+        });
+        it.answers = answers;
+        pmtApplyCategoryMath(it);
+        var ov = document.getElementById('pmt-questions-ov'); if(ov) ov.remove();
+        pmtRenderSidebar(); pmtAutoSave();
+        toast(libItem.name+' assigned','ok');
+        pmtConfirmQuestions = origConfirm; // restore normal behavior
+      };
+    } else {
+      it.answers = {};
+      it.label = namePart + ' — ' + (it.value_sqft!==undefined ? it.value_sqft+' sqft' : it.value_ft!==undefined ? it.value_ft+' ft' : it.label);
+      pmtApplyCategoryMath(it);
+      pmtRenderSidebar(); pmtAutoSave();
+      toast(libItem.name+' assigned','ok');
+    }
+  }
+  if(libItem.methods.length > 1){
+    document.querySelectorAll('#pmt-method-ov').forEach(function(el){el.remove();});
+    var el = document.createElement('div');
+    el.id = 'pmt-method-ov';
+    el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:3500;box-shadow:0 8px 30px rgba(0,0,0,0.35)';
+    el.innerHTML = '<div style="background:#fff;border-radius:12px;padding:16px;width:280px">'
+      +'<div style="font-weight:800;font-size:14px;margin-bottom:10px">How are you measuring this '+libItem.name+'?</div>'
+      + libItem.methods.map(function(m,i){
+          return '<div onclick="pmtDoAssignItemMethod(\''+groupId+'\',\''+itemId+'\',\''+libItemId+'\','+i+')" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:12.5px;font-weight:600">'+m.label+'</div>';
+        }).join('')
+      +'<button onclick="document.getElementById(\'pmt-method-ov\').remove()" style="width:100%;margin-top:4px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+      +'</div>';
+    document.body.appendChild(el);
+    window._pmtAssignApplyFn = apply;
+  } else {
+    apply(libItem.methods[0]);
+  }
+}
+function pmtDoAssignItemMethod(groupId, itemId, libItemId, methodIdx){
+  document.getElementById('pmt-method-ov').remove();
+  var libItem = pmtGetItemLibrary().find(function(i){return i.id===libItemId;});
+  if(window._pmtAssignApplyFn) window._pmtAssignApplyFn(libItem.methods[methodIdx]);
+}
+
 async function checkLinePrice(estId, idx, btnEl){
   var idemKey = 'check_line_'+estId+'_'+idx;
   if(btnEl && !guardAction(idemKey,btnEl)) return;
@@ -16244,6 +16341,7 @@ function pmtRenderSidebar(){
               +'<span style="display:flex;gap:6px;flex-shrink:0">'
               +'<span onclick="event.stopPropagation();pmtGenerateMaterialList(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.materials&&it.materials.length?'View materials ('+it.materials.length+')':'Generate material list')+'">'+(it.materials&&it.materials.length?'📦':'🤖')+'</span>'
               +(it.libMethod && it.libMethod.questions && it.libMethod.questions.length ? '<span onclick="event.stopPropagation();pmtEditItemAnswers(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit '+it.libMethod.questions.map(function(q){return q.label;}).join('/')+'">📐</span>' : '')
+              +(it.type!=='count' ? '<span onclick="event.stopPropagation();pmtAssignItemToMeasurement(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.libItemName?'Change item ('+it.libItemName+')':'Assign an item')+'">🏷️</span>' : '')
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
               +'</span></div>'
