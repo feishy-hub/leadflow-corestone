@@ -12238,18 +12238,49 @@ async function showBidComparison(leadOrJobId){
   var byTrade={};
   bids.forEach(function(b){var t=b.trade||'General';if(!byTrade[t])byTrade[t]=[];byTrade[t].push(b);});
   var el=document.createElement('div');el.className='ov';el.id='bidcomp-ov';el.style.zIndex='1000';
-  var html='<div class="modal" style="max-width:860px;margin:auto"><div class="mh"><div class="mt">Bid Comparison — All Trades</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb" style="max-height:75vh;overflow-y:auto">';
+  var html='<div class="modal" style="max-width:1000px;margin:auto"><div class="mh"><div class="mt">Bid Leveling — All Trades</div><button class="mc" onclick="closeOv(this)">&#x2715;</button></div><div class="mb" style="max-height:75vh;overflow-y:auto">';
   Object.keys(byTrade).forEach(function(trade){
     var tb=byTrade[trade].sort(function(a,b){return (a.amount||999999)-(b.amount||999999);});
-    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase;margin-bottom:8px">'+trade+'</div><table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:var(--teal);color:#fff"><th style="padding:7px;text-align:left">Sub</th><th style="padding:7px;text-align:right">Amount</th><th style="padding:7px;text-align:center">Status</th><th style="padding:7px">Notes</th><th style="padding:7px;text-align:center">Award</th></tr>';
+    var priced = tb.filter(function(b){return b.amount>0;}).map(function(b){return b.amount;});
+    var median = priced.length ? priced.slice().sort(function(a,b){return a-b;})[Math.floor(priced.length/2)] : 0;
+    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase;margin-bottom:8px">'+trade+'</div><table style="width:100%;border-collapse:collapse;font-size:11.5px"><tr style="background:var(--teal);color:#fff"><th style="padding:6px;text-align:left">Sub</th><th style="padding:6px;text-align:right">Base Bid</th><th style="padding:6px;text-align:left">Alternates</th><th style="padding:6px;text-align:left">Exclusions</th><th style="padding:6px;text-align:left">Inclusions</th><th style="padding:6px;text-align:center">Status</th><th style="padding:6px;text-align:center">Award</th></tr>';
     tb.forEach(function(b,i){
       var low=i===0&&b.amount>0;
-      html+='<tr style="border-bottom:1px solid var(--border)'+(low?';background:rgba(134,239,172,0.08)':'')+'"><td style="padding:7px;font-weight:600">'+(low?'⭐ ':'')+(b.subs||'TBD')+'</td><td style="padding:7px;text-align:right;font-weight:700;color:'+(low?'var(--green)':'inherit')+'">'+(b.amount?fmt$(b.amount):'Pending')+'</td><td style="padding:7px;text-align:center"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:'+(b.status==='received'?'var(--green-bg)':'rgba(0,0,0,0.05)')+'">'+(b.status||'sent')+'</span></td><td style="padding:7px;color:var(--muted)">'+(b.notes||'—')+'</td><td style="padding:7px;text-align:center">'+(b.awarded?'<span style="color:var(--green);font-weight:700;font-size:11px">Awarded</span>':'<button onclick="pmtConfirmAwardBid(\''+b.id+'\',\''+uxEsc(b.subs||'TBD')+'\','+(b.amount||0)+',\''+uxEsc(b.trade||'')+'\')" style="background:var(--teal);color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit">Award</button>')+'</td></tr>';
+      var outlierHigh = median && b.amount > median*1.2;
+      var outlierLow = median && b.amount>0 && b.amount < median*0.8;
+      var priceColor = low?'var(--green)':(outlierHigh?'#dc2626':outlierLow?'#d97706':'inherit');
+      html+='<tr style="border-bottom:1px solid var(--border)'+(low?';background:rgba(134,239,172,0.08)':'')+'"><td style="padding:6px;font-weight:600">'+(low?'⭐ ':'')+(b.subs||'TBD')+'</td>'
+        +'<td style="padding:6px;text-align:right;font-weight:700;color:'+priceColor+'">'+(b.amount?fmt$(b.amount):'Pending')+(outlierHigh?' <span title="More than 20% above median" style="font-size:9px">▲high</span>':outlierLow?' <span title="More than 20% below median" style="font-size:9px">▼low</span>':'')+'</td>'
+        +'<td style="padding:6px;color:var(--muted)">'+(b.alternates||'—')+'</td>'
+        +'<td style="padding:6px;color:var(--muted)">'+(b.exclusions||'—')+'</td>'
+        +'<td style="padding:6px;color:var(--muted)">'+(b.inclusions||'—')+'</td>'
+        +'<td style="padding:6px;text-align:center"><span style="padding:2px 7px;border-radius:10px;font-size:10px;background:'+(b.status==='received'?'var(--green-bg)':'rgba(0,0,0,0.05)')+'">'+(b.status||'sent')+'</span></td>'
+        +'<td style="padding:6px;text-align:center;white-space:nowrap">'
+        +'<span onclick="pmtEditBidLeveling(\''+b.id+'\')" style="cursor:pointer;margin-right:6px" title="Edit alternates/exclusions/inclusions">✏️</span>'
+        +(b.awarded?'<span style="color:var(--green);font-weight:700;font-size:11px">Awarded</span>':'<button onclick="pmtConfirmAwardBid(\''+b.id+'\',\''+uxEsc(b.subs||'TBD')+'\','+(b.amount||0)+',\''+uxEsc(b.trade||'')+'\')" style="background:var(--teal);color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit">Award</button>')
+        +'</td></tr>';
     });
     html+='</table></div>';
   });
   html+='<button onclick="aiRankAllBids(\''+leadOrJobId+'\')" class="btn btn-p" style="width:100%;margin-top:8px">🤖 AI Rank All Bids & Flag Overpriced</button></div></div>';
   el.innerHTML=html;document.body.appendChild(el);
+}
+function pmtEditBidLeveling(bidId){
+  (async function(){
+    var bids = await dbGet('bids','?id=eq.'+bidId);
+    var b = bids[0]; if(!b) return;
+    var alternates = prompt('Alternates (comma-separated, e.g. "Upgrade fixtures +$800"):', b.alternates||'');
+    if(alternates===null) return;
+    var exclusions = prompt('Exclusions (what\'s NOT included):', b.exclusions||'');
+    if(exclusions===null) return;
+    var inclusions = prompt('Inclusions (what IS included, if worth noting):', b.inclusions||'');
+    if(inclusions===null) return;
+    await dbUpd('bids', bidId, {alternates:alternates, exclusions:exclusions, inclusions:inclusions});
+    toast('Updated','ok');
+    var leadOrJobId = b.lead_id || b.job_id;
+    var ov = document.getElementById('bidcomp-ov'); if(ov) ov.remove();
+    showBidComparison(leadOrJobId);
+  })();
 }
 
 // A financial commitment shouldn't be one click — same review-before-
@@ -17580,6 +17611,36 @@ async function aifrSendSelected(sourceType, sourceId){
 // now also asks whether to move the schedule, rather than silently doing
 // nothing or moving it automatically.
 // ═══════════════════════════════════════════════════════════════════════
+async function pmtDeclineBid(bidId, subId){
+  var reasons = ['Too expensive','Scope mismatch','Timeline conflict','Sub unavailable','Other'];
+  var reason = prompt('Reason for declining?\n1) '+reasons.join('\n2) ').replace(/^1\) /,'')+'\n\nType the reason:');
+  if(!reason) return;
+  var bids = await dbGet('bids','?id=eq.'+bidId);
+  var bid = bids[0]; if(!bid) return;
+  var responses = JSON.parse(bid.responses||'[]');
+  var resp = responses.find(function(r){return r.sub_id===subId;});
+  if(resp){ resp.status='declined'; resp.decline_reason=reason; resp.declined_at=new Date().toISOString(); }
+  await dbUpd('bids', bidId, {responses: JSON.stringify(responses)});
+  toast('Bid declined','ok');
+  viewBidDetail(bidId);
+}
+function pmtExportBidPdf(bidId){
+  (async function(){
+    var bids = await dbGet('bids','?id=eq.'+bidId);
+    var bid = bids[0]; if(!bid) return;
+    var jobs = bid.job_id ? await dbGet('jobs','?id=eq.'+bid.job_id) : [];
+    var job = jobs[0];
+    var w = window.open('', '_blank');
+    w.document.write('<html><head><title>Bid Package — '+uxEsc(bid.trade)+'</title>'
+      +'<style>body{font-family:Arial,sans-serif;padding:40px;color:#1a1a1a}h1{font-size:20px;border-bottom:2px solid #0d7a70;padding-bottom:10px}.meta{color:#666;font-size:13px;margin-bottom:20px}pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.6}</style></head><body>'
+      +'<h1>Bid Package — '+uxEsc(bid.trade)+'</h1>'
+      +'<div class="meta">'+(job?uxEsc(job.job_name):uxEsc(bid.job_name||''))+' &middot; '+uxEsc(bid.address||'')+(bid.due_date?' &middot; Due back: '+bid.due_date:'')+'</div>'
+      +'<h3>Scope of Work</h3><pre>'+uxEsc((bid.scope_of_work||'').replace(/Reference photo:.*/g,''))+'</pre>'
+      +'</body></html>');
+    w.document.close();
+    setTimeout(function(){ w.print(); }, 400);
+  })();
+}
 async function viewBidDetail(id){
   var bids = await dbGet('bids','?id=eq.'+id);
   var bid = bids[0]; if(!bid){toast('Bid package not found','err');return;}
@@ -17614,8 +17675,10 @@ async function viewBidDetail(id){
             +'<input type="text" placeholder="Notes" id="bidnote-'+s.id+'" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:4px">'
             +'<button onclick="recordBidResponse(\''+bid.id+'\',\''+s.id+'\')" class="btn btn-g btn-sm">Record</button></div>' : '')
           +(r.status==='received' ? '<button onclick="approveBidAndCreateCO(\''+bid.id+'\',\''+s.id+'\')" class="btn btn-p btn-sm" style="margin-top:8px">✅ Approve This Bid → Create Client Change Order</button>' : '')
+          +(r.status==='received' ? '<button onclick="pmtDeclineBid(\''+bid.id+'\',\''+s.id+'\')" class="btn btn-g btn-sm" style="margin-top:8px;margin-left:6px;color:#dc2626;border-color:#dc2626">✕ Decline</button>' : '')
           +'</div>';
       }).join('')
+    +'<button onclick="pmtExportBidPdf(\''+bid.id+'\')" class="btn btn-g btn-sm" style="margin-bottom:10px">🖨 Export PDF</button>'
     +'<div style="border-top:2px solid var(--border);margin-top:16px;padding-top:12px">'
     +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Messages</div>'
     +'<div id="bid-msg-thread" style="max-height:160px;overflow-y:auto;margin-bottom:10px">'
