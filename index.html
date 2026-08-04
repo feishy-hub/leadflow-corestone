@@ -10855,27 +10855,29 @@ function showClientSurvey(leadId){
       html+='<div style="margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">'
         +'<div style="font-size:13px;font-weight:800;margin-bottom:3px">'+item+'</div>'
         +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">'+itemData.desc+'</div>'
+        +'<input type="hidden" id="sv_'+cat+'_'+item+'" name="sv_'+cat+'_'+item+'" value="">'
         +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
 
       itemData.opts.forEach(function(opt){
         var tc = tierColors[opt.tier], tb = tierBgs[opt.tier];
-        html+='<label style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:'+tb+';border:1.5px solid '+tc+';cursor:pointer;position:relative">'
-          +'<input type="radio" name="sv_'+cat+'_'+item+'" value="'+opt.tier+':'+opt.name+'" onmousedown="this._wasChecked=this.checked" onclick="if(this._wasChecked){this.checked=false;event.preventDefault();}" style="position:absolute;top:8px;right:8px;margin:0">'
+        var fieldId = 'sv_'+cat+'_'+item;
+        html+='<div class="sv-opt" data-field="'+fieldId+'" data-value="'+opt.tier+':'+opt.name+'" onclick="pmtToggleSurveyOption(this)" style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:'+tb+';border:1.5px solid '+tc+';cursor:pointer;position:relative">'
+          +'<span class="sv-check" style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;border:1.5px solid '+tc+';background:#fff"></span>'
           +(opt.img && opt.img.indexOf('http')===0
-            ? '<img src="'+opt.img+'" onclick="event.preventDefault();event.stopPropagation();pmtShowEnlargedPhoto(\''+opt.img+'\',\''+uxEsc(opt.name)+'\')" style="width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:zoom-in" loading="lazy" onerror="this.style.display=\'none\'">'
+            ? '<img src="'+opt.img+'" onclick="event.stopPropagation();pmtShowEnlargedPhoto(\''+opt.img+'\',\''+uxEsc(opt.name)+'\')" style="width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:zoom-in" loading="lazy" onerror="this.style.display=\'none\'">'
             : '<div style="font-size:18px">'+opt.img+'</div>')
           +'<div style="font-size:9px;font-weight:800;color:'+tc+';text-transform:uppercase;letter-spacing:0.05em">'+opt.tier+'</div>'
           +'<div style="font-size:11px;font-weight:700;color:var(--text)">'+opt.name+'</div>'
           +'<div style="font-size:10px;color:var(--muted);line-height:1.4">'+opt.desc+'</div>'
-          +'</label>';
+          +'</div>';
       });
-      html+='<label style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:#f9fafb;border:1.5px dashed #9ca3af;cursor:pointer;position:relative">'
-        +'<input type="radio" name="sv_'+cat+'_'+item+'" value="Custom:Uploaded" onmousedown="this._wasChecked=this.checked" onclick="if(this._wasChecked){this.checked=false;event.preventDefault();}else{pmtShowCustomUploadPrompt(this,\''+cat+'\',\''+item+'\')}" style="position:absolute;top:8px;right:8px;margin:0">'
+      html+='<div class="sv-opt" data-field="sv_'+cat+'_'+item+'" data-value="Custom:Uploaded" data-custom="1" onclick="pmtToggleSurveyOption(this,\''+cat+'\',\''+item+'\')" style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:#f9fafb;border:1.5px dashed #9ca3af;cursor:pointer;position:relative">'
+        +'<span class="sv-check" style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;border:1.5px solid #9ca3af;background:#fff"></span>'
         +'<div style="width:100%;height:72px;border-radius:6px;background:#fff;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;font-size:22px">📤</div>'
         +'<div style="font-size:9px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Custom</div>'
         +'<div style="font-size:11px;font-weight:700;color:var(--text)">Upload Your Own</div>'
         +'<div style="font-size:10px;color:var(--muted);line-height:1.4">Have something specific in mind? Upload a photo and notes.</div>'
-        +'</label>';
+        +'</div>';
 
       html+='</div></div>';
     });
@@ -10896,7 +10898,38 @@ function showClientSurvey(leadId){
   document.body.appendChild(el);
 }
 
-// Click any survey option photo to see it full size
+// Fully custom, deterministic selection — click an option to select it,
+// click the SAME one again to deselect. Doesn't depend on native radio
+// click-timing (which is what silently broke the previous version).
+function pmtToggleSurveyOption(el, cat, item){
+  var field = el.dataset.field;
+  var value = el.dataset.value;
+  var hiddenInput = document.getElementById(field);
+  if(!hiddenInput) return;
+  var group = document.querySelectorAll('.sv-opt[data-field="'+field+'"]');
+  var alreadySelected = hiddenInput.value === value;
+
+  if(alreadySelected){
+    hiddenInput.value = '';
+    group.forEach(function(g){ g.classList.remove('sv-selected'); g.querySelector('.sv-check').innerHTML=''; g.style.outline='none'; });
+    return;
+  }
+
+  // Custom/upload option: don't commit selection until the user actually
+  // confirms in the upload prompt — cancelling should leave nothing selected.
+  if(el.dataset.custom === '1'){
+    pmtShowCustomUploadPrompt(el, cat, item);
+    return;
+  }
+
+  hiddenInput.value = value;
+  group.forEach(function(g){
+    var isThis = g === el;
+    g.classList.toggle('sv-selected', isThis);
+    g.style.outline = isThis ? '2.5px solid #111827' : 'none';
+    g.querySelector('.sv-check').innerHTML = isThis ? '✓' : '';
+  });
+}
 function pmtShowEnlargedPhoto(url, name){
   document.querySelectorAll('#survey-photo-ov').forEach(function(el){el.remove();});
   var el = document.createElement('div');
@@ -10945,7 +10978,18 @@ function pmtConfirmCustomUpload(cat, item){
   var key = 'sv_custom_'+cat+'_'+item;
   window._pmtSurveyCustomData = window._pmtSurveyCustomData || {};
   window._pmtSurveyCustomData[key] = {photo: photo, notes: notes};
-  if(window._pmtCustomUploadRadio){ window._pmtCustomUploadRadio.checked = true; }
+  var el = window._pmtCustomUploadRadio;
+  if(el){
+    var field = el.dataset.field, value = el.dataset.value;
+    var hiddenInput = document.getElementById(field);
+    if(hiddenInput) hiddenInput.value = value;
+    document.querySelectorAll('.sv-opt[data-field="'+field+'"]').forEach(function(g){
+      var isThis = g === el;
+      g.classList.toggle('sv-selected', isThis);
+      g.style.outline = isThis ? '2.5px solid #111827' : 'none';
+      g.querySelector('.sv-check').innerHTML = isThis ? '✓' : '';
+    });
+  }
   document.getElementById('survey-custom-ov').remove();
   toast('Custom selection saved for '+item,'ok');
 }
@@ -10958,7 +11002,9 @@ async function saveSurveyResults(leadId,btnEl){
   var idemKey='save_survey_'+leadId;
   if(btnEl && !guardAction(idemKey,btnEl)) return;
   var sels={};
-  document.querySelectorAll('#survey-ov input[type=radio]:checked').forEach(function(r){sels[r.name]=r.value;});
+  document.querySelectorAll('#survey-ov input[type=hidden][id^="sv_"]').forEach(function(inp){
+    if(inp.value) sels[inp.name] = inp.value;
+  });
   if(window._pmtSurveyCustomData){
     Object.keys(window._pmtSurveyCustomData).forEach(function(k){
       var origName = k.replace('sv_custom_','sv_');
