@@ -805,6 +805,32 @@ async function ai(prompt,sys,max){
   }
 }
 
+// Guesses a trade from freeform text (call notes, commitments) using the
+// same keyword vocabulary as the survey trade map, so both sources of
+// requirements end up tagged the same way and both reach bid scope.
+function pmtGuessTradeFromText(text){
+  if(!text) return null;
+  var t = text.toLowerCase();
+  var vocab = {
+    roof: 'roof', shingle: 'roof', metal: 'roof',
+    siding: 'siding', vinyl: 'siding', stucco: 'siding', hardie: 'siding',
+    door: 'door', frame: 'carpentry',
+    window: 'window',
+    cabinet: 'cabinet', kitchen: 'kitchen',
+    counter: 'counter', quartz: 'counter', granite: 'counter', marble: 'counter',
+    floor: 'floor', hardwood: 'floor', tile: 'tile', carpet: 'floor', lvp: 'floor',
+    shower: 'plumb', bath: 'plumb', plumbing: 'plumb', toilet: 'plumb', sink: 'plumb',
+    deck: 'deck', railing: 'deck',
+    electric: 'elec', outlet: 'elec', wiring: 'elec', light: 'elec',
+    concrete: 'concrete', foundation: 'concrete', slab: 'concrete',
+    paint: 'paint', hvac: 'hvac', heat: 'hvac'
+  };
+  for(var kw in vocab){
+    if(t.indexOf(kw) > -1) return vocab[kw];
+  }
+  return null;
+}
+
 // Robust JSON parser - handles special chars, smart quotes, broken strings
 function safeJSON(str){
   if(!str) return {};
@@ -4473,7 +4499,7 @@ async function generatePostCallReport(lead,notes,transcript){
           lead_id: lead.id, title: pref,
           description: 'Captured from call on ' + new Date().toLocaleDateString(),
           source: 'call', status: 'captured', priority: 'P1',
-          category: 'preference', captured_at: new Date().toISOString(), captured_by: 'call_ai'
+          category: 'preference', trade: pmtGuessTradeFromText(pref), captured_at: new Date().toISOString(), captured_by: 'call_ai'
         }));
       });
       // From commitments
@@ -8562,6 +8588,8 @@ async function openEstimate(id){
   
   var jobs = await dbGet('jobs','?order=job_name.asc');
   var job = jobs.find(function(j){return j.id===est.job_id;});
+  var reqLeadId = est.lead_id || (job ? job.lead_id : null);
+  var requirements = reqLeadId ? await dbGet('requirements','?lead_id=eq.'+reqLeadId+'&order=captured_at.desc') : [];
   var lines = est.line_items||[];
   if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} } // defensive: line_items sometimes saved as JSON string
   if(!Array.isArray(lines)) lines=[];
@@ -8674,7 +8702,25 @@ async function openEstimate(id){
     '</div>',
     '<button onclick="setEstStatus(\''+id+'\',\'declined\')" class="btn btn-red btn-sm" style="justify-content:flex-start">✕ Mark Declined</button>',
     '</div></div>',
-    
+
+    '<div class="card" style="margin-bottom:12px">',
+    '<div style="font-size:12px;font-weight:800;margin-bottom:12px;color:var(--muted);text-transform:uppercase">Requirements ('+requirements.length+')</div>',
+    (requirements.length===0
+      ? '<div style="font-size:11.5px;color:var(--dim)">Nothing captured yet from Survey or client calls.</div>'
+      : requirements.map(function(r){
+          var sourceColor = r.source==='survey' ? 'var(--teal)' : '#7c3aed';
+          return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">'
+            +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">'
+            +'<span style="font-size:12px;font-weight:700">'+uxEsc(r.title||'')+'</span>'
+            +'<span style="font-size:9px;font-weight:800;color:'+sourceColor+';text-transform:uppercase;flex-shrink:0">'+(r.source||'')+'</span>'
+            +'</div>'
+            +(r.description?'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+uxEsc(r.description)+'</div>':'')
+            +(r.trade?'<div style="font-size:9.5px;color:var(--dim);margin-top:3px;text-transform:uppercase;letter-spacing:0.04em">'+uxEsc(r.trade)+'</div>':'')
+            +'</div>';
+        }).join('')
+    ),
+    '</div>',
+
     '<div class="card">',
     '<div style="font-size:12px;font-weight:800;margin-bottom:12px;color:var(--muted);text-transform:uppercase">Client Info</div>',
     '<div style="font-size:13px;font-weight:700">'+est.client_name+'</div>',
@@ -10820,7 +10866,7 @@ async function autoSendBidsToAllSubs(lead){
     var trades={};
     subs.forEach(function(s){var tr=s.trade_specialty||'General';if(!trades[tr])trades[tr]=[];trades[tr].push(s);});
     for(var trade in trades){
-      await dbIns('bids',{lead_id:lead.id,job_name:lead.client_name+' — '+(lead.job_type||'Construction'),address:lead.address||'TBD',scope_of_work:getBidScopeForTrade(trade,lead,prefText),trade:trade,subs:trades[trade].map(function(s){return s.company_name;}).join(', '),status:'sent',sent_date:new Date().toISOString(),client_preferences:prefText});
+      await dbIns('bids',{lead_id:lead.id,job_name:lead.client_name+' — '+(lead.job_type||'Construction'),address:lead.address||'TBD',scope_of_work:await getBidScopeForTrade(trade,lead,prefText),trade:trade,subs:trades[trade].map(function(s){return s.company_name;}).join(', '),status:'sent',sent_date:new Date().toISOString(),client_preferences:prefText});
     }
     toast('Bid packages sent to '+Object.keys(trades).length+' trades','ok');
   }catch(e){logErr('autoSendBidsToAllSubs',e);}
@@ -10850,24 +10896,42 @@ var SURVEY_ITEM_TRADE_MAP = {
 // and the actual photo — for whatever this specific trade is responsible
 // for, straight out of the survey data. Real, not a flat text dump sent
 // to every trade equally.
-function getRelevantSelectionsForTrade(trade, lead){
-  if(!lead.survey_selections) return '';
-  var sels; try{ sels = JSON.parse(lead.survey_selections); }catch(e){ return ''; }
+async function getRelevantSelectionsForTrade(trade, lead){
   var t = trade.toLowerCase();
   var lines = [];
-  Object.keys(SURVEY_CATS).forEach(function(cat){
-    Object.keys(SURVEY_CATS[cat].items).forEach(function(item){
-      var relevantTrades = SURVEY_ITEM_TRADE_MAP[item];
-      if(!relevantTrades || !relevantTrades.some(function(rt){return t.indexOf(rt) > -1;})) return;
-      var key = 'sv_'+cat+'_'+item;
-      var picked = sels[key];
-      if(!picked) return;
-      var parts = picked.split(':');
-      var tier = parts[0], name = parts.slice(1).join(':');
-      var opt = SURVEY_CATS[cat].items[item].opts.find(function(o){return o.tier===tier;});
-      lines.push('\u2022 '+item+': '+tier+' \u2014 '+name+(opt&&opt.desc?' ('+opt.desc+')':'')+(opt&&opt.img&&opt.img.indexOf('http')===0?'\n  Reference photo: '+opt.img:''));
+
+  if(lead.survey_selections){
+    try{
+      var sels = JSON.parse(lead.survey_selections);
+      Object.keys(SURVEY_CATS).forEach(function(cat){
+        Object.keys(SURVEY_CATS[cat].items).forEach(function(item){
+          var relevantTrades = SURVEY_ITEM_TRADE_MAP[item];
+          if(!relevantTrades || !relevantTrades.some(function(rt){return t.indexOf(rt) > -1;})) return;
+          var key = 'sv_'+cat+'_'+item;
+          var picked = sels[key];
+          if(!picked) return;
+          var parts = picked.split(':');
+          var tier = parts[0], name = parts.slice(1).join(':');
+          var opt = SURVEY_CATS[cat].items[item].opts.find(function(o){return o.tier===tier;});
+          lines.push('\u2022 '+item+': '+tier+' \u2014 '+name+(opt&&opt.desc?' ('+opt.desc+')':'')+(opt&&opt.img&&opt.img.indexOf('http')===0?'\n  Reference photo: '+opt.img:''));
+        });
+      });
+    }catch(e){}
+  }
+
+  // Also pull call-sourced requirements (things captured on the phone,
+  // like "wants shingle roofing") tagged with this same trade — this is
+  // the unification: both sources of requirements now reach bid scope,
+  // not just survey selections.
+  try{
+    var reqs = await dbGet('requirements', '?lead_id=eq.'+lead.id+'&source=eq.call');
+    reqs.forEach(function(r){
+      if(r.trade && t.indexOf(r.trade) > -1){
+        lines.push('\u2022 From client call: '+(r.title||r.description||''));
+      }
     });
-  });
+  }catch(e){}
+
   return lines.length ? '\n\nCLIENT SELECTIONS FOR YOUR SCOPE:\n'+lines.join('\n') : '';
 }
 
@@ -10881,10 +10945,10 @@ function renderScopeWithPhotos(text){
   });
 }
 
-function getBidScopeForTrade(trade,lead,clientPrefs){
+async function getBidScopeForTrade(trade,lead,clientPrefs){
   var t=trade.toLowerCase();
   var base='Project: '+lead.client_name+' | Job: '+(lead.job_type||'Construction')+' | Address: '+(lead.address||'TBD')+'\n\n';
-  var selections = getRelevantSelectionsForTrade(trade, lead);
+  var selections = await getRelevantSelectionsForTrade(trade, lead);
   var scopeText;
   if(t.includes('elec')) scopeText='SCOPE: Full electrical rough and finish. Include panel upgrade if needed. Quote per sqft and per fixture.';
   else if(t.includes('plumb')) scopeText='SCOPE: Full plumbing rough and finish. Include fixture count. Quote per fixture and labor rate.';
@@ -11215,15 +11279,19 @@ async function saveSurveyResults(leadId,btnEl){
     Object.entries(sels).forEach(function(entry) {
       var field = entry[0], value = entry[1];
       if(!value) return;
+      var fieldParts = field.replace(/^sv_/,'').split('_');
+      var itemNameGuess = fieldParts.slice(1).join(' ');
+      var trades = SURVEY_ITEM_TRADE_MAP[itemNameGuess] || [];
       reqInserts.push(dbIns('requirements', {
         lead_id: leadId,
         requirement_id: 'REQ-SURVEY-' + field.toUpperCase(),
-        title: field.replace(/_/g,' ').replace(/\w/g,function(c){return c.toUpperCase();}),
+        title: field.replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}),
         description: value,
         source: 'survey',
         status: 'captured',
         priority: 'P1',
         category: field,
+        trade: trades[0] || null,
         captured_at: new Date().toISOString(),
         captured_by: 'client_survey'
       }));
