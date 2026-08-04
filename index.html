@@ -9063,11 +9063,49 @@ async function sendLineForBid(estId, idx){
     +'<div style="padding:12px 20px;overflow-y:auto;flex:1">'
     +'<div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:8px">Choose a vendor</div>'
     + (subs.length ? subs.map(function(s){
-        return '<div onclick="confirmSendLineForBid(\''+estId+'\','+idx+',\''+s.id+'\')" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:12.5px;font-weight:600" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">'+uxEsc(s.company_name)+(s.trade?' <span style="color:#9ca3af;font-weight:400">— '+uxEsc(s.trade)+'</span>':'')+'</div>';
+        return '<div onclick="pmtShowBidPreview(\''+estId+'\','+idx+',\''+s.id+'\')" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:12.5px;font-weight:600" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">'+uxEsc(s.company_name)+(s.trade?' <span style="color:#9ca3af;font-weight:400">— '+uxEsc(s.trade)+'</span>':'')+'</div>';
       }).join('') : '<div style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0">No subcontractors on file yet</div>')
     +'</div>'
     +'<div style="padding:12px 20px;border-top:1px solid #eee"><button onclick="document.getElementById(\'send-line-bid-ov\').remove()" style="width:100%;padding:9px;background:transparent;border:1px solid #e5e7eb;color:#6b7280;border-radius:8px;cursor:pointer;font-size:12px">Cancel</button></div>'
     +'</div>';
+  document.body.appendChild(el);
+}
+// The actual review step, matching how real bid software (Buildertrend,
+// Planyard) does it: show exactly what's being sent, let the contractor
+// add instructions and a due date, require an explicit Send.
+async function pmtShowBidPreview(estId, idx, subId){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} }
+  var line = lines[idx];
+  var subs = await dbGet('subcontractors','?id=eq.'+subId);
+  var sub = subs[0];
+  if(!line || !sub) return;
+  var defaultDue = new Date(Date.now()+7*86400000).toISOString().slice(0,10);
+  var defaultScope = line.description + (line.notes ? '\n\n'+line.notes : '') + '\n\nQuantity: '+line.qty+' '+line.unit;
+
+  document.querySelectorAll('#send-line-bid-ov, #bid-preview-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'bid-preview-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:440px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eee">'
+    +'<div style="font-weight:800;font-size:15px">Review before sending</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-top:2px">To: '+uxEsc(sub.company_name)+(sub.trade?' — '+uxEsc(sub.trade):'')+'</div>'
+    +'</div>'
+    +'<div style="padding:16px 20px;overflow-y:auto;flex:1">'
+    +'<label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;display:block;margin-bottom:6px">Scope of Work — edit if needed</label>'
+    +'<textarea id="bid-preview-scope" style="width:100%;min-height:110px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;box-sizing:border-box;font-family:inherit;font-size:12.5px;margin-bottom:14px">'+uxEsc(defaultScope)+'</textarea>'
+    +'<label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;display:block;margin-bottom:6px">When do you need this back?</label>'
+    +'<input type="date" id="bid-preview-due" value="'+defaultDue+'" style="width:100%;padding:9px;border:1px solid #e5e7eb;border-radius:8px;box-sizing:border-box;margin-bottom:14px">'
+    +'<label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;display:block;margin-bottom:6px">Message to '+uxEsc(sub.company_name)+' (optional)</label>'
+    +'<textarea id="bid-preview-message" placeholder="Anything specific they should know..." style="width:100%;min-height:60px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;box-sizing:border-box;font-family:inherit;font-size:12.5px"></textarea>'
+    +'</div>'
+    +'<div style="padding:14px 20px;border-top:1px solid #eee;background:#f9fafb;display:flex;gap:8px">'
+    +'<button onclick="document.getElementById(\'bid-preview-ov\').remove()" style="flex:1;padding:10px;background:transparent;border:1px solid #e5e7eb;color:#6b7280;border-radius:8px;cursor:pointer;font-size:12.5px">Back</button>'
+    +'<button onclick="confirmSendLineForBid(\''+estId+'\','+idx+',\''+subId+'\')" style="flex:2;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:12.5px">Send to '+uxEsc(sub.company_name)+'</button>'
+    +'</div></div>';
   document.body.appendChild(el);
 }
 async function confirmSendLineForBid(estId, idx, subId){
@@ -9080,11 +9118,21 @@ async function confirmSendLineForBid(estId, idx, subId){
   var sub = subs[0];
   if(!line || !sub) return;
 
+  var scopeEl = document.getElementById('bid-preview-scope');
+  var dueEl = document.getElementById('bid-preview-due');
+  var msgEl = document.getElementById('bid-preview-message');
+  var finalScope = scopeEl ? scopeEl.value : (line.description + (line.notes ? '\n\n'+line.notes : '') + '\n\nQuantity: '+line.qty+' '+line.unit);
+  var dueDate = dueEl ? dueEl.value : null;
+  var message = msgEl ? msgEl.value.trim() : '';
+
   var bidRecord = {
     lead_id: est.lead_id || null,
     job_name: est.title,
     address: est.address || 'TBD',
-    scope_of_work: line.description + (line.notes ? '\n\n'+line.notes : '') + '\n\nQuantity: '+line.qty+' '+line.unit,
+    scope_of_work: finalScope,
+    due_date: dueDate,
+    initial_message: message,
+    messages: JSON.stringify(message ? [{from:'contractor', text: message, at: new Date().toISOString()}] : []),
     trade: sub.trade || line.cost_type || 'General',
     subs: sub.company_name,
     status: 'sent',
@@ -9101,8 +9149,8 @@ async function confirmSendLineForBid(estId, idx, subId){
   line.bid_id = newBid && newBid.id ? newBid.id : null;
   await dbUpd('estimates', estId, {line_items: lines});
 
-  document.getElementById('send-line-bid-ov').remove();
-  toast('Sent to '+sub.company_name+' for pricing','ok');
+  document.getElementById('bid-preview-ov').remove();
+  toast('Sent to '+sub.company_name+' for pricing'+(dueDate?' — due back '+dueDate:''),'ok');
   openEstimate(estId);
 }
 // Opens the bid tied to this specific line — same detail view used for
@@ -16922,8 +16970,11 @@ async function viewBidDetail(id){
     return {id:sid, name: sub?sub.company_name:'Unknown Sub', resp: resp||{sub_id:sid,status:'pending'}};
   });
 
+  var messages = JSON.parse(bid.messages||'[]');
+
   var html = '<div style="max-width:640px">'
     +'<div style="margin-bottom:14px"><div style="font-weight:800;font-size:15px">'+(job?job.job_name:'No job')+' — '+uxEsc(bid.trade)+'</div>'
+    +(bid.due_date?'<div style="font-size:11.5px;color:#d97706;font-weight:700;margin-top:3px">Due back: '+bid.due_date+'</div>':'')
     +'<div style="font-size:12px;color:var(--muted);margin-top:4px;white-space:pre-wrap;line-height:1.6">'+renderScopeWithPhotos(bid.scope_of_work||'')+'</div></div>'
     + invitedSubs.map(function(s){
         var r = s.resp;
@@ -16940,11 +16991,41 @@ async function viewBidDetail(id){
           +(r.status==='received' ? '<button onclick="approveBidAndCreateCO(\''+bid.id+'\',\''+s.id+'\')" class="btn btn-p btn-sm" style="margin-top:8px">✅ Approve This Bid → Create Client Change Order</button>' : '')
           +'</div>';
       }).join('')
+    +'<div style="border-top:2px solid var(--border);margin-top:16px;padding-top:12px">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Messages</div>'
+    +'<div id="bid-msg-thread" style="max-height:160px;overflow-y:auto;margin-bottom:10px">'
+    + (messages.length ? messages.map(function(m){
+        var isSub = m.from==='sub';
+        return '<div style="display:flex;justify-content:'+(isSub?'flex-start':'flex-end')+';margin-bottom:8px">'
+          +'<div style="max-width:75%;background:'+(isSub?'#f3f4f6':'var(--teal-light,#e6f6f4)')+';border-radius:8px;padding:8px 10px">'
+          +'<div style="font-size:12px">'+uxEsc(m.text)+'</div>'
+          +'<div style="font-size:9.5px;color:var(--dim);margin-top:2px">'+(isSub?'Sub':'You')+' \u00b7 '+new Date(m.at).toLocaleString()+'</div>'
+          +'</div></div>';
+      }).join('') : '<div style="color:var(--dim);font-size:11.5px">No messages yet.</div>')
+    +'</div>'
+    +'<div style="display:flex;gap:6px">'
+    +'<input type="text" id="bid-msg-input" placeholder="Send an update to the sub..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px">'
+    +'<button onclick="pmtSendBidMessage(\''+bid.id+'\')" class="btn btn-p btn-sm">Send</button>'
+    +'</div>'
+    +'</div>'
     +'</div>';
   document.querySelectorAll('.ov').forEach(function(el){el.remove();});
   var wrap = document.createElement('div'); wrap.className='ov'; wrap.id='bid-detail-ov';
   wrap.innerHTML = '<div class="modal"><div class="mh"><div class="mt">Bid Package Detail</div><button class="mc" onclick="closeOv(this)">\u00d7</button></div><div class="mb">'+html+'</div></div>';
   document.body.appendChild(wrap);
+}
+
+async function pmtSendBidMessage(bidId){
+  var input = document.getElementById('bid-msg-input');
+  var text = input ? input.value.trim() : '';
+  if(!text){ toast('Type a message first','err'); return; }
+  var bids = await dbGet('bids','?id=eq.'+bidId);
+  var bid = bids[0]; if(!bid) return;
+  var messages = JSON.parse(bid.messages||'[]');
+  messages.push({from:'contractor', text: text, at: new Date().toISOString()});
+  await dbUpd('bids', bidId, {messages: JSON.stringify(messages)});
+  toast('Message sent','ok');
+  viewBidDetail(bidId);
 }
 
 async function recordBidResponse(bidId, subId){
