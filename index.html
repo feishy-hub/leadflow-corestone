@@ -5190,7 +5190,7 @@ function showEstimateModal(est){
     +'</div>'
     +'<div class="mf">'
     +'<button class="btn btn-g" onclick="closeOv(this)">Close</button>'
-    +'<button class="btn btn-p">📧 Send to Client for Review</button></div></div>';
+    +'<button class="btn btn-p" onclick="closeOv(this);sendEstimate(\''+est.id+'\')">📧 Send to Client for Review</button></div></div>';
   document.body.appendChild(el);
 }
 
@@ -7891,24 +7891,26 @@ async function saveNewBid(){
   ]);
 }
 async function aiRankBids(){
-  toast('🤖 AI ranking bids...','ok',6000);
-  // Use actual bids from the job if available
-  var r=await ai('I have 3 bids for electrical work:\nBid A: Smith Electric — $18,500, 3 weeks, licensed, 4 reviews avg 4.2\nBid B: Jones Power — $15,200, 4 weeks, licensed, 12 reviews avg 4.8\nBid C: Fast Electric — $22,000, 2 weeks, licensed, 2 reviews avg 3.5\nRank these bids and explain. Return JSON: {"ranked":[{"contractor":"name","bid_amount":0,"rank":1,"reason":"2 sentences","risk":"low|medium|high"}],"recommendation":"1 sentence"}','Return ONLY raw JSON.',800);
-  var d=safeJSON(r);if(!d){toast('AI ranking failed','err');return;}
-  var html='<div style="background:var(--card);border:1px solid var(--purple);border-radius:var(--radius);padding:16px;margin-top:16px">'
-    +'<div style="font-size:14px;font-weight:700;color:var(--purple);margin-bottom:10px">🤖 AI Bid Analysis</div>'
-    +(d.recommendation?'<div style="margin-bottom:12px;padding:10px;background:var(--purple-bg);border-radius:var(--radius-sm);font-size:13px;color:var(--purple)">Recommendation: '+d.recommendation+'</div>':'')
-    +(d.ranked||[]).map(function(b){return '<div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:800;color:var(--teal)">'+b.rank+'</div><div style="flex:1"><div style="font-weight:700">'+b.contractor+'</div><div style="font-size:12px;color:var(--muted)">'+b.reason+'</div></div><div style="text-align:right"><div style="font-weight:700">'+fmt$(b.bid_amount)+'</div><div style="font-size:11px;color:'+(b.risk==='low'?'var(--green)':b.risk==='medium'?'var(--amber)':'var(--red)')+'">'+b.risk+' risk</div></div></div>';}).join('')
-    +'</div>';
-  var existing=$('content').innerHTML;
-  $('content').innerHTML=existing+html;
+  var jobSel = document.getElementById('nbid-job');
+  var jobId = jobSel ? jobSel.value : '';
+  if(!jobId){ toast('Pick a job above first, so AI knows which bids to rank','err',5000); return; }
+  var jobs = await dbGet('jobs','?id=eq.'+jobId);
+  var job = jobs[0];
+  var leadId = job && job.lead_id ? job.lead_id : jobId;
+  await aiRankAllBids(leadId);
+}
+async function aiRankBid(id){
+  var bids = await dbGet('bids','?id=eq.'+id);
+  var bid = bids[0];
+  if(!bid){ toast('Bid not found','err'); return; }
+  await aiRankAllBids(bid.lead_id || bid.job_id);
 }
 async function voiceBid(){
   micFillField('nbid-scope','Describe the scope of work for this bid package in detail');
   if($('bid-form-wrap'))$('bid-form-wrap').style.display='block';
 }
 // (viewBidDetail replaced below — see REAL BID RESPONSE INTAKE)
-async function aiRankBid(id){aiRankBids();}
+// (aiRankBid now defined above, alongside aiRankBids — this old no-op stub removed)
 async function pgTodos(){
   var jobs = await dbGet('jobs','?order=job_name.asc');
   var todos = await dbGet('todos','?order=due_date.asc');
@@ -11064,12 +11066,35 @@ async function autoSendBidsToAllSubs(lead){
     if(!subs.length){await addToGatekeeper('bid_send','Send Bid Packages: '+lead.client_name,'No subs in system. Add subs first.','high','Add subcontractors, then send bids.');return;}
     var prefs=lead.client_preferences?JSON.parse(lead.client_preferences):[];
     var prefText=prefs.length?prefs.join(', '):'See client survey';
+
+    // Only send to trades this job actually needs — pulled from Requirements
+    // (survey selections + call notes, both already tagged with a trade).
+    // Falls back to sending to every trade only when there's nothing yet
+    // to filter by, rather than silently sending a kitchen job's bid
+    // packages to roofers and excavators.
+    var reqs = await dbGet('requirements', '?lead_id=eq.'+lead.id);
+    var neededTrades = Array.from(new Set(reqs.map(function(r){return r.trade;}).filter(Boolean)));
+
     var trades={};
-    subs.forEach(function(s){var tr=s.trade_specialty||'General';if(!trades[tr])trades[tr]=[];trades[tr].push(s);});
+    subs.forEach(function(s){
+      var tr=s.trade_specialty||'General';
+      if(neededTrades.length){
+        var matches = neededTrades.some(function(nt){ return tr.toLowerCase().indexOf(nt) > -1; });
+        if(!matches) return; // skip subs whose trade isn't actually needed for this job
+      }
+      if(!trades[tr])trades[tr]=[];
+      trades[tr].push(s);
+    });
+
+    if(neededTrades.length && !Object.keys(trades).length){
+      await addToGatekeeper('bid_send','No matching subs for this job\'s trades: '+lead.client_name,'Requirements need: '+neededTrades.join(', ')+' — no subs on file match any of these.','high','Add subcontractors for these trades, then send bids.');
+      return;
+    }
+
     for(var trade in trades){
       await dbIns('bids',{lead_id:lead.id,job_name:lead.client_name+' — '+(lead.job_type||'Construction'),address:lead.address||'TBD',scope_of_work:await getBidScopeForTrade(trade,lead,prefText),trade:trade,subs:trades[trade].map(function(s){return s.company_name;}).join(', '),status:'sent',sent_date:new Date().toISOString(),client_preferences:prefText});
     }
-    toast('Bid packages sent to '+Object.keys(trades).length+' trades','ok');
+    toast('Bid packages sent to '+Object.keys(trades).length+' trade'+(Object.keys(trades).length===1?'':'s')+(neededTrades.length?' (filtered to this job\'s actual requirements)':' (no requirements yet — sent to all trades on file)'),'ok',6000);
   }catch(e){logErr('autoSendBidsToAllSubs',e);}
 }
 
@@ -11681,8 +11706,49 @@ async function saveManualRequirement() {
 async function editRequirement(reqId) {
   var reqs = await dbGet('requirements', '?id=eq.' + reqId);
   var r = reqs[0]; if(!r) return;
-  // Simple inline status update — full edit modal can be Phase 1.2
-  toast('Use the status dropdown to update. Full edit coming in Phase 1.2.','ok', 3000);
+  document.querySelectorAll('#req-edit-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'req-edit-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  var statusOpts = ['captured','reviewed','in_progress','fulfilled','on_hold'];
+  var priorityOpts = ['P1','P2','P3'];
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:0;width:420px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--border)"><div style="font-weight:800;font-size:15px">Edit Requirement</div></div>'
+    +'<div style="padding:16px 20px;overflow-y:auto;flex:1">'
+    +'<label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Title</label>'
+    +'<input id="req-edit-title" value="'+uxEsc(r.title||'')+'" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;box-sizing:border-box;margin-bottom:12px">'
+    +'<label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Description</label>'
+    +'<textarea id="req-edit-desc" style="width:100%;min-height:70px;padding:9px;border:1px solid var(--border);border-radius:7px;box-sizing:border-box;margin-bottom:12px;font-family:inherit">'+uxEsc(r.description||'')+'</textarea>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Trade</label>'
+    +'<input id="req-edit-trade" value="'+uxEsc(r.trade||'')+'" placeholder="e.g. roof, plumb, kitchen" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;box-sizing:border-box"></div>'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Priority</label>'
+    +'<select id="req-edit-priority" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;box-sizing:border-box">'
+    + priorityOpts.map(function(p){return '<option'+(p===r.priority?' selected':'')+'>'+p+'</option>';}).join('')
+    +'</select></div></div>'
+    +'<label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Status</label>'
+    +'<select id="req-edit-status" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;box-sizing:border-box;margin-bottom:12px">'
+    + statusOpts.map(function(s){return '<option value="'+s+'"'+(s===r.status?' selected':'')+'>'+s.replace(/_/g,' ')+'</option>';}).join('')
+    +'</select>'
+    +'<div style="font-size:10.5px;color:var(--dim)">Source: '+(r.source||'unknown')+(r.captured_at?' · '+new Date(r.captured_at).toLocaleDateString():'')+'</div>'
+    +'</div>'
+    +'<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px">'
+    +'<button onclick="document.getElementById(\'req-edit-ov\').remove()" style="flex:1;padding:9px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer">Cancel</button>'
+    +'<button onclick="saveEditedRequirement(\''+reqId+'\')" style="flex:2;padding:9px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Save</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+async function saveEditedRequirement(reqId){
+  var title = document.getElementById('req-edit-title').value.trim();
+  var description = document.getElementById('req-edit-desc').value.trim();
+  var trade = document.getElementById('req-edit-trade').value.trim();
+  var priority = document.getElementById('req-edit-priority').value;
+  var status = document.getElementById('req-edit-status').value;
+  if(!title){ toast('Title is required','err'); return; }
+  await dbUpd('requirements', reqId, {title:title, description:description, trade:trade||null, priority:priority, status:status});
+  document.getElementById('req-edit-ov').remove();
+  toast('Requirement updated','ok');
+  pgRequirements();
 }
 
 // ═══════════════════════════════════════════════════════════════
