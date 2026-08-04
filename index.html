@@ -10426,24 +10426,83 @@ async function autoSendBidsToAllSubs(lead){
     var trades={};
     subs.forEach(function(s){var tr=s.trade_specialty||'General';if(!trades[tr])trades[tr]=[];trades[tr].push(s);});
     for(var trade in trades){
-      await dbIns('bids',{lead_id:lead.id,job_name:lead.client_name+' — '+(lead.job_type||'Construction'),address:lead.address||'TBD',scope:getBidScopeForTrade(trade,lead,prefText),trade:trade,subs:trades[trade].map(function(s){return s.company_name;}).join(', '),status:'sent',sent_date:new Date().toISOString(),client_preferences:prefText});
+      await dbIns('bids',{lead_id:lead.id,job_name:lead.client_name+' — '+(lead.job_type||'Construction'),address:lead.address||'TBD',scope_of_work:getBidScopeForTrade(trade,lead,prefText),trade:trade,subs:trades[trade].map(function(s){return s.company_name;}).join(', '),status:'sent',sent_date:new Date().toISOString(),client_preferences:prefText});
     }
     toast('Bid packages sent to '+Object.keys(trades).length+' trades','ok');
   }catch(e){logErr('autoSendBidsToAllSubs',e);}
 }
 
+// Which survey item belongs to which trade's bid package — this is the
+// actual fix: a roofer sees the roof selection with its real photo, a
+// painter doesn't see irrelevant cabinet selections, etc.
+var SURVEY_ITEM_TRADE_MAP = {
+  'Roof': ['roof'],
+  'Siding': ['siding','exterior'],
+  'Front Door': ['door','carpentry','frame'],
+  'Windows': ['window','carpentry','frame'],
+  'Cabinets': ['cabinet','kitchen'],
+  'Countertops': ['cabinet','kitchen','counter'],
+  'Flooring': ['floor','tile'],
+  'Appliances': ['kitchen','cabinet'],
+  'Tile': ['tile','floor'],
+  'Shower': ['plumb'],
+  'Decking': ['deck','carpentry','frame'],
+  'Railing': ['deck','carpentry','frame'],
+  'Lighting': ['elec']
+};
+
+// Pulls the client's real selection — tier, product name, description,
+// and the actual photo — for whatever this specific trade is responsible
+// for, straight out of the survey data. Real, not a flat text dump sent
+// to every trade equally.
+function getRelevantSelectionsForTrade(trade, lead){
+  if(!lead.survey_selections) return '';
+  var sels; try{ sels = JSON.parse(lead.survey_selections); }catch(e){ return ''; }
+  var t = trade.toLowerCase();
+  var lines = [];
+  Object.keys(SURVEY_CATS).forEach(function(cat){
+    Object.keys(SURVEY_CATS[cat].items).forEach(function(item){
+      var relevantTrades = SURVEY_ITEM_TRADE_MAP[item];
+      if(!relevantTrades || !relevantTrades.some(function(rt){return t.indexOf(rt) > -1;})) return;
+      var key = 'sv_'+cat+'_'+item;
+      var picked = sels[key];
+      if(!picked) return;
+      var parts = picked.split(':');
+      var tier = parts[0], name = parts.slice(1).join(':');
+      var opt = SURVEY_CATS[cat].items[item].opts.find(function(o){return o.tier===tier;});
+      lines.push('\u2022 '+item+': '+tier+' \u2014 '+name+(opt&&opt.desc?' ('+opt.desc+')':'')+(opt&&opt.img&&opt.img.indexOf('http')===0?'\n  Reference photo: '+opt.img:''));
+    });
+  });
+  return lines.length ? '\n\nCLIENT SELECTIONS FOR YOUR SCOPE:\n'+lines.join('\n') : '';
+}
+
+// Turns "Reference photo: https://..." lines in a bid scope into a real
+// inline photo — a sub reading their bid package should see the actual
+// selected material, not a URL they have to click.
+function renderScopeWithPhotos(text){
+  var escaped = uxEsc(text);
+  return escaped.replace(/Reference photo: (https?:\/\/\S+)/g, function(full, url){
+    return 'Reference photo:<br><img src="'+url+'" style="width:160px;height:110px;object-fit:cover;border-radius:6px;margin-top:4px" loading="lazy" onerror="this.style.display=\'none\'">';
+  });
+}
+
 function getBidScopeForTrade(trade,lead,clientPrefs){
   var t=trade.toLowerCase();
-  var base='Project: '+lead.client_name+' | Job: '+(lead.job_type||'Construction')+' | Address: '+(lead.address||'TBD')+'\nClient Specifications: '+clientPrefs+'\n\n';
-  if(t.includes('elec')) return base+'SCOPE: Full electrical rough and finish. Include panel upgrade if needed. Quote per sqft and per fixture.';
-  if(t.includes('plumb')) return base+'SCOPE: Full plumbing rough and finish. Include fixture count. Quote per fixture and labor rate.';
-  if(t.includes('hvac')||t.includes('heat')) return base+'SCOPE: Full HVAC system. Include equipment and labor. Specify energy efficiency ratings.';
-  if(t.includes('frame')||t.includes('carp')) return base+'SCOPE: Framing and carpentry. Quote labor per sqft. Materials separate.';
-  if(t.includes('tile')||t.includes('floor')) return base+'SCOPE: Tile and flooring. Client spec: '+clientPrefs+'. Labor per sqft, materials separate.';
-  if(t.includes('cabinet')||t.includes('kitchen')) return base+'SCOPE: Cabinets and millwork. Client preference: '+clientPrefs+'. Include installation. Quote with and without countertops.';
-  if(t.includes('paint')) return base+'SCOPE: Interior and exterior painting. Quote per sqft. Specify coats.';
-  if(t.includes('roof')) return base+'SCOPE: Roofing. Include tearoff if needed. Quote per sqft. Specify warranty.';
-  return base+'SCOPE: '+trade+' work as required. Break out labor and materials separately. Include timeline.';
+  var base='Project: '+lead.client_name+' | Job: '+(lead.job_type||'Construction')+' | Address: '+(lead.address||'TBD')+'\n\n';
+  var selections = getRelevantSelectionsForTrade(trade, lead);
+  var scopeText;
+  if(t.includes('elec')) scopeText='SCOPE: Full electrical rough and finish. Include panel upgrade if needed. Quote per sqft and per fixture.';
+  else if(t.includes('plumb')) scopeText='SCOPE: Full plumbing rough and finish. Include fixture count. Quote per fixture and labor rate.';
+  else if(t.includes('hvac')||t.includes('heat')) scopeText='SCOPE: Full HVAC system. Include equipment and labor. Specify energy efficiency ratings.';
+  else if(t.includes('frame')||t.includes('carp')) scopeText='SCOPE: Framing and carpentry. Quote labor per sqft. Materials separate.';
+  else if(t.includes('tile')||t.includes('floor')) scopeText='SCOPE: Tile and flooring. Labor per sqft, materials separate.';
+  else if(t.includes('cabinet')||t.includes('kitchen')) scopeText='SCOPE: Cabinets and millwork. Include installation. Quote with and without countertops.';
+  else if(t.includes('paint')) scopeText='SCOPE: Interior and exterior painting. Quote per sqft. Specify coats.';
+  else if(t.includes('roof')) scopeText='SCOPE: Roofing. Include tearoff if needed. Quote per sqft. Specify warranty.';
+  else if(t.includes('sid')) scopeText='SCOPE: Siding installation. Quote per sqft including trim and flashing.';
+  else if(t.includes('deck')) scopeText='SCOPE: Deck construction. Include framing, decking, and railing. Quote per sqft plus railing linear ft.';
+  else scopeText='SCOPE: '+trade+' work as required. Break out labor and materials separately. Include timeline.';
+  return base+scopeText+selections+(selections?'':'\n\nGeneral client notes: '+clientPrefs);
 }
 
 async function startPermitProcess(lead){
@@ -10483,14 +10542,14 @@ var SURVEY_CATS = {
     icon:'\u{1F3E0}',
     items:{
       'Siding':{desc:'The exterior wall covering — affects curb appeal, maintenance, and durability.', opts:[
-        {tier:'Standard',name:'Vinyl',desc:'Low maintenance, budget-friendly, wide color range',img:'\u{1F3E0}'},
-        {tier:'Premium',name:'Hardie Board',desc:'Fiber cement, fire-resistant, 30+ year lifespan',img:'\u{1F3E2}'},
-        {tier:'Luxury',name:'Stone/Stucco',desc:'Premium look, highest durability, custom texture',img:'\u{1F3F0}'}
+        {tier:'Standard',name:'Vinyl',desc:'Low maintenance, budget-friendly, wide color range',img:'https://images.unsplash.com/photo-1631458325834-8f678e48912c?auto=format&fit=crop&w=400&q=70'},
+        {tier:'Premium',name:'Hardie Board',desc:'Fiber cement, fire-resistant, 30+ year lifespan',img:'https://images.unsplash.com/photo-1612451850869-87c3c039c72e?auto=format&fit=crop&w=400&q=70'},
+        {tier:'Luxury',name:'Stone/Stucco',desc:'Premium look, highest durability, custom texture',img:'https://images.unsplash.com/photo-1598654797939-407635ee99b1?auto=format&fit=crop&w=400&q=70'}
       ]},
       'Roof':{desc:'Roofing material affects longevity, energy efficiency, and appearance.', opts:[
-        {tier:'Standard',name:'Asphalt Shingle',desc:'Most common, cost-effective, 20-25 yr life',img:'\u{1F3E0}'},
-        {tier:'Premium',name:'Metal Standing Seam',desc:'50+ year life, energy efficient, modern look',img:'\u26A1'},
-        {tier:'Luxury',name:'Clay Tile',desc:'Distinctive look, exceptional longevity',img:'\u{1F3DB}'}
+        {tier:'Standard',name:'Asphalt Shingle',desc:'Most common, cost-effective, 20-25 yr life',img:'https://images.unsplash.com/photo-1566071634551-224a639a1c7d?auto=format&fit=crop&w=400&q=70'},
+        {tier:'Premium',name:'Metal Standing Seam',desc:'50+ year life, energy efficient, modern look',img:'https://images.unsplash.com/photo-1673645652350-6a4c31c1c78f?auto=format&fit=crop&w=400&q=70'},
+        {tier:'Luxury',name:'Clay Tile',desc:'Distinctive look, exceptional longevity',img:'https://images.unsplash.com/photo-1614418583513-8e96d9160333?auto=format&fit=crop&w=400&q=70'}
       ]},
       'Front Door':{desc:'The entry door sets the first impression of your home.', opts:[
         {tier:'Standard',name:'Fiberglass',desc:'Durable, energy efficient, low maintenance',img:'\u{1F6AA}'},
@@ -10593,7 +10652,9 @@ function showClientSurvey(leadId){
         var tc = tierColors[opt.tier], tb = tierBgs[opt.tier];
         html+='<label style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:'+tb+';border:1.5px solid '+tc+';cursor:pointer;position:relative">'
           +'<input type="radio" name="sv_'+cat+'_'+item+'" value="'+opt.tier+':'+opt.name+'" style="position:absolute;top:8px;right:8px;margin:0">'
-          +'<div style="font-size:18px">'+opt.img+'</div>'
+          +(opt.img && opt.img.indexOf('http')===0
+            ? '<img src="'+opt.img+'" style="width:100%;height:72px;object-fit:cover;border-radius:6px" loading="lazy" onerror="this.style.display=\'none\'">'
+            : '<div style="font-size:18px">'+opt.img+'</div>')
           +'<div style="font-size:9px;font-weight:800;color:'+tc+';text-transform:uppercase;letter-spacing:0.05em">'+opt.tier+'</div>'
           +'<div style="font-size:11px;font-weight:700;color:var(--text)">'+opt.name+'</div>'
           +'<div style="font-size:10px;color:var(--muted);line-height:1.4">'+opt.desc+'</div>'
@@ -16157,7 +16218,7 @@ async function viewBidDetail(id){
 
   var html = '<div style="max-width:640px">'
     +'<div style="margin-bottom:14px"><div style="font-weight:800;font-size:15px">'+(job?job.job_name:'No job')+' — '+uxEsc(bid.trade)+'</div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+uxEsc(bid.scope_of_work||'')+'</div></div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-top:4px;white-space:pre-wrap;line-height:1.6">'+renderScopeWithPhotos(bid.scope_of_work||'')+'</div></div>'
     + invitedSubs.map(function(s){
         var r = s.resp;
         var statusColor = {pending:'#94a3b8',received:'#2563eb',approved:'#059669',declined:'#dc2626'}[r.status]||'#94a3b8';
