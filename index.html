@@ -11652,12 +11652,62 @@ var SURVEY_CATS = {
   }
 };
 
-function showClientSurvey(leadId){
+// Manual way: type room names, save them, reopen the survey with the
+// per-room questions generated from that list.
+async function pmtApplySurveyRooms(leadId){
+  var text = document.getElementById('survey-rooms-input').value;
+  var rooms = text.split(',').map(function(r){return r.trim();}).filter(Boolean);
+  if(!rooms.length){ toast('Type at least one room','err'); return; }
+  await dbUpd('leads', leadId, {survey_rooms: JSON.stringify(rooms)});
+  toast(rooms.length+' rooms applied — survey updated','ok');
+  closeOv(document.getElementById('survey-ov'));
+  showClientSurvey(leadId);
+}
+// Automatic way: read the actual Takeoff measurement group names for
+// this lead's job's plans, and use those as the room list.
+async function pmtPullRoomsFromTakeoff(leadId){
+  var leads = await dbGet('leads','?id=eq.'+leadId);
+  var lead = leads[0];
+  if(!lead || !lead.job_id){ toast('This lead has no linked job/plans yet','err'); return; }
+  var docs = await dbGet('documents','?job_id=eq.'+lead.job_id);
+  var plans = docs.filter(function(d){return d.markup_data;});
+  if(!plans.length){ toast('No takeoff measurements found yet for this job\'s plans','err'); return; }
+  var roomNames = new Set();
+  plans.forEach(function(doc){
+    var data; try{ data = JSON.parse(doc.markup_data||'{}'); }catch(e){ return; }
+    (data.groups||[]).forEach(function(g){
+      if(g.name && g.name!=='General') roomNames.add(g.name);
+    });
+  });
+  if(!roomNames.size){ toast('No named measurement groups found — try naming your groups in Takeoff (e.g. "Master Bath") first','err',6000); return; }
+  var rooms = Array.from(roomNames);
+  document.getElementById('survey-rooms-input').value = rooms.join(', ');
+  toast(rooms.length+' rooms pulled from Takeoff — click Apply Room List to use them','ok',5000);
+}
+// Button way: jump straight to Plans/Takeoff for this lead's job so
+// rooms can be measured and named, then come back to pull them in.
+async function pmtOpenTakeoffFromSurvey(leadId){
+  var leads = await dbGet('leads','?id=eq.'+leadId);
+  var lead = leads[0];
+  closeOv(document.getElementById('survey-ov'));
+  if(lead && lead.job_id){
+    AJOB = (await dbGet('jobs','?id=eq.'+lead.job_id))[0] || AJOB;
+  }
+  goTab('plans');
+  toast('Measure and name your rooms here, then reopen the survey and use "Pull from Takeoff"','ok',7000);
+}
+
+async function showClientSurvey(leadId){
   var el=document.createElement('div');
   el.className='ov';el.id='survey-ov';el.style.zIndex='1000';
   window._pmtSurveyLeadId = leadId;
   var tierColors={'Standard':'#6b7280','Premium':'#0d7a70','Luxury':'#8b5cf6'};
   var tierBgs={'Standard':'rgba(107,114,128,0.06)','Premium':'var(--teal-bg,#f0faf9)','Luxury':'rgba(139,92,246,0.08)'};
+
+  var leads = await dbGet('leads','?id=eq.'+leadId);
+  var lead = leads[0];
+  var savedRooms = lead && lead.survey_rooms ? JSON.parse(lead.survey_rooms) : ['Kitchen','Living Room'];
+  window._pmtSurveyRooms = savedRooms;
 
   var html='<div class="modal" style="max-width:820px;margin:auto"><div class="mh">'
     +'<div><div class="mt">Client Selection Survey</div>'
@@ -11665,6 +11715,15 @@ function showClientSurvey(leadId){
     +'<button class="mc" onclick="closeOv(this)">&#x2715;</button></div>'
     +'<div class="mb" style="max-height:75vh;overflow-y:auto" id="survey-scroll-body">'
     +'<div id="survey-progress-bar" style="position:sticky;top:0;background:#fff;z-index:5;padding:8px 0;margin-bottom:10px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted)"></div>'
+    +'<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:18px">'
+    +'<div style="font-size:13px;font-weight:800;margin-bottom:6px">Rooms in this home</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:8px">This decides how many times Flooring and Bathroom items get asked \u2014 e.g. "Master Bath floor" and "Hall Bath floor" separately, instead of one generic flooring question.</div>'
+    +'<textarea id="survey-rooms-input" placeholder="Kitchen, Master Bath, Hall Bath, Living Room, Bedroom 1, Laundry..." style="width:100%;min-height:50px;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-family:inherit;font-size:12.5px">'+savedRooms.join(', ')+'</textarea>'
+    +'<div style="display:flex;gap:8px;margin-top:8px">'
+    +'<button onclick="pmtApplySurveyRooms(\''+leadId+'\')" style="padding:7px 12px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">Apply Room List</button>'
+    +'<button onclick="pmtPullRoomsFromTakeoff(\''+leadId+'\')" style="padding:7px 12px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">📐 Pull from Takeoff</button>'
+    +'<button onclick="pmtOpenTakeoffFromSurvey(\''+leadId+'\')" style="padding:7px 12px;background:#374151;color:#fff;border:none;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">Open Takeoff to Measure Rooms</button>'
+    +'</div></div>'
     +'<div style="background:var(--teal-bg,#f0faf9);border:1px solid var(--teal);border-radius:8px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--text)">'
     +'<strong>How this works:</strong> For each item, pick Standard, Premium, or Luxury based on your preference and budget. There are no wrong answers \u2014 this simply helps us build an accurate estimate and source the right materials for your project.'
     +'</div>'
@@ -11680,6 +11739,18 @@ function showClientSurvey(leadId){
     'Tile':'Bathroom','Shower':'Bathroom',
     'Flooring':'Whole Home','Interior Doors':'Whole Home'
   };
+  var rooms = window._pmtSurveyRooms || ['Kitchen','Living Room'];
+  var bathRooms = rooms.filter(function(r){return r.toLowerCase().indexOf('bath')>-1;});
+
+  // Which room instances a given item should repeat across — Flooring
+  // asks once per room in the house, Tile/Shower once per bathroom,
+  // everything else stays a single generic question like before.
+  function pmtRoomInstancesFor(item){
+    if(item==='Flooring') return rooms.length ? rooms : [null];
+    if(item==='Tile' || item==='Shower') return bathRooms.length ? bathRooms : [null];
+    return [null];
+  }
+
   Object.keys(SURVEY_CATS).forEach(function(cat){
     var catData = SURVEY_CATS[cat];
     html+='<div style="margin-bottom:24px">'
@@ -11694,15 +11765,20 @@ function showClientSurvey(leadId){
         html += '<div style="font-size:11px;font-weight:800;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 8px 2px">'+lastRoom+'</div>';
       }
       var itemData = catData.items[item];
+      var instances = pmtRoomInstancesFor(item);
+
+      instances.forEach(function(roomInstance){
+      var fieldSuffix = roomInstance ? '_'+roomInstance.replace(/[^a-zA-Z0-9]/g,'') : '';
+      var displayName = roomInstance ? roomInstance+' — '+item : item;
       html+='<div style="margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">'
-        +'<div style="font-size:13px;font-weight:800;margin-bottom:3px">'+item+'</div>'
+        +'<div style="font-size:13px;font-weight:800;margin-bottom:3px">'+displayName+'</div>'
         +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">'+itemData.desc+'</div>'
-        +'<input type="hidden" id="sv_'+cat+'_'+item+'" name="sv_'+cat+'_'+item+'" value="">'
+        +'<input type="hidden" id="sv_'+cat+'_'+item+fieldSuffix+'" name="sv_'+cat+'_'+item+fieldSuffix+'" value="">'
         +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
 
       itemData.opts.forEach(function(opt){
         var tc = tierColors[opt.tier], tb = tierBgs[opt.tier];
-        var fieldId = 'sv_'+cat+'_'+item;
+        var fieldId = 'sv_'+cat+'_'+item+fieldSuffix;
         html+='<div class="sv-opt" data-field="'+fieldId+'" data-value="'+opt.tier+':'+opt.name+'" onclick="pmtToggleSurveyOption(this)" style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:'+tb+';border:1.5px solid '+tc+';cursor:pointer;position:relative">'
           +'<span class="sv-check" style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;border:1.5px solid '+tc+';background:#fff"></span>'
           +(opt.img && opt.img.indexOf('http')===0
@@ -11713,7 +11789,7 @@ function showClientSurvey(leadId){
           +'<div style="font-size:10px;color:var(--muted);line-height:1.4">'+opt.desc+'</div>'
           +'</div>';
       });
-      html+='<div class="sv-opt" data-field="sv_'+cat+'_'+item+'" data-value="Custom:Uploaded" data-custom="1" onclick="pmtToggleSurveyOption(this,\''+cat+'\',\''+item+'\')" style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:#f9fafb;border:1.5px dashed #9ca3af;cursor:pointer;position:relative">'
+      html+='<div class="sv-opt" data-field="sv_'+cat+'_'+item+fieldSuffix+'" data-value="Custom:Uploaded" data-custom="1" onclick="pmtToggleSurveyOption(this,\''+cat+'\',\''+item+fieldSuffix+'\')" style="display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:8px;background:#f9fafb;border:1.5px dashed #9ca3af;cursor:pointer;position:relative">'
         +'<span class="sv-check" style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;border:1.5px solid #9ca3af;background:#fff"></span>'
         +'<div style="width:100%;height:72px;border-radius:6px;background:#fff;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;font-size:22px">📤</div>'
         +'<div style="font-size:9px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Custom</div>'
@@ -11724,10 +11800,11 @@ function showClientSurvey(leadId){
       html+='<div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'
         +'<label style="font-size:11px;color:var(--muted);font-weight:600">Budget allowance (optional):</label>'
         +'<span style="font-size:12px;color:var(--muted)">$</span>'
-        +'<input type="number" id="sv_'+cat+'_'+item+'_allowance" oninput="pmtSurveyPartialSave(\''+cat+'\',\''+item+'\')" style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px" placeholder="0">'
+        +'<input type="number" id="sv_'+cat+'_'+item+fieldSuffix+'_allowance" oninput="pmtSurveyPartialSave(\''+cat+'\',\''+item+fieldSuffix+'\')" style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px" placeholder="0">'
         +'</div>';
 
       html+='</div></div>';
+      }); // end instances.forEach
     });
     html+='</div>';
   });
@@ -16489,39 +16566,39 @@ function pmtCanvasDblClick(e){
 // panel; nothing here is fixed by the code.
 var DEFAULT_ITEM_LIBRARY = [
   {id:'roof', name:'Roof', methods:[
-    {label:'Rectangular Section', tool:'rect', outputUnit:'squares', questions:[{key:'pitch',label:'Roof Pitch',suffix:'/12'},{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Irregular / Polygon Section', tool:'poly', outputUnit:'squares', questions:[{key:'pitch',label:'Roof Pitch',suffix:'/12'},{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'Rectangular Section', tool:'rect', outputUnit:'squares', questions:[{key:'pitch',label:'Roof Pitch',suffix:'/12'},{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Irregular / Polygon Section', tool:'poly', outputUnit:'squares', questions:[{key:'pitch',label:'Roof Pitch',suffix:'/12'},{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]}
   ]},
   {id:'siding', name:'Siding', methods:[
-    {label:'Vinyl Siding — Rectangle',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Vinyl Siding — Irregular Shape',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Stucco',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Stone Veneer',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Fiber Cement (Hardie)',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'Vinyl Siding — Rectangle',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Vinyl Siding — Irregular Shape',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Stucco',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:5}]},
+    {label:'Stone Veneer',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Fiber Cement (Hardie)',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]}
   ]},
   {id:'flooring', name:'Flooring', methods:[
-    {label:'LVP / Vinyl Plank — Rectangle',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'LVP / Vinyl Plank — Irregular Room',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Engineered Hardwood',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Solid Hardwood',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Tile',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Carpet',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'LVP / Vinyl Plank — Rectangle',tool:'rect', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'LVP / Vinyl Plank — Irregular Room',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Engineered Hardwood',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Solid Hardwood',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Tile',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:15}]},
+    {label:'Carpet',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]}
   ]},
   {id:'framing', name:'Wall Framing', methods:[
-    {label:'Straight Wall Run', tool:'wall', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Full Perimeter Loop', tool:'perimeter', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'Straight Wall Run', tool:'wall', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:5}]},
+    {label:'Full Perimeter Loop', tool:'perimeter', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:5}]}
   ]},
   {id:'foundation', name:'Foundation', methods:[
-    {label:'Trace the perimeter', tool:'perimeter', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Straight run', tool:'linear', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'Trace the perimeter', tool:'perimeter', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:5}]},
+    {label:'Straight run', tool:'linear', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:5}]}
   ]},
   {id:'openings', name:'Windows & Doors', methods:[
     {label:'Click to count', tool:'count', outputUnit:'ea', questions:[]}
   ]},
   {id:'concrete', name:'Concrete', methods:[
-    {label:'Linear run (footing)', tool:'linear', outputUnit:'cy', questions:[{key:'width',label:'Width',suffix:'ft'},{key:'depth',label:'Depth',suffix:'ft'},{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Slab area', tool:'poly', outputUnit:'cy', questions:[{key:'depth',label:'Depth',suffix:'ft'},{key:'waste',label:'Waste Factor',suffix:'%'}]},
-    {label:'Perimeter run (curb/footing loop)', tool:'perimeter', outputUnit:'cy', questions:[{key:'width',label:'Width',suffix:'ft'},{key:'depth',label:'Depth',suffix:'ft'},{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'Linear run (footing)', tool:'linear', outputUnit:'cy', questions:[{key:'width',label:'Width',suffix:'ft'},{key:'depth',label:'Depth',suffix:'ft'},{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Slab area', tool:'poly', outputUnit:'cy', questions:[{key:'depth',label:'Depth',suffix:'ft'},{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]},
+    {label:'Perimeter run (curb/footing loop)', tool:'perimeter', outputUnit:'cy', questions:[{key:'width',label:'Width',suffix:'ft'},{key:'depth',label:'Depth',suffix:'ft'},{key:'waste',label:'Waste Factor',suffix:'%',defaultValue:10}]}
   ]},
   {id:'length', name:'Length', methods:[
     {label:'Draw a line', tool:'linear', outputUnit:'lf', questions:[]}
@@ -16552,6 +16629,27 @@ function pmtGetItemLibrary(){
     }
   });
   if(upgraded.length){ lsSave('item_library', items); toast('Your Item Library was upgraded — '+upgraded.join(', ')+' now offer more ways to measure','ok',6000); }
+
+  // Second pass: backfill default answer values (like waste %) onto
+  // existing questions that don't have one yet — never touches a value
+  // already set, so nothing customized gets overwritten.
+  var defaultsAdded = false;
+  DEFAULT_ITEM_LIBRARY.forEach(function(fresh){
+    var existing = items.find(function(i){return i.id===fresh.id;});
+    if(!existing) return;
+    existing.methods.forEach(function(existingMethod){
+      var freshMethod = fresh.methods.find(function(m){return m.label===existingMethod.label;});
+      if(!freshMethod) return;
+      (existingMethod.questions||[]).forEach(function(existingQ){
+        var freshQ = (freshMethod.questions||[]).find(function(q){return q.key===existingQ.key;});
+        if(freshQ && freshQ.defaultValue!==undefined && existingQ.defaultValue===undefined){
+          existingQ.defaultValue = freshQ.defaultValue;
+          defaultsAdded = true;
+        }
+      });
+    });
+  });
+  if(defaultsAdded){ lsSave('item_library', items); }
   return items;
 }
 function pmtSaveItemLibrary(items){ lsSave('item_library', items); }
@@ -16659,6 +16757,19 @@ function pmtStartLibraryItem(item, method){
 // Every question a method needs, asked once, up front — before drawing,
 // not discovered as a problem after the fact.
 function pmtAskQuestionsThenActivate(item, method){
+  // If every question already has a saved default, don't ask at all —
+  // just use them and go straight to measuring. This is the actual fix
+  // for "why do you ask me every time" — set it once, it's remembered.
+  var allDefaulted = method.questions.every(function(q){ return q.defaultValue!==undefined && q.defaultValue!==null; });
+  if(allDefaulted && method.questions.length){
+    var answers = {};
+    method.questions.forEach(function(q){ answers[q.key] = q.defaultValue; });
+    PMT.activeLibItem = item; PMT.activeLibMethod = method; PMT.pendingAnswers = answers;
+    var summary = method.questions.map(function(q){ return q.label+': '+q.defaultValue+(q.suffix||''); }).join(', ');
+    toast('Using saved defaults \u2014 '+summary+' (tap \ud83d\udcd0 on the item after to change just this one)','ok',5000);
+    pmtSetTool(method.tool);
+    return;
+  }
   document.querySelectorAll('#pmt-questions-ov').forEach(function(el){el.remove();});
   var el = document.createElement('div');
   el.id = 'pmt-questions-ov';
@@ -16667,9 +16778,10 @@ function pmtAskQuestionsThenActivate(item, method){
     +'<div style="font-weight:800;font-size:15px;margin-bottom:4px">'+item.name+'</div>'
     +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">A couple numbers before you draw.</div>'
     + method.questions.map(function(q,i){
-        return '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">'+q.label+(q.suffix?' ('+q.suffix+')':'')+'</label>'
-          +'<input type="number" id="pmt-q-'+i+'" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box"></div>';
+        return '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">'+q.label+(q.suffix?' ('+q.suffix+')':'')+(q.defaultValue!==undefined?' <span style="color:#0d7a70;font-weight:600">(usually '+q.defaultValue+')</span>':'')+'</label>'
+          +'<input type="number" id="pmt-q-'+i+'" value="'+(q.defaultValue!==undefined?q.defaultValue:'')+'" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box"></div>';
       }).join('')
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:10px;cursor:pointer"><input type="checkbox" id="pmt-q-remember" checked> Remember these as the default for '+item.name+' next time</label>'
     +'<button onclick="pmtConfirmQuestions()" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Continue — Start Measuring</button>'
     +'<button onclick="document.getElementById(\'pmt-questions-ov\').remove()" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
     +'</div>';
@@ -16680,10 +16792,13 @@ function pmtAskQuestionsThenActivate(item, method){
 function pmtConfirmQuestions(){
   var item = window._pmtPendingQItem, method = window._pmtPendingQMethod;
   var answers = {};
+  var remember = document.getElementById('pmt-q-remember');
   method.questions.forEach(function(q,i){
     var v = parseFloat(document.getElementById('pmt-q-'+i).value);
     answers[q.key] = isNaN(v) ? 0 : v;
+    if(remember && remember.checked && !isNaN(v)) q.defaultValue = v; // saved onto this method for next time
   });
+  if(remember && remember.checked){ pmtSaveItemLibrary(pmtGetItemLibrary()); }
   PMT.activeLibItem = item; PMT.activeLibMethod = method; PMT.pendingAnswers = answers;
   var ov = document.getElementById('pmt-questions-ov'); if(ov) ov.remove();
   pmtSetTool(method.tool);
