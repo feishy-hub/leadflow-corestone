@@ -8574,16 +8574,24 @@ async function openEstimate(id){
     var cost = (l.qty||0)*(l.unit_cost||0);
     var markup = cost*((l.markup_pct||est.default_markup||20)/100);
     var total = cost+markup;
-    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 130px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)">'
-      + '<div><div style="font-size:13px;font-weight:600">'+l.description+'</div>'
+    var statusBadge = {
+      sent: '<span style="font-size:9px;font-weight:700;color:#2563eb;background:#dbeafe;padding:2px 7px;border-radius:10px;margin-left:6px">SENT FOR BID</span>',
+      waiting: '<span style="font-size:9px;font-weight:700;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:10px;margin-left:6px">WAITING FOR APPROVAL</span>',
+      approved: '<span style="font-size:9px;font-weight:700;color:#059669;background:#d1fae5;padding:2px 7px;border-radius:10px;margin-left:6px">APPROVED</span>'
+    }[l.bid_status] || '';
+    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 160px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)">'
+      + '<div><div style="font-size:13px;font-weight:600">'+l.description+statusBadge+'</div>'
       + (l.notes?'<div style="font-size:11px;color:var(--muted)">'+l.notes+'</div>':'')
       + '</div>'
       + '<div style="font-size:13px;text-align:center">'+l.qty+' '+l.unit+'</div>'
       + '<div style="font-size:13px;text-align:right">'+fmt$(l.unit_cost)+'</div>'
       + '<div style="font-size:13px;text-align:center">'+l.markup_pct+'%</div>'
       + '<div style="font-size:13px;font-weight:700;text-align:right;color:var(--teal)">'+fmt$(total)+'</div>'
-      + '<div style="display:flex;gap:4px">'
-      + '<button onclick="checkLinePrice(\''+id+'\','+i+',this)" title="Verify this price against historical jobs and an AI estimate" style="padding:4px 8px;font-size:11px;border:1px solid var(--teal);border-radius:4px;background:#fff;color:var(--teal);cursor:pointer">🔍 Check</button>'
+      + '<div style="display:flex;gap:4px;flex-wrap:wrap">'
+      + (l.bid_status
+          ? '<button onclick="viewLineBid(\''+id+'\','+i+')" title="View this bid request" style="padding:4px 8px;font-size:11px;border:1px solid #2563eb;border-radius:4px;background:#fff;color:#2563eb;cursor:pointer">👁 Bid</button>'
+          : '<button onclick="sendLineForBid(\''+id+'\','+i+')" title="Send this line out to a vendor for pricing" style="padding:4px 8px;font-size:11px;border:1px solid #6b7280;border-radius:4px;background:#fff;color:#6b7280;cursor:pointer">📤 Bid</button>')
+      + '<button onclick="checkLinePrice(\''+id+'\','+i+',this)" title="Verify this price against historical jobs and an AI estimate" style="padding:4px 8px;font-size:11px;border:1px solid var(--teal);border-radius:4px;background:#fff;color:var(--teal);cursor:pointer">🔍</button>'
       + '<button onclick="editLine(\''+id+'\','+i+')" style="padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">Edit</button>'
       + '<button onclick="deleteLine(\''+id+'\','+i+',this)" style="padding:4px 8px;font-size:11px;border:1px solid var(--red);border-radius:4px;background:#fff;color:var(--red);cursor:pointer">✕</button>'
       + '</div></div>';
@@ -8632,7 +8640,7 @@ async function openEstimate(id){
     // Left: line items
     '<div>',
     '<div class="card" style="padding:0;overflow:hidden">',
-    '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 130px;gap:8px;padding:10px 12px;background:var(--navy);font-size:10px;font-weight:800;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.08em">',
+    '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 160px;gap:8px;padding:10px 12px;background:var(--navy);font-size:10px;font-weight:800;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.08em">',
     '<div>Description / Notes / Type</div><div style="text-align:center">Qty</div><div style="text-align:right">Unit Cost</div><div style="text-align:center">Markup</div><div style="text-align:right">Total</div><div></div>',
     '</div>',
     linesHtml,
@@ -8982,6 +8990,86 @@ async function applyCheckedPrice(estId, idx, newCost){
   document.getElementById('price-check-ov').remove();
   toast('Price updated to '+fmt$(newCost)+'/'+lines[idx].unit,'ok');
   openEstimate(estId);
+}
+
+// Send ONE specific estimate line out to a vendor for pricing — creates
+// a bid tied directly to that line, not a trade-wide blast. The line
+// itself carries the status from here on: Sent -> Waiting -> Approved.
+async function sendLineForBid(estId, idx){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  if(!est){ toast('Estimate not found','err'); return; }
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} }
+  var line = lines[idx];
+  if(!line){ toast('Line not found','err'); return; }
+
+  var subs = await dbGet('subcontractors','?order=company_name.asc');
+  document.querySelectorAll('#send-line-bid-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'send-line-bid-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:380px;max-height:75vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eee">'
+    +'<div style="font-weight:800;font-size:14px">Send for Bid</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-top:2px">'+uxEsc(line.description)+' — '+line.qty+' '+line.unit+'</div>'
+    +'</div>'
+    +'<div style="padding:12px 20px;overflow-y:auto;flex:1">'
+    +'<div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:8px">Choose a vendor</div>'
+    + (subs.length ? subs.map(function(s){
+        return '<div onclick="confirmSendLineForBid(\''+estId+'\','+idx+',\''+s.id+'\')" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:12.5px;font-weight:600" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'transparent\'">'+uxEsc(s.company_name)+(s.trade?' <span style="color:#9ca3af;font-weight:400">— '+uxEsc(s.trade)+'</span>':'')+'</div>';
+      }).join('') : '<div style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0">No subcontractors on file yet</div>')
+    +'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid #eee"><button onclick="document.getElementById(\'send-line-bid-ov\').remove()" style="width:100%;padding:9px;background:transparent;border:1px solid #e5e7eb;color:#6b7280;border-radius:8px;cursor:pointer;font-size:12px">Cancel</button></div>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+async function confirmSendLineForBid(estId, idx, subId){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} }
+  var line = lines[idx];
+  var subs = await dbGet('subcontractors','?id=eq.'+subId);
+  var sub = subs[0];
+  if(!line || !sub) return;
+
+  var bidRecord = {
+    lead_id: est.lead_id || null,
+    job_name: est.title,
+    address: est.address || 'TBD',
+    scope_of_work: line.description + (line.notes ? '\n\n'+line.notes : '') + '\n\nQuantity: '+line.qty+' '+line.unit,
+    trade: sub.trade || line.cost_type || 'General',
+    subs: sub.company_name,
+    status: 'sent',
+    sent_date: new Date().toISOString(),
+    source_type: 'estimate_line',
+    source_id: estId,
+    line_index: idx,
+    invited_sub_ids: JSON.stringify([sub.id]),
+    responses: JSON.stringify([{sub_id: sub.id, status: 'pending'}])
+  };
+  var newBid = await dbIns('bids', bidRecord);
+
+  line.bid_status = 'sent';
+  line.bid_id = newBid && newBid.id ? newBid.id : null;
+  await dbUpd('estimates', estId, {line_items: lines});
+
+  document.getElementById('send-line-bid-ov').remove();
+  toast('Sent to '+sub.company_name+' for pricing','ok');
+  openEstimate(estId);
+}
+// Opens the bid tied to this specific line — same detail view used for
+// trade-wide bids, so recording a response and approving it works the
+// same way, and (via the sync below) reflects back on this exact line.
+async function viewLineBid(estId, idx){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} }
+  var line = lines[idx];
+  if(!line || !line.bid_id){ toast('No bid found for this line','err'); return; }
+  viewBidDetail(line.bid_id);
 }
 
 function addLine(estId){
@@ -16749,8 +16837,27 @@ async function recordBidResponse(bidId, subId){
   if(idx>=0) responses[idx]=entry; else responses.push(entry);
   var receivedCount = responses.filter(function(r){return r.status==='received'||r.status==='approved';}).length;
   await dbUpd('bids', bidId, {responses: JSON.stringify(responses), bids_received: receivedCount});
+  // Sync back to the original line item, if this bid was sent from one
+  if(bid.source_type==='estimate_line' && bid.source_id!=null && bid.line_index!=null){
+    await syncLineBidStatus(bid.source_id, bid.line_index, 'waiting');
+  }
   toast('Bid recorded — review and approve when ready','ok');
   viewBidDetail(bidId);
+}
+// The actual sync mechanism — updates the exact line item's status
+// (and, when approved, its price) directly on the estimate it came from.
+async function syncLineBidStatus(estId, lineIndex, status, approvedPrice){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  if(!est) return;
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} }
+  if(!lines[lineIndex]) return;
+  lines[lineIndex].bid_status = status;
+  if(approvedPrice!==undefined && approvedPrice!==null){
+    lines[lineIndex].unit_cost = lines[lineIndex].qty ? Math.round((approvedPrice/lines[lineIndex].qty)*100)/100 : approvedPrice;
+  }
+  await dbUpd('estimates', estId, {line_items: lines});
 }
 
 async function approveBidAndCreateCO(bidId, subId){
@@ -16761,6 +16868,12 @@ async function approveBidAndCreateCO(bidId, subId){
   if(idx<0){toast('Bid response not found','err');return;}
   responses[idx].status = 'approved';
   await dbUpd('bids', bidId, {responses: JSON.stringify(responses), status:'Bid Approved'});
+  // The actual requested behavior: approving here reflects automatically
+  // back on the exact estimate line this bid was sent from — price fills
+  // in, status becomes Approved, right there on the same line.
+  if(bid.source_type==='estimate_line' && bid.source_id!=null && bid.line_index!=null){
+    await syncLineBidStatus(bid.source_id, bid.line_index, 'approved', responses[idx].amount);
+  }
 
   var subs = await dbGet('subcontractors','?id=eq.'+subId);
   var subName = subs[0] ? subs[0].company_name : 'subcontractor';
@@ -16770,19 +16883,31 @@ async function approveBidAndCreateCO(bidId, subId){
   var jobs = bid.job_id ? await dbGet('jobs','?id=eq.'+bid.job_id) : [];
   var job = jobs[0];
 
-  await dbIns('change_orders', {
-    job_id: bid.job_id || null,
-    title: bid.trade + ' — additional scope',
-    description: bid.scope_of_work + '\n\n(Priced from approved sub bid — '+subName+': '+fmt$(bidAmount)+')',
-    reason: 'Unforeseen Condition',
-    labor_cost: bidAmount, material_cost: 0, markup_pct: 20,
-    cost_impact: markedUpPrice,
-    status: 'Draft', source: 'Approved Sub Bid'
-  });
+  // A line-scoped bid (sent from a specific estimate line) already has its
+  // price reflected directly on that line via the sync above — a Change
+  // Order here would just duplicate it. Change Orders are for the other
+  // real case: trade-wide/deposit-triggered bids with no single originating
+  // line, or genuine out-of-scope work.
+  if(bid.source_type !== 'estimate_line'){
+    await dbIns('change_orders', {
+      job_id: bid.job_id || null,
+      title: bid.trade + ' — additional scope',
+      description: bid.scope_of_work + '\n\n(Priced from approved sub bid — '+subName+': '+fmt$(bidAmount)+')',
+      reason: 'Unforeseen Condition',
+      labor_cost: bidAmount, material_cost: 0, markup_pct: 20,
+      cost_impact: markedUpPrice,
+      status: 'Draft', source: 'Approved Sub Bid'
+    });
+  }
 
-  toast('✅ Bid approved — Change Order drafted for the client at '+fmt$(markedUpPrice)+' (bid '+fmt$(bidAmount)+' + 20%). Review and send from Change Orders.','ok',8000);
+  if(bid.source_type === 'estimate_line'){
+    toast('✅ Bid approved — '+fmt$(bidAmount)+' applied directly to that line in the estimate.','ok',6000);
+  } else {
+    toast('✅ Bid approved — Change Order drafted for the client at '+fmt$(markedUpPrice)+' (bid '+fmt$(bidAmount)+' + 20%). Review and send from Change Orders.','ok',8000);
+  }
   document.querySelectorAll('.ov').forEach(function(el){el.remove();});
-  if(typeof pgCOs==='function') pgCOs();
+  if(bid.source_type === 'estimate_line' && bid.source_id){ openEstimate(bid.source_id); }
+  else if(typeof pgCOs==='function') pgCOs();
 }
 
 
