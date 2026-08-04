@@ -8574,7 +8574,7 @@ async function openEstimate(id){
     var cost = (l.qty||0)*(l.unit_cost||0);
     var markup = cost*((l.markup_pct||est.default_markup||20)/100);
     var total = cost+markup;
-    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 80px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)">'
+    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 130px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)">'
       + '<div><div style="font-size:13px;font-weight:600">'+l.description+'</div>'
       + (l.notes?'<div style="font-size:11px;color:var(--muted)">'+l.notes+'</div>':'')
       + '</div>'
@@ -8583,6 +8583,7 @@ async function openEstimate(id){
       + '<div style="font-size:13px;text-align:center">'+l.markup_pct+'%</div>'
       + '<div style="font-size:13px;font-weight:700;text-align:right;color:var(--teal)">'+fmt$(total)+'</div>'
       + '<div style="display:flex;gap:4px">'
+      + '<button onclick="checkLinePrice(\''+id+'\','+i+',this)" title="Verify this price against historical jobs and an AI estimate" style="padding:4px 8px;font-size:11px;border:1px solid var(--teal);border-radius:4px;background:#fff;color:var(--teal);cursor:pointer">🔍 Check</button>'
       + '<button onclick="editLine(\''+id+'\','+i+')" style="padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">Edit</button>'
       + '<button onclick="deleteLine(\''+id+'\','+i+',this)" style="padding:4px 8px;font-size:11px;border:1px solid var(--red);border-radius:4px;background:#fff;color:var(--red);cursor:pointer">✕</button>'
       + '</div></div>';
@@ -8631,7 +8632,7 @@ async function openEstimate(id){
     // Left: line items
     '<div>',
     '<div class="card" style="padding:0;overflow:hidden">',
-    '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 80px;gap:8px;padding:10px 12px;background:var(--navy);font-size:10px;font-weight:800;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.08em">',
+    '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 130px;gap:8px;padding:10px 12px;background:var(--navy);font-size:10px;font-weight:800;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.08em">',
     '<div>Description / Notes / Type</div><div style="text-align:center">Qty</div><div style="text-align:right">Unit Cost</div><div style="text-align:center">Markup</div><div style="text-align:right">Total</div><div></div>',
     '</div>',
     linesHtml,
@@ -8676,6 +8677,180 @@ async function openEstimate(id){
     '</div>'
   ].join('');
   }catch(e){toast('Estimate error: '+e.message,'err');console.error('openEstimate',e);}
+}
+
+// The actual "verify this matches" feature — for any line item, pulls
+// what similar items have actually cost on past Corestone jobs, and asks
+// AI for a current market estimate, so a price can be checked before it's
+// locked into an estimate or compared against what a sub is charging.
+// Sanity-check a sub's submitted bid amount against an AI-estimated
+// realistic total for the same trade and scope — catches a sub pricing
+// way too high or suspiciously low before it gets approved.
+async function checkBidPrice(bidId, subId, btnEl){
+  var idemKey = 'check_bid_'+bidId+'_'+subId;
+  if(btnEl && !guardAction(idemKey,btnEl)) return;
+  try{
+    var bids = await dbGet('bids','?id=eq.'+bidId);
+    var bid = bids[0];
+    if(!bid){ toast('Bid not found','err'); if(btnEl) releaseAction(idemKey,btnEl,false); return; }
+    var responses = bid.responses ? (typeof bid.responses==='string'?JSON.parse(bid.responses):bid.responses) : [];
+    var resp = responses.find(function(r){return r.sub_id===subId;});
+    if(!resp || !resp.amount){ toast('No bid amount recorded yet','err'); if(btnEl) releaseAction(idemKey,btnEl,false); return; }
+
+    btnEl && (btnEl.textContent='🔍 Checking...');
+
+    var prompt = 'Trade: '+bid.trade+'.\nScope of work:\n'+(bid.scope_of_work||'General scope')
+      + '\n\nGive a realistic total price range for a subcontractor to complete this scope in Hudson Valley, NY residential construction. '
+      + 'Return ONLY valid JSON: {"expected_low":0,"expected_high":0,"reasoning":"one short sentence"}';
+    var r = await ai(prompt, 'You are a construction cost estimator for Hudson Valley, NY. Return only valid JSON.', 300);
+    var aiResult = safeJSON(r);
+
+    btnEl && (btnEl.textContent='🔍 Sanity Check');
+    releaseAction(idemKey,btnEl,true);
+    showBidCheckModal(bid, resp.amount, aiResult);
+  }catch(e){
+    btnEl && (btnEl.textContent='🔍 Sanity Check');
+    if(btnEl) releaseAction(idemKey,btnEl,false);
+    toast('Sanity check error: '+e.message,'err');
+  }
+}
+
+function showBidCheckModal(bid, subAmount, aiResult){
+  document.querySelectorAll('#bid-check-ov').forEach(function(el){el.remove();});
+  var low = aiResult && aiResult.expected_low;
+  var high = aiResult && aiResult.expected_high;
+  var verdict = '';
+  if(low!=null && high!=null){
+    if(subAmount < low) verdict = '<span style="color:#d97706;font-weight:700">⚠ Below expected range — verify scope is fully covered</span>';
+    else if(subAmount > high) verdict = '<span style="color:#dc2626;font-weight:700">⚠ Above expected range</span>';
+    else verdict = '<span style="color:#059669;font-weight:700">✓ Within expected range</span>';
+  }
+  var el = document.createElement('div');
+  el.id = 'bid-check-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:400px">'
+    +'<div style="padding:18px 22px;border-bottom:1px solid #eee">'
+    +'<div style="font-weight:800;font-size:15px">🔍 Bid Sanity Check</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-top:2px">'+uxEsc(bid.trade)+'</div>'
+    +'</div>'
+    +'<div style="padding:16px 22px">'
+    +'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12.5px;color:#374151">Sub\'s bid</span><span style="font-weight:800;font-size:15px">'+fmt$(subAmount)+'</span></div>'
+    +(low!=null ? '<div style="display:flex;justify-content:space-between;padding:8px 0"><span style="font-size:12.5px;color:#374151">AI expected range</span><span style="font-weight:700;font-size:13px">'+fmt$(low)+' – '+fmt$(high)+'</span></div>' : '<div style="color:#9ca3af;font-size:12px;padding:8px 0">AI estimate unavailable</div>')
+    +'<div style="margin-top:6px">'+verdict+'</div>'
+    +(aiResult && aiResult.reasoning ? '<div style="font-size:11.5px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:10px;margin-top:10px">'+uxEsc(aiResult.reasoning)+'</div>' : '')
+    +'</div>'
+    +'<div style="padding:14px 22px;border-top:1px solid #eee;background:#f9fafb">'
+    +'<button onclick="document.getElementById(\'bid-check-ov\').remove()" style="width:100%;padding:9px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:12.5px">Close</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+
+async function checkLinePrice(estId, idx, btnEl){
+  var idemKey = 'check_line_'+estId+'_'+idx;
+  if(btnEl && !guardAction(idemKey,btnEl)) return;
+  try{
+    var results = await dbGet('estimates','?id=eq.'+estId);
+    var est = results[0];
+    if(!est){ toast('Estimate not found','err'); if(btnEl) releaseAction(idemKey,btnEl,false); return; }
+    var lines = est.line_items||[];
+    if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} }
+    var line = lines[idx];
+    if(!line){ toast('Line item not found','err'); if(btnEl) releaseAction(idemKey,btnEl,false); return; }
+
+    btnEl && (btnEl.textContent='🔍 Checking...');
+
+    // Historical: scan every past estimate's line items for similar descriptions
+    var allEstimates = await dbGet('estimates','?order=created_at.desc');
+    var targetWords = (line.description||'').toLowerCase().split(/\s+/).filter(function(w){return w.length>3;});
+    var matches = [];
+    allEstimates.forEach(function(e){
+      if(e.id===estId) return; // skip this same estimate
+      var eLines = e.line_items||[];
+      if(typeof eLines==='string'){ try{eLines=JSON.parse(eLines);}catch(err){eLines=[];} }
+      if(!Array.isArray(eLines)) return;
+      eLines.forEach(function(l){
+        var desc=(l.description||'').toLowerCase();
+        var hits = targetWords.filter(function(w){return desc.indexOf(w)>-1;}).length;
+        if(hits>=1 && l.unit===line.unit && l.unit_cost>0){
+          matches.push({unit_cost:l.unit_cost, description:l.description, job:e.title});
+        }
+      });
+    });
+    var histAvg = matches.length ? Math.round((matches.reduce(function(s,m){return s+m.unit_cost;},0)/matches.length)*100)/100 : null;
+
+    // AI estimate for current market pricing
+    var prompt = 'Line item: "'+line.description+'" — quantity '+line.qty+' '+line.unit+'. '
+      + (histAvg ? 'Corestone\'s own historical average for similar items: $'+histAvg+' per '+line.unit+' (from '+matches.length+' past job'+(matches.length===1?'':'s')+'). ' : 'No historical data available for this item. ')
+      + 'Give a realistic current unit cost for this in Hudson Valley, NY residential construction. Return ONLY valid JSON: {"estimated_unit_cost":0,"reasoning":"one short sentence"}';
+    var r = await ai(prompt, 'You are a construction cost estimator for Hudson Valley, NY. Return only valid JSON.', 300);
+    var aiResult = safeJSON(r);
+
+    btnEl && (btnEl.textContent='🔍 Check');
+    releaseAction(idemKey,btnEl,true);
+    showPriceCheckModal(estId, idx, line, histAvg, matches.length, aiResult);
+  }catch(e){
+    btnEl && (btnEl.textContent='🔍 Check');
+    if(btnEl) releaseAction(idemKey,btnEl,false);
+    toast('Price check error: '+e.message,'err');
+  }
+}
+
+function showPriceCheckModal(estId, idx, line, histAvg, matchCount, aiResult){
+  document.querySelectorAll('#price-check-ov').forEach(function(el){el.remove();});
+  var currentCost = line.unit_cost||0;
+  var aiCost = aiResult && aiResult.estimated_unit_cost;
+  function diffLabel(val){
+    if(!val || !currentCost) return '';
+    var pct = Math.round(((val-currentCost)/currentCost)*100);
+    if(Math.abs(pct)<3) return '<span style="color:#059669;font-weight:700">✓ matches</span>';
+    return '<span style="color:'+(pct>0?'#d97706':'#dc2626')+';font-weight:700">'+(pct>0?'+':'')+pct+'% vs current</span>';
+  }
+  var el = document.createElement('div');
+  el.id = 'price-check-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:420px;max-height:80vh;overflow-y:auto">'
+    +'<div style="padding:18px 22px;border-bottom:1px solid #eee">'
+    +'<div style="font-weight:800;font-size:15px">🔍 Price Check</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-top:2px">'+uxEsc(line.description)+' — '+line.qty+' '+line.unit+'</div>'
+    +'</div>'
+    +'<div style="padding:16px 22px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f6">'
+    +'<span style="font-size:12.5px;color:#374151">Current price in this estimate</span>'
+    +'<span style="font-weight:800;font-size:14px">'+fmt$(currentCost)+'/'+line.unit+'</span></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f6">'
+    +'<span style="font-size:12.5px;color:#374151">Corestone historical average'+(matchCount?' ('+matchCount+' past job'+(matchCount===1?'':'s')+')':'')+'</span>'
+    +(histAvg
+      ? '<span style="text-align:right"><span style="font-weight:800;font-size:14px">'+fmt$(histAvg)+'/'+line.unit+'</span><br>'+diffLabel(histAvg)+'</span>'
+      : '<span style="color:#9ca3af;font-size:12px">No matching history</span>')
+    +'</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0">'
+    +'<span style="font-size:12.5px;color:#374151">AI estimate (current market)</span>'
+    +(aiCost
+      ? '<span style="text-align:right"><span style="font-weight:800;font-size:14px">'+fmt$(aiCost)+'/'+line.unit+'</span><br>'+diffLabel(aiCost)+'</span>'
+      : '<span style="color:#9ca3af;font-size:12px">Unavailable</span>')
+    +'</div>'
+    +(aiResult && aiResult.reasoning ? '<div style="font-size:11.5px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:10px;margin-top:8px">'+uxEsc(aiResult.reasoning)+'</div>' : '')
+    +'</div>'
+    +'<div style="padding:14px 22px;border-top:1px solid #eee;background:#f9fafb;display:flex;gap:8px">'
+    +(histAvg ? '<button onclick="applyCheckedPrice(\''+estId+'\','+idx+','+histAvg+')" style="flex:1;padding:9px;background:#fff;border:1px solid #0d7a70;color:#0d7a70;border-radius:8px;font-weight:700;cursor:pointer;font-size:11.5px">Use Historical</button>' : '')
+    +(aiCost ? '<button onclick="applyCheckedPrice(\''+estId+'\','+idx+','+aiCost+')" style="flex:1;padding:9px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:11.5px">Use AI Estimate</button>' : '')
+    +'<button onclick="document.getElementById(\'price-check-ov\').remove()" style="flex:1;padding:9px;background:transparent;border:1px solid #e5e7eb;color:#6b7280;border-radius:8px;cursor:pointer;font-size:11.5px">Keep Current</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+}
+
+async function applyCheckedPrice(estId, idx, newCost){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){ try{lines=JSON.parse(lines);}catch(e){lines=[];} }
+  if(!lines[idx]) return;
+  lines[idx].unit_cost = newCost;
+  await dbUpd('estimates',estId,{line_items:lines});
+  await autoMarkEstimateRevised(estId);
+  document.getElementById('price-check-ov').remove();
+  toast('Price updated to '+fmt$(newCost)+'/'+lines[idx].unit,'ok');
+  openEstimate(estId);
 }
 
 function addLine(estId){
@@ -16232,7 +16407,7 @@ async function viewBidDetail(id){
           +'<div style="display:flex;justify-content:space-between;align-items:center">'
           +'<div style="font-weight:700;font-size:13px">'+uxEsc(s.name)+'</div>'
           +'<span class="badge" style="background:'+statusColor+'22;color:'+statusColor+'">'+r.status.toUpperCase()+'</span></div>'
-          +(r.status==='received'||r.status==='approved' ? '<div style="font-size:13px;margin-top:6px">Bid amount: <b>'+fmt$(r.amount||0)+'</b></div><div style="font-size:12px;color:var(--muted)">'+uxEsc(r.notes||'')+'</div>' : '')
+          +(r.status==='received'||r.status==='approved' ? '<div style="font-size:13px;margin-top:6px;display:flex;justify-content:space-between;align-items:center"><span>Bid amount: <b>'+fmt$(r.amount||0)+'</b></span><button onclick="checkBidPrice(\''+bid.id+'\',\''+s.id+'\',this)" style="padding:3px 8px;font-size:10.5px;border:1px solid var(--teal);color:var(--teal);background:#fff;border-radius:4px;cursor:pointer">🔍 Sanity Check</button></div><div style="font-size:12px;color:var(--muted)">'+uxEsc(r.notes||'')+'</div>' : '')
           +(r.status==='pending'||r.status==='declined' ? '<div style="display:flex;gap:6px;margin-top:8px">'
             +'<input type="number" placeholder="Bid $" id="bidamt-'+s.id+'" style="width:100px;padding:6px;border:1px solid var(--border);border-radius:4px">'
             +'<input type="text" placeholder="Notes" id="bidnote-'+s.id+'" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:4px">'
