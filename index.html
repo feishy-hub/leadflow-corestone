@@ -4764,10 +4764,10 @@ async function pgPlans(){
         :docs.map(function(d){
           return '<div class="card" style="margin-bottom:10px;cursor:pointer" onclick="viewPlanTakeoff(\''+d.id+'\')">'
             +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-            +'<div><div style="font-size:14px;font-weight:800">📄 '+d.name+'</div>'
+            +'<div><div style="font-size:14px;font-weight:800">📄 '+d.name+(d.revision>1?' <span style="font-size:10px;font-weight:800;color:#7c3aed;background:#ede9fe;padding:2px 7px;border-radius:10px">Rev '+d.revision+'</span>':'')+'</div>'
             +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(d.category||'Plan')+' · Uploaded '+fmtD(d.created_at)+'</div></div>'
             +'<div style="display:flex;gap:6px">'
-            +(d.file_url?'<span class="badge" style="background:var(--green-bg);color:var(--green)">✅ Takeoff Done</span>':'<span class="badge badge-warm">⏳ No Takeoff Yet</span>')
+            +(d.markup_data?'<span class="badge" style="background:var(--green-bg);color:var(--green)">✅ Takeoff Done</span>':'<span class="badge badge-warm">⏳ No Takeoff Yet</span>')
             +'</div></div>'
             +(d.description?'<div style="margin-top:10px;font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:80px;overflow:hidden">'+d.description.substring(0,300)+'...</div>':'')
             +'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
@@ -4847,12 +4847,17 @@ async function uploadAndAnalyzePlan(){
       fr.readAsDataURL(file);
     });
     
-    // Save the document record first
+    // Save the document record first — checking for prior plans with the
+    // same name on this job so we can tag this as Rev 2, Rev 3, etc.
     var jobId=AJOB?AJOB.id:null;
+    var priorPlans = jobId ? await dbGet('documents', '?job_id=eq.'+jobId+'&category=eq.Plan') : [];
+    var sameNamePlans = priorPlans.filter(function(p){return p.name===name;});
+    var revision = sameNamePlans.length + 1;
     var saved=await dbIns('documents',{
       name:name,category:'Plan',job_id:jobId,
       file_url:'local:'+file.name,
       visible_to_client:false,
+      revision:revision,
       created_at:new Date().toISOString()
     });
     docId=saved[0].id;
@@ -7936,6 +7941,43 @@ async function pmtShowRequiredTrades(){
   document.body.appendChild(el);
 }
 
+async function pmtShowCoverageMatrix(){
+  var leadId = prompt('Enter the Lead ID to see bid coverage for:');
+  if(!leadId) return;
+  var bids = await dbGet('bids', '?lead_id=eq.'+leadId);
+  if(!bids.length){ toast('No bid packages found for that lead','err'); return; }
+  var subs = await dbGet('subcontractors');
+  var trades = Array.from(new Set(bids.map(function(b){return b.trade;})));
+  var subNames = Array.from(new Set(bids.flatMap(function(b){return (b.subs||'').split(', ').filter(Boolean);})));
+
+  document.querySelectorAll('#coverage-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'coverage-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  var cellsHtml = trades.map(function(trade){
+    var tradeBids = bids.filter(function(b){return b.trade===trade;});
+    var anyReceived = tradeBids.some(function(b){return (b.bids_received||0)>0;});
+    var rowColor = tradeBids.length===0 ? '#fee2e2' : (!anyReceived ? '#fef3c7' : '#d1fae5');
+    return '<tr><td style="padding:8px;font-weight:700;background:'+rowColor+'">'+trade+'</td>'
+      + subNames.map(function(sub){
+          var b = tradeBids.find(function(x){return (x.subs||'').indexOf(sub)>-1;});
+          var status = !b ? 'None' : (b.bids_received?'Received':'Sent');
+          var color = status==='Received'?'#059669':status==='Sent'?'#d97706':'#9ca3af';
+          return '<td style="padding:8px;text-align:center;color:'+color+';font-weight:700;font-size:11px">'+status+'</td>';
+        }).join('')
+      +'</tr>';
+  }).join('');
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:0;width:min(700px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--border)"><div style="font-weight:800;font-size:15px">Bid Coverage</div>'
+    +'<div style="font-size:12px;color:var(--muted)">Red row = no bids sent for that trade yet. Amber = sent, nobody responded yet.</div></div>'
+    +'<div style="padding:14px 20px;overflow:auto;flex:1">'
+    +'<table style="border-collapse:collapse;font-size:12px;width:100%"><tr><th style="padding:8px;text-align:left">Trade</th>'+subNames.map(function(s){return '<th style="padding:8px;font-size:10.5px">'+uxEsc(s)+'</th>';}).join('')+'</tr>'+cellsHtml+'</table>'
+    +'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid var(--border)"><button onclick="document.getElementById(\'coverage-ov\').remove()" style="width:100%;padding:9px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Close</button></div>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+
 async function pgBids(){
   var bids=await dbGet('bids','?order=created_at.desc');
   var jobs=await dbGet('jobs','?order=job_name.asc');
@@ -7951,6 +7993,7 @@ async function pgBids(){
     +'<input id="bid-search" placeholder="Search job, trade, or sub..." oninput="pmtFilterBidRows()" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">'
     +'<select id="bid-status-filter" onchange="pmtFilterBidRows()" style="padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit"><option value="">All Statuses</option><option value="sent">Sent</option><option value="received">Received</option><option value="awarded">Awarded</option></select>'
     +'<button onclick="pmtShowRequiredTrades()" style="padding:8px 14px;background:#7c3aed;color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">🎯 Required Trades</button>'
+    +'<button onclick="pmtShowCoverageMatrix()" style="padding:8px 14px;background:#374151;color:#fff;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">📊 Coverage</button>'
     +'</div>'
     +'<div id="bid-form-wrap" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">'
     +'<div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">New Bid Package<button onclick="$(\'bid-form-wrap\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
@@ -7972,7 +8015,8 @@ async function pgBids(){
         var w9 = s.w9_status||'Not Requested';
         var warn = (!coiOk || w9!=='Received');
         var coiLabel = coiDays===null ? 'not on file' : coiDays<0 ? 'EXPIRED' : 'valid';
-        return '<label style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;cursor:pointer"><input type="checkbox" value="'+s.id+'"> '+s.company_name+(warn?' <span title="COI: '+coiLabel+' \u00b7 W-9: '+w9+'" style="color:#d97706;font-size:10px">⚠</span>':' <span title="COI and W-9 on file" style="color:#059669;font-size:10px">✓</span>')+'</label>';
+        var recommended = s.rating && s.rating>=4;
+        return '<label style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:'+(recommended?'#f0fdf4':'var(--bg)')+';border:1px solid '+(recommended?'#059669':'var(--border)')+';border-radius:var(--radius-sm);font-size:12px;cursor:pointer"><input type="checkbox" value="'+s.id+'"> '+s.company_name+(recommended?' <span title="Rated '+s.rating+'/5 on past jobs" style="color:#059669;font-size:10px">⭐ Recommended</span>':'')+(warn?' <span title="COI: '+coiLabel+' \u00b7 W-9: '+w9+'" style="color:#d97706;font-size:10px">⚠</span>':' <span title="COI and W-9 on file" style="color:#059669;font-size:10px">✓</span>')+'</label>';
       }).join('')+'</div></div>'
     +'<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Bid Due Date</div>'
     +'<input id="nbid-due" type="date" style="padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;background:var(--card);color:var(--text)"></div>'
@@ -8970,6 +9014,38 @@ function pmtVerifyAiRoom(groupId, itemId){
   toast(stillUnverified ? stillUnverified+' room'+(stillUnverified===1?'':'s')+' still need verifying' : 'All AI-detected rooms verified','ok');
 }
 
+// Warns (never blocks) if a newly-drawn area measurement significantly
+// overlaps an existing one on the same page — catches accidental double
+// measuring without getting in the way of intentional overlaps.
+function pmtBoundingBox(points){
+  var xs = points.map(function(p){return p.x;}), ys = points.map(function(p){return p.y;});
+  return { x1: Math.min.apply(null,xs), y1: Math.min.apply(null,ys), x2: Math.max.apply(null,xs), y2: Math.max.apply(null,ys) };
+}
+function pmtCheckOverlap(newItem){
+  if(newItem.type!=='rect' && newItem.type!=='poly') return;
+  if(!newItem.points || newItem.points.length<2) return;
+  var newBox = pmtBoundingBox(newItem.points);
+  var newArea = (newBox.x2-newBox.x1)*(newBox.y2-newBox.y1);
+  if(!newArea) return;
+  var found = null;
+  PMT.groups.forEach(function(g){
+    g.items.forEach(function(it){
+      if(it.id===newItem.id) return;
+      if((it.type!=='rect'&&it.type!=='poly') || !it.points || it.points.length<2) return;
+      if((it.page||1) !== (newItem.page||1)) return;
+      var box = pmtBoundingBox(it.points);
+      var ix1=Math.max(newBox.x1,box.x1), iy1=Math.max(newBox.y1,box.y1);
+      var ix2=Math.min(newBox.x2,box.x2), iy2=Math.min(newBox.y2,box.y2);
+      if(ix2<=ix1 || iy2<=iy1) return;
+      var overlapArea = (ix2-ix1)*(iy2-iy1);
+      if(overlapArea / newArea > 0.5 && !found) found = it;
+    });
+  });
+  if(found){
+    toast('⚠️ This overlaps an existing measurement ("'+ (found.label||'').split(' — ')[0] +'") by more than half its area — check you didn\'t double-measure','err',7000);
+  }
+}
+
 function pmtAssignItemToMeasurement(groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
   var it = g && g.items.find(function(x){return x.id===itemId;});
@@ -9312,6 +9388,10 @@ async function confirmSendLineForBid(estId, idx, subId){
   document.getElementById('bid-preview-ov').remove();
   toast('Sent to '+sub.company_name+' for pricing'+(dueDate?' — due back '+dueDate:''),'ok');
   openEstimate(estId);
+  nextStep('Bid Sent', 'Sent to '+sub.company_name+' for '+(line.description||'this line')+'. What next?', [
+    {icon:'📤', label:'Send to another vendor', sub:'Get a second price to compare', fn:"sendLineForBid('"+estId+"',"+idx+")"},
+    {icon:'📊', label:'View all bids', sub:'See everything sent out for this job', fn:'goTab("bidding")'}
+  ]);
 }
 // Opens the bid tied to this specific line — same detail view used for
 // trade-wide bids, so recording a response and approving it works the
@@ -11957,6 +12037,10 @@ async function saveSurveyResults(leadId,btnEl){
     toast('✅ Survey saved — ' + Object.keys(sels).length + ' requirements created','ok');
     var summary=Object.values(sels).slice(0,4).join(', ');
     await addToGatekeeper('survey_complete','Survey Complete: '+leadId,summary+(notes?'\nNotes: '+notes:''),'normal','Review and confirm selections are in bid packages.');
+    nextStep('Survey Complete', Object.keys(sels).length+' requirements created from this survey. What next?', [
+      {icon:'📋', label:'View Requirements', sub:'See everything the client selected', fn:'pgRequirements()'},
+      {icon:'💰', label:'Start an Estimate', sub:'Requirements will show right in the estimate', fn:'pgEstimates()'}
+    ]);
     if(btnEl) releaseAction(idemKey,btnEl,true);
   }catch(e){
     if(btnEl) releaseAction(idemKey,btnEl,false);
@@ -15909,6 +15993,7 @@ async function showPlanMarkupTool(docId){
         return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[1]+'" style="padding:7px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer" >'+pmtSvgIcon(t[0])+'</button>';
       }).join('')
       +'<button onclick="pmtUndo()" title="Undo last item" style="padding:7px;background:#3a2d2d;color:#fca5a5;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">↩️</button>'
+      +'<button onclick="pmtRedo()" title="Redo" style="padding:7px;background:#2d3a2d;color:#86efac;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">↪️</button>'
       +'<button onclick="pmtShowHistory()" title="Markup history" style="padding:7px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">🕐</button>'
       +'</div>'
     +'</div>'
@@ -16820,6 +16905,7 @@ function pmtActiveGroup(){
 function pmtAddItem(item){
   item.id = 'i'+Date.now()+Math.floor(Math.random()*1000);
   item.page = PMT.currentPage || 1;
+  PMT.redoStack = []; // a new action invalidates the redo chain
   if(PMT.activeLibItem && PMT.activeLibMethod){
     item.libItem = PMT.activeLibItem.id;
     item.libItemName = PMT.activeLibItem.name;
@@ -16828,6 +16914,7 @@ function pmtAddItem(item){
   }
   pmtApplyCategoryMath(item);
   pmtActiveGroup().items.push(item);
+  pmtCheckOverlap(item);
   pmtLogHistory('added', item.label);
   pmtRenderSidebar();
   pmtAutoSave();
@@ -16848,7 +16935,23 @@ function pmtLogHistory(action, detail){
 }
 function pmtUndo(){
   var g = pmtActiveGroup();
-  if(g.items.length){ var removed=g.items.pop(); pmtLogHistory('undo-removed', removed.label); pmtRenderSidebar(); pmtRedraw(); toast('Removed last item','ok'); }
+  if(g.items.length){
+    var removed=g.items.pop();
+    PMT.redoStack = PMT.redoStack || [];
+    PMT.redoStack.push({groupId:g.id, item:removed});
+    pmtLogHistory('undo-removed', removed.label);
+    pmtRenderSidebar(); pmtRedraw(); toast('Removed last item','ok');
+  }
+}
+function pmtRedo(){
+  if(!PMT.redoStack || !PMT.redoStack.length){ toast('Nothing to redo','err'); return; }
+  var last = PMT.redoStack.pop();
+  var g = PMT.groups.find(function(x){return x.id===last.groupId;});
+  if(!g){ toast('That group no longer exists','err'); return; }
+  g.items.push(last.item);
+  pmtLogHistory('redo-restored', last.item.label);
+  pmtRenderSidebar(); pmtRedraw();
+  toast('Restored: '+last.item.label,'ok');
 }
 function pmtShowHistory(){
   document.querySelectorAll('#pmt-history-ov').forEach(function(el){el.remove();});
