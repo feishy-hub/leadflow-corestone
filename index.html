@@ -15686,10 +15686,12 @@ var DEFAULT_ITEM_LIBRARY = [
     {label:'Carpet',tool:'poly', outputUnit:'sqft', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
   ]},
   {id:'framing', name:'Wall Framing', methods:[
-    {label:'Draw the wall length', tool:'wall', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'Straight Wall Run', tool:'wall', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
+    {label:'Full Perimeter Loop', tool:'perimeter', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
   ]},
   {id:'foundation', name:'Foundation', methods:[
-    {label:'Trace the perimeter', tool:'perimeter', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
+    {label:'Trace the perimeter', tool:'perimeter', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]},
+    {label:'Straight run', tool:'linear', outputUnit:'lf', questions:[{key:'waste',label:'Waste Factor',suffix:'%'}]}
   ]},
   {id:'openings', name:'Windows & Doors', methods:[
     {label:'Click to count', tool:'count', outputUnit:'ea', questions:[]}
@@ -15709,20 +15711,25 @@ var DEFAULT_ITEM_LIBRARY = [
 function pmtGetItemLibrary(){
   var items = lsAll('item_library');
   if(!items || !items.length){ items = DEFAULT_ITEM_LIBRARY; lsSave('item_library', items); return items; }
-  // One-time upgrade: items created before material-choice support only
-  // had one generic method (just "draw the area") — bring them up to the
-  // real multi-material version, but never touch an item whose name the
-  // user has changed or whose methods they've already customized past 1.
-  var upgraded = false;
-  ['siding','flooring'].forEach(function(id){
-    var existing = items.find(function(i){return i.id===id;});
-    var fresh = DEFAULT_ITEM_LIBRARY.find(function(i){return i.id===id;});
-    if(existing && fresh && existing.methods.length===1 && existing.methods[0].label.indexOf('Draw the')===0){
+  // One-time upgrade, generalized to every default item: if a stored item
+  // has fewer measuring methods than the current default AND its first
+  // method label still matches one of the default's own labels (meaning
+  // it's a recognized older version, not something the user renamed),
+  // bring it up to date. This is exactly why Roof, Framing, and Foundation
+  // stayed stuck on one drawing option — the earlier migration only
+  // covered Siding and Flooring.
+  var upgraded = [];
+  DEFAULT_ITEM_LIBRARY.forEach(function(fresh){
+    var existing = items.find(function(i){return i.id===fresh.id;});
+    if(!existing) return;
+    var freshSigs = fresh.methods.map(function(m){return m.tool+'|'+m.outputUnit;});
+    var looksLikeOlderDefault = existing.methods.every(function(m){return freshSigs.indexOf(m.tool+'|'+m.outputUnit) > -1;});
+    if(existing.methods.length < fresh.methods.length && looksLikeOlderDefault){
       existing.methods = fresh.methods;
-      upgraded = true;
+      upgraded.push(fresh.name);
     }
   });
-  if(upgraded){ lsSave('item_library', items); toast('Your Item Library was upgraded — Siding and Flooring now ask which material','ok',6000); }
+  if(upgraded.length){ lsSave('item_library', items); toast('Your Item Library was upgraded — '+upgraded.join(', ')+' now offer more ways to measure','ok',6000); }
   return items;
 }
 function pmtSaveItemLibrary(items){ lsSave('item_library', items); }
@@ -16341,7 +16348,26 @@ function pmtRegenerateMaterialList(groupId, itemId){
 function pmtEditItemAnswers(groupId, itemId){
   var g = PMT.groups.find(function(x){return x.id===groupId;});
   var it = g && g.items.find(function(x){return x.id===itemId;});
-  if(!it || !it.libMethod || !it.libMethod.questions || !it.libMethod.questions.length){
+  if(!it || !it.libMethod){
+    toast('This item has no assigned item to edit — tag it with an item first','err');
+    return;
+  }
+  // Always pull the CURRENT method definition from the live library,
+  // matched by item + method label, instead of trusting the frozen
+  // snapshot saved when this measurement was made. This is exactly why
+  // waste (added to the library later) never showed up on older items —
+  // fixed now, so any question added to the library going forward
+  // automatically becomes editable on every existing item too.
+  var currentMethod = it.libMethod;
+  if(it.libItem){
+    var libItem = pmtGetItemLibrary().find(function(i){return i.id===it.libItem;});
+    if(libItem){
+      var matched = libItem.methods.find(function(m){return m.label===it.libMethod.label;}) || libItem.methods[0];
+      if(matched) currentMethod = matched;
+    }
+  }
+  it.libMethod = currentMethod; // keep the item's snapshot in sync going forward
+  if(!currentMethod.questions || !currentMethod.questions.length){
     toast('This item has no editable answers','err');
     return;
   }
@@ -16351,7 +16377,7 @@ function pmtEditItemAnswers(groupId, itemId){
   el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3400;display:flex;align-items:center;justify-content:center';
   el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:300px">'
     +'<div style="font-weight:800;font-size:15px;margin-bottom:12px">Edit — '+uxEsc(it.libItemName||'Measurement')+'</div>'
-    + it.libMethod.questions.map(function(q,i){
+    + currentMethod.questions.map(function(q,i){
         var val = (it.answers && it.answers[q.key]!==undefined) ? it.answers[q.key] : '';
         return '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">'+q.label+(q.suffix?' ('+q.suffix+')':'')+'</label>'
           +'<input type="number" id="pmt-ea-'+i+'" value="'+val+'" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box"></div>';
@@ -16530,7 +16556,7 @@ function pmtRenderSidebar(){
               +'<span style="font-size:13.5px;font-weight:800;color:'+g.color+';white-space:nowrap">'+qty+' '+unit+'</span>'
               +'<span style="display:flex;gap:6px;flex-shrink:0">'
               +'<span onclick="event.stopPropagation();pmtGenerateMaterialList(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.materials&&it.materials.length?'View materials ('+it.materials.length+')':'Generate material list')+'">'+(it.materials&&it.materials.length?'📦':'🤖')+'</span>'
-              +(it.libMethod && it.libMethod.questions && it.libMethod.questions.length ? '<span onclick="event.stopPropagation();pmtEditItemAnswers(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit '+it.libMethod.questions.map(function(q){return q.label;}).join('/')+'">📐</span>' : '')
+              +(it.libMethod ? '<span onclick="event.stopPropagation();pmtEditItemAnswers(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit details (pitch, waste, etc.)">📐</span>' : '')
               +(it.type!=='count' ? '<span onclick="event.stopPropagation();pmtAssignItemToMeasurement(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="'+(it.libItemName?'Change item ('+it.libItemName+')':'Assign an item')+'">🏷️</span>' : '')
               +(it.type!=='count' && it.type!=='freehand' ? '<span onclick="event.stopPropagation();pmtEditItemValue(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer" title="Edit the number">✏️</span>' : '')
               +'<span onclick="event.stopPropagation();pmtDeleteItem(\''+g.id+'\',\''+it.id+'\')" style="cursor:pointer;color:#fca5a5">✕</span>'
