@@ -8780,6 +8780,10 @@ async function openEstimate(id){
   });
 
   var costTypes = ['Labor','Materials','Subcontractor','Equipment','Permit','Other'];
+  // Real construction sequence — the order work (and client draws) actually
+  // happen in, not just a cost category. This is what "sort by trade" means.
+  var TRADE_SEQUENCE = ['Excavation','Demolition','Concrete','Waterproofing','Framing','Plumbing Rough','Electrical Rough','HVAC Rough','Insulation','Drywall','Interior Trim','Painting','Flooring','Cabinetry','Countertops','Plumbing Finish','Electrical Finish','Fixtures','Final Cleanup','Other'];
+  var sortMode = est.line_sort_mode || 'cost_type';
   
   // BUG-3 FIX: line items now grouped by trade/cost type with subtotals — was a flat list
   function renderEstLineRow(l,i){
@@ -8791,7 +8795,7 @@ async function openEstimate(id){
       waiting: '<span style="font-size:9px;font-weight:700;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:10px;margin-left:6px">WAITING FOR APPROVAL</span>',
       approved: '<span style="font-size:9px;font-weight:700;color:#059669;background:#d1fae5;padding:2px 7px;border-radius:10px;margin-left:6px">APPROVED</span>'
     }[l.bid_status] || '';
-    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 220px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)'+(l.is_allowance?';border-left:3px solid #d97706':'')+'">'
+    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 270px;gap:8px;align-items:center;padding:10px 12px;background:'+(i%2===0?'#fff':'#fafbfc')+';border-bottom:1px solid var(--border)'+(l.is_allowance?';border-left:3px solid #d97706':'')+'">'
       + '<div><input type="checkbox" class="li-bulk-check" data-idx="'+i+'" onclick="event.stopPropagation()" style="margin-right:6px;vertical-align:middle"><div style="display:inline-block;font-size:13px;font-weight:600">'+l.description+statusBadge+(l.is_allowance?'<span style="font-size:9px;font-weight:800;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:10px;margin-left:6px">ALLOWANCE</span>':'')+'</div>'
       + (l.cost_code?'<div style="font-size:10px;color:var(--dim)">'+l.cost_code+'</div>':'')
       + (l.notes?'<div style="font-size:11px;color:var(--muted)">'+l.notes+'</div>':'')
@@ -8807,6 +8811,8 @@ async function openEstimate(id){
       + '<button onclick="checkLinePrice(\''+id+'\','+i+',this)" title="Verify this price against historical jobs and an AI estimate" style="padding:4px 8px;font-size:11px;border:1px solid var(--teal);border-radius:4px;background:#fff;color:var(--teal);cursor:pointer">🔍</button>'
       + (l.source_takeoff_doc_id ? '<button onclick="pmtResetToTakeoffQty(\''+id+'\','+i+')" title="Pull the current measured quantity from Takeoff (in case it changed)" style="padding:4px 8px;font-size:11px;border:1px solid #7c3aed;border-radius:4px;background:#fff;color:#7c3aed;cursor:pointer">📐 Reset</button>' : '')
       + '<button onclick="editLine(\''+id+'\','+i+')" style="padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">Edit</button>'
+      + '<button onclick="pmtMoveLine(\''+id+'\','+i+',-1)" title="Move up" style="padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">↑</button>'
+      + '<button onclick="pmtMoveLine(\''+id+'\','+i+',1)" title="Move down" style="padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">↓</button>'
       + '<button onclick="deleteLine(\''+id+'\','+i+',this)" style="padding:4px 8px;font-size:11px;border:1px solid var(--red);border-radius:4px;background:#fff;color:var(--red);cursor:pointer">✕</button>'
       + '</div></div>';
   }
@@ -8814,15 +8820,20 @@ async function openEstimate(id){
   var linesHtml;
   if(lines.length === 0){
     linesHtml = '<div style="text-align:center;padding:28px;color:var(--dim);font-size:13px">No line items yet — click Add Line below</div>';
+  } else if(sortMode === 'custom'){
+    // Manual order — exactly the sequence you arranged with the up/down
+    // arrows, no automatic regrouping.
+    linesHtml = lines.map(function(l,i){return renderEstLineRow(l,i);}).join('');
   } else {
-    var tradeOrder = ['Labor','Materials','Subcontractor','Equipment','Permit'];
+    var groupKeyFn = sortMode==='trade' ? function(l){return l.trade || 'Other';} : function(l){return l.cost_type || 'Other';};
+    var orderList = sortMode==='trade' ? TRADE_SEQUENCE : ['Labor','Materials','Subcontractor','Equipment','Permit'];
     var byTrade = {};
     lines.forEach(function(l,i){
-      var t = l.cost_type || 'Other';
+      var t = groupKeyFn(l);
       if(!byTrade[t]) byTrade[t] = [];
       byTrade[t].push({line:l, idx:i});
     });
-    var orderedTrades = tradeOrder.filter(function(t){return byTrade[t];}).concat(Object.keys(byTrade).filter(function(t){return tradeOrder.indexOf(t)===-1;}));
+    var orderedTrades = orderList.filter(function(t){return byTrade[t];}).concat(Object.keys(byTrade).filter(function(t){return orderList.indexOf(t)===-1;}));
     linesHtml = orderedTrades.map(function(trade){
       var group = byTrade[trade];
       var groupTotal = group.reduce(function(s,g){
@@ -8854,12 +8865,17 @@ async function openEstimate(id){
     // Left: line items
     '<div>',
     '<div class="card" style="padding:0;overflow:hidden">',
-    '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 220px;gap:8px;padding:10px 12px;background:var(--navy);font-size:10px;font-weight:800;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.08em">',
+    '<div style="display:grid;grid-template-columns:2fr 0.7fr 0.9fr 0.7fr 0.8fr 270px;gap:8px;padding:10px 12px;background:var(--navy);font-size:10px;font-weight:800;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.08em">',
     '<div>Description / Notes / Type</div><div style="text-align:center">Qty</div><div style="text-align:right">Unit Cost</div><div style="text-align:center">Markup</div><div style="text-align:right">Total</div><div></div>',
     '</div>',
     linesHtml,
     '<div style="padding:12px;border-top:2px solid var(--border);display:flex;gap:8px">',
     '<button class="btn btn-p" onclick="addLine(\''+id+'\')">+ Add Line Item</button>',
+    '<select onchange="pmtSetLineSortMode(\''+id+'\',this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">'
+      +'<option value="cost_type"'+(sortMode==='cost_type'?' selected':'')+'>Sort: Cost Type</option>'
+      +'<option value="trade"'+(sortMode==='trade'?' selected':'')+'>Sort: Trade Sequence (Excavation → Concrete → Framing...)</option>'
+      +'<option value="custom"'+(sortMode==='custom'?' selected':'')+'>Sort: Custom (use ↑↓ arrows)</option>'
+    +'</select>',
     '<button class="btn btn-g" onclick="addLine(\''+id+'\',true)" style="border-color:#d97706;color:#d97706">+ Add Allowance</button>',
     '<button class="btn btn-g" onclick="pmtShowTakeoffImportPicker(\''+id+'\')">📐 From Takeoff</button>',
     '<button class="btn btn-g" onclick="showEstimateVersionHistory(\''+id+'\')">🕐 Version History</button>',
@@ -8867,6 +8883,7 @@ async function openEstimate(id){
     '<div style="display:flex;align-items:center;gap:8px;margin-left:auto">'
       +'<button class="btn btn-g btn-sm" onclick="pmtBulkDeleteLines(\''+id+'\')">🗑 Delete Selected</button>'
       +'<button class="btn btn-g btn-sm" onclick="pmtBulkChangeTrade(\''+id+'\')">↔ Change Trade</button>'
+      +'<button class="btn btn-g btn-sm" onclick="pmtShowMarkupModal(\''+id+'\')">💲 Apply Markup</button>'
       +'<button class="btn btn-g btn-sm" onclick="pmtBulkSendForBid(\''+id+'\')">📤 Send Selected for Bid</button>'
     +'</div>',
     '</div></div></div>',
@@ -9605,6 +9622,54 @@ function pmtGetCheckedLineIndexes(){
   var boxes = document.querySelectorAll('.li-bulk-check:checked');
   return Array.from(boxes).map(function(b){return parseInt(b.dataset.idx);});
 }
+// Apply markup to the whole estimate at once, or just the lines you've
+// checked — and optionally save it as the default so future Change
+// Orders on this job start with the same markup automatically.
+function pmtShowMarkupModal(estId){
+  var checkedCount = pmtGetCheckedLineIndexes().length;
+  document.querySelectorAll('#markup-modal-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'markup-modal-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:20px;width:340px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:12px">Apply Markup</div>'
+    +'<label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:5px">New Markup %</label>'
+    +'<input type="number" id="markup-new-pct" placeholder="e.g. 20" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;margin-bottom:12px">'
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-bottom:6px;cursor:pointer"><input type="radio" name="markup-scope" value="all" checked> Apply to the whole estimate</label>'
+    +(checkedCount ? '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-bottom:12px;cursor:pointer"><input type="radio" name="markup-scope" value="checked"> Apply only to the '+checkedCount+' checked line'+(checkedCount===1?'':'s')+'</label>' : '<div style="height:6px"></div>')
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin-bottom:14px;cursor:pointer"><input type="checkbox" id="markup-save-default" checked> Also use this as the default markup for future Change Orders on this job</label>'
+    +'<button onclick="pmtApplyMarkup(\''+estId+'\')" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Apply</button>'
+    +'<button onclick="document.getElementById(\'markup-modal-ov\').remove()" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+async function pmtApplyMarkup(estId){
+  var pct = parseFloat(document.getElementById('markup-new-pct').value);
+  if(isNaN(pct)){ toast('Enter a markup percentage first','err'); return; }
+  var scope = document.querySelector('input[name="markup-scope"]:checked').value;
+  var saveDefault = document.getElementById('markup-save-default').checked;
+
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+
+  if(scope==='all'){
+    lines.forEach(function(l){ l.markup_pct = pct; });
+  } else {
+    var idxs = pmtGetCheckedLineIndexes();
+    idxs.forEach(function(i){ if(lines[i]) lines[i].markup_pct = pct; });
+  }
+
+  var updates = { line_items: lines };
+  if(saveDefault) updates.default_markup = pct;
+  await dbUpd('estimates', estId, updates);
+  await autoMarkEstimateRevised(estId);
+  document.getElementById('markup-modal-ov').remove();
+  toast('Markup applied'+(saveDefault?' and saved as the default for this job':''),'ok');
+  openEstimate(estId);
+}
+
 async function pmtBulkDeleteLines(estId){
   var idxs = pmtGetCheckedLineIndexes();
   if(!idxs.length){ toast('Check a few lines first','err'); return; }
@@ -9644,6 +9709,32 @@ async function pmtBulkSendForBid(estId){
   }
 }
 
+// Saves the chosen sort as the actual default for this estimate — it
+// stays that way, not just for this one view.
+async function pmtSetLineSortMode(estId, mode){
+  await dbUpd('estimates', estId, {line_sort_mode: mode});
+  openEstimate(estId);
+}
+// Manual reorder — moves a line's real position in the underlying array,
+// which is exactly what "Custom" sort mode displays directly. Matters
+// because the sequence IS the schedule: excavation has to show before
+// concrete, concrete before framing, because that's the order the client
+// gets billed in.
+async function pmtMoveLine(estId, idx, direction){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+  var newIdx = idx + direction;
+  if(newIdx<0 || newIdx>=lines.length) return;
+  var tmp = lines[idx];
+  lines[idx] = lines[newIdx];
+  lines[newIdx] = tmp;
+  await dbUpd('estimates', estId, {line_items: lines});
+  await autoMarkEstimateRevised(estId);
+  openEstimate(estId);
+}
+
 function addLine(estId, isAllowance){
   var costTypes = ['Labor','Materials','Subcontractor','Equipment','Permit','Other'];
   var csiCodes = ['01-General Requirements','02-Existing Conditions','03-Concrete','04-Masonry','05-Metals','06-Wood/Plastics/Composites','07-Thermal/Moisture','08-Openings','09-Finishes','10-Specialties','11-Equipment','12-Furnishings','13-Special Construction','14-Conveying','15-Mechanical','16-Electrical'];
@@ -9659,6 +9750,7 @@ function addLine(estId, isAllowance){
     +'<div><label>Unit</label><select id="li-unit"><option>EA</option><option>SF</option><option>LF</option><option>HR</option><option>LS</option><option>Day</option></select></div>'
     +'</div>'
     +'<div class="fr"><label>Cost Code (optional)</label><select id="li-csi"><option value="">— none —</option>'+csiCodes.map(function(c){return'<option>'+c+'</option>';}).join('')+'</select></div>'
+    +'<div class="fr"><label>Trade (for sequence sorting, optional)</label><select id="li-trade"><option value="">— none —</option>'+['Excavation','Demolition','Concrete','Waterproofing','Framing','Plumbing Rough','Electrical Rough','HVAC Rough','Insulation','Drywall','Interior Trim','Painting','Flooring','Cabinetry','Countertops','Plumbing Finish','Electrical Finish','Fixtures','Final Cleanup'].map(function(t){return'<option>'+t+'</option>';}).join('')+'</select></div>'
     +'<div class="f2">'
     +'<div><label>Quantity</label><input id="li-qty" type="number" value="1" min="0" step="0.01"></div>'
     +'<div><label>Unit Cost ($)</label><input id="li-cost" type="number" value="0" min="0" step="0.01"></div>'
@@ -9699,6 +9791,7 @@ async function saveNewLine(estId){
     cost_type: document.getElementById('li-type').value,
     unit: document.getElementById('li-unit').value,
     cost_code: document.getElementById('li-csi').value || null,
+    trade: document.getElementById('li-trade').value || null,
     is_allowance: document.getElementById('li-allowance').checked,
     qty: parseFloat(document.getElementById('li-qty').value)||1,
     unit_cost: parseFloat(document.getElementById('li-cost').value)||0,
