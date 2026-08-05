@@ -8809,7 +8809,7 @@ async function openEstimate(id){
           ? '<button onclick="viewLineBid(\''+id+'\','+i+')" title="View this bid request" style="padding:4px 8px;font-size:11px;border:1px solid #2563eb;border-radius:4px;background:#fff;color:#2563eb;cursor:pointer">👁 Bid</button>'
           : '<button onclick="sendLineForBid(\''+id+'\','+i+')" title="Send this line out to a vendor for pricing" style="padding:4px 8px;font-size:11px;border:1px solid #6b7280;border-radius:4px;background:#fff;color:#6b7280;cursor:pointer">📤 Bid</button>')
       + '<button onclick="checkLinePrice(\''+id+'\','+i+',this)" title="Verify this price against historical jobs and an AI estimate" style="padding:4px 8px;font-size:11px;border:1px solid var(--teal);border-radius:4px;background:#fff;color:var(--teal);cursor:pointer">🔍</button>'
-      + (l.source_takeoff_doc_id ? '<button onclick="pmtResetToTakeoffQty(\''+id+'\','+i+')" title="Pull the current measured quantity from Takeoff (in case it changed)" style="padding:4px 8px;font-size:11px;border:1px solid #7c3aed;border-radius:4px;background:#fff;color:#7c3aed;cursor:pointer">📐 Reset</button>' : '')
+      + (l.source_takeoff_doc_id ? '<button onclick="pmtResetToTakeoffQty(\''+id+'\','+i+')" title="Pull the current measured quantity from Takeoff (in case it changed)" style="padding:4px 8px;font-size:11px;border:1px solid #7c3aed;border-radius:4px;background:#fff;color:#7c3aed;cursor:pointer">📐 Reset</button>' : '<button onclick="pmtImportForThisLine(\''+id+'\','+i+')" title="Find or measure something in Takeoff and pull the quantity directly into this line" style="padding:4px 8px;font-size:11px;border:1px solid #7c3aed;border-radius:4px;background:#fff;color:#7c3aed;cursor:pointer">📐 Import</button>')
       + '<button onclick="editLine(\''+id+'\','+i+')" style="padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">Edit</button>'
       + '<button onclick="pmtMoveLine(\''+id+'\','+i+',-1)" title="Move up" style="padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">↑</button>'
       + '<button onclick="pmtMoveLine(\''+id+'\','+i+',1)" title="Move down" style="padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer">↓</button>'
@@ -9668,6 +9668,95 @@ async function pmtApplyMarkup(estId){
   document.getElementById('markup-modal-ov').remove();
   toast('Markup applied'+(saveDefault?' and saved as the default for this job':''),'ok');
   openEstimate(estId);
+}
+
+// The direct line-to-Takeoff link you asked for: from an existing line
+// (like "Tile"), pull a measurement straight into THAT line, filtered to
+// what's actually relevant, instead of the generic multi-item picker.
+async function pmtImportForThisLine(estId, idx){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+  var line = lines[idx];
+  if(!line){ toast('Line not found','err'); return; }
+
+  var jobs = await dbGet('jobs','?order=job_name.asc');
+  var job = jobs.find(function(j){return j.id===est.job_id;});
+  var jobId = est.job_id || (job?job.id:null);
+  if(!jobId){ pmtPromptLinkJobThenImport(estId, jobs); return; }
+
+  var docs = await dbGet('documents', '?job_id=eq.'+jobId);
+  var plans = docs.filter(function(d){return d.markup_data;});
+  var keywords = (line.description||'').toLowerCase().split(/\s+/).filter(function(w){return w.length>3;});
+  var allItems = [];
+  plans.forEach(function(doc){
+    var data; try{ data = JSON.parse(doc.markup_data||'{}'); }catch(e){ return; }
+    (data.groups||[]).forEach(function(g){
+      (g.items||[]).forEach(function(it){
+        var qty, unit;
+        if(it.value_squares!==undefined){ qty=it.value_squares; unit='squares'; }
+        else if(it.value_cy!==undefined){ qty=it.value_cy; unit='CY'; }
+        else if(it.type==='count'){ qty=1; unit='ea'; }
+        else if(it.value_with_waste!==undefined && it.value_sqft!==undefined){ qty=it.value_with_waste; unit='SF'; }
+        else if(it.value_with_waste!==undefined && it.value_ft!==undefined){ qty=it.value_with_waste; unit='LF'; }
+        else if(it.value_sqft!==undefined){ qty=it.value_sqft; unit='SF'; }
+        else if(it.value_ft!==undefined){ qty=it.value_ft; unit='LF'; }
+        else return;
+        var dashIdx = (it.label||'').indexOf(' — ');
+        var name = dashIdx>-1 ? it.label.slice(0,dashIdx) : (it.libItemName||'Measurement');
+        allItems.push({docId: doc.id, itemId: it.id, name: name, qty: qty, unit: unit});
+      });
+    });
+  });
+  var matches = keywords.length ? allItems.filter(function(it){
+    var n = it.name.toLowerCase();
+    return keywords.some(function(k){return n.indexOf(k)>-1;});
+  }) : allItems;
+
+  document.querySelectorAll('#pmt-line-import-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-line-import-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:0;width:380px;max-height:70vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--border)"><div style="font-weight:800;font-size:15px">Import for "'+uxEsc(line.description)+'"</div>'
+    +'<div style="font-size:12px;color:var(--muted)">'+(matches.length?'Matching Takeoff measurements — pick one':'No matching measurements found yet')+'</div></div>'
+    +'<div style="padding:12px 20px;overflow-y:auto;flex:1">'
+    + (matches.length ? matches.map(function(m,i){
+        return '<div onclick="pmtDoImportForLine(\''+estId+'\','+idx+','+i+')" style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'transparent\'">'
+          +'<div style="font-size:12.5px;font-weight:700">'+uxEsc(m.name)+'</div>'
+          +'<div style="font-size:11px;color:var(--muted)">'+m.qty+' '+m.unit+'</div></div>';
+      }).join('') : '<div style="color:var(--dim);font-size:12.5px;text-align:center;padding:16px 0">Go measure it in Takeoff first, then come back and import.</div>')
+    +'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px">'
+    +'<button onclick="document.getElementById(\'pmt-line-import-ov\').remove();pmtOpenTakeoffFromLine(\''+jobId+'\')" style="flex:1;padding:9px;background:#374151;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:12px">Open Takeoff to Measure</button>'
+    +'<button onclick="document.getElementById(\'pmt-line-import-ov\').remove()" style="flex:1;padding:9px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div></div>';
+  document.body.appendChild(el);
+  window._pmtLineImportMatches = matches;
+}
+async function pmtDoImportForLine(estId, idx, matchIdx){
+  var m = window._pmtLineImportMatches[matchIdx];
+  document.getElementById('pmt-line-import-ov').remove();
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+  if(!lines[idx]) return;
+  lines[idx].qty = m.qty;
+  lines[idx].unit = m.unit;
+  lines[idx].source_takeoff_doc_id = m.docId;
+  lines[idx].source_takeoff_item_id = m.itemId;
+  lines[idx].source_takeoff_qty = m.qty;
+  await dbUpd('estimates', estId, {line_items: lines});
+  await autoMarkEstimateRevised(estId);
+  toast('Line updated from Takeoff — '+m.qty+' '+m.unit,'ok');
+  openEstimate(estId);
+}
+async function pmtOpenTakeoffFromLine(jobId){
+  var jobs = await dbGet('jobs','?id=eq.'+jobId);
+  if(jobs[0]) AJOB = jobs[0];
+  goTab('plans');
 }
 
 async function pmtBulkDeleteLines(estId){
