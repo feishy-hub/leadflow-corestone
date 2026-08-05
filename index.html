@@ -2270,6 +2270,14 @@ function uxListSearchDelegated(input){
   uxSetState(listId, {q: input.value, selected: {}});
   uxRerender(listId);
 }
+function uxSelectAllDelegated(checkbox){
+  var listId = checkbox.dataset.listid || 'list';
+  uxSelectAll(checkbox, listId);
+}
+function uxToggleSelectDelegated(checkbox){
+  var listId = checkbox.dataset.listid || 'list';
+  uxToggleSelect(checkbox, listId);
+}
 function uxListClearDelegated(btn){
   var listId = btn.dataset.listid || 'list';
   uxSetState(listId, {q:'', selected:{}});
@@ -9411,6 +9419,38 @@ async function viewLineBid(estId, idx){
 // you want, assign a trade to each, and imports them as real priced
 // lines in one shot — pre-filled from the Item Library's default price
 // when the measurement has an item tagged.
+// The actual fix for "the button doesn't go anywhere" — an estimate
+// with no linked job has nowhere to look for plans, since plans are only
+// ever attached to a job. Instead of a dead-end error, offer to link one
+// right here, then continue straight into the import picker.
+function pmtPromptLinkJobThenImport(estId, jobs){
+  document.querySelectorAll('#pmt-link-job-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-link-job-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:20px;width:340px">'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:6px">This estimate isn\'t linked to a job yet</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Plans and Takeoff measurements are attached to jobs, not estimates directly — link this estimate to the right job to pull its measurements in.</div>'
+    +(jobs.length
+      ? '<select id="pmt-link-job-select" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">'
+        +'<option value="">Choose a job...</option>'
+        + jobs.map(function(j){return '<option value="'+j.id+'">'+uxEsc(j.job_name)+'</option>';}).join('')
+        +'</select>'
+        +'<button onclick="pmtLinkJobAndImport(\''+estId+'\')" style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Link Job & Continue</button>'
+      : '<div style="color:var(--dim);font-size:12.5px;margin-bottom:12px">No jobs exist yet — create the job first, then come back here.</div>')
+    +'<button onclick="document.getElementById(\'pmt-link-job-ov\').remove()" style="width:100%;margin-top:8px;padding:8px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+async function pmtLinkJobAndImport(estId){
+  var jobId = document.getElementById('pmt-link-job-select').value;
+  if(!jobId){ toast('Pick a job first','err'); return; }
+  await dbUpd('estimates', estId, {job_id: jobId});
+  document.getElementById('pmt-link-job-ov').remove();
+  toast('Estimate linked to job','ok');
+  pmtShowTakeoffImportPicker(estId);
+}
+
 async function pmtShowTakeoffImportPicker(estId){
   var results = await dbGet('estimates','?id=eq.'+estId);
   var est = results[0];
@@ -9418,7 +9458,10 @@ async function pmtShowTakeoffImportPicker(estId){
   var jobs = await dbGet('jobs','?order=job_name.asc');
   var job = jobs.find(function(j){return j.id===est.job_id;});
   var jobId = est.job_id || (job?job.id:null);
-  if(!jobId){ toast('This estimate has no linked job — cannot find its plans','err'); return; }
+  if(!jobId){
+    pmtPromptLinkJobThenImport(estId, jobs);
+    return;
+  }
 
   var docs = await dbGet('documents', '?job_id=eq.'+jobId);
   var plans = docs.filter(function(d){return d.markup_data;});
