@@ -25,7 +25,39 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
   position:fixed;top:0;left:0;width:var(--sb-width);height:100vh;background:var(--sb-bg);
   display:flex;flex-direction:column;z-index:300;overflow:hidden;transition:width 0.2s ease;
   box-shadow:2px 0 8px rgba(0,0,0,0.3);
+  display:none; /* Replaced by the horizontal #bt-topnav below — kept in the DOM, not deleted */
 }
+
+/* ── TOP NAV BAR (Buildertrend-style horizontal tabs, our own branding) ── */
+#bt-topnav{
+  position:fixed;top:0;left:0;right:0;height:52px;background:var(--sb-bg);
+  z-index:310;display:flex;align-items:center;padding:0 16px;gap:4px;
+  box-shadow:0 2px 6px rgba(0,0,0,0.15);
+}
+.bt-topnav-logo{display:flex;align-items:center;gap:8px;cursor:pointer;margin-right:14px;flex-shrink:0}
+.bt-topnav-logo-mark{width:28px;height:28px;background:var(--teal);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;color:#fff}
+.bt-topnav-logo-name{font-size:13px;font-weight:800;color:#fff;letter-spacing:0.04em;white-space:nowrap}
+.bt-topnav-tabs{display:flex;align-items:center;gap:2px;flex:1;overflow-x:auto;height:100%}
+.bt-topnav-tabs::-webkit-scrollbar{height:0}
+.bt-topnav-tab{position:relative;display:flex;align-items:center;gap:6px;padding:0 14px;height:100%;cursor:pointer;color:rgba(255,255,255,0.75);font-size:12.5px;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;transition:all 0.15s}
+.bt-topnav-tab:hover{color:#fff;background:rgba(255,255,255,0.06)}
+.bt-topnav-tab.active{color:#fff;border-bottom-color:var(--teal)}
+.bt-topnav-tab .bt-topnav-arrow{font-size:9px;opacity:0.6}
+.bt-topnav-dropdown{display:none;position:absolute;top:52px;left:0;background:#fff;border-radius:0 0 8px 8px;box-shadow:0 10px 30px rgba(0,0,0,0.25);min-width:200px;padding:6px;z-index:320}
+.bt-topnav-tab.dropdown-open .bt-topnav-dropdown{display:block}
+.bt-topnav-dropdown-item{padding:9px 14px;font-size:12.5px;font-weight:600;color:var(--text);cursor:pointer;border-radius:6px;white-space:nowrap}
+.bt-topnav-dropdown-item:hover{background:var(--bg);color:var(--teal)}
+.bt-topnav-dropdown-item.active{color:var(--teal);background:var(--teal-bg,#f0faf9)}
+.bt-topnav-right{display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0}
+.bt-topnav-jobsel{display:flex;flex-direction:column;padding:6px 12px;border-radius:7px;cursor:pointer;background:rgba(255,255,255,0.08);transition:background 0.15s;max-width:160px}
+.bt-topnav-jobsel:hover{background:rgba(255,255,255,0.15)}
+#bt-topnav-sel-name{font-size:11.5px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bt-topnav-job-picker{display:none;position:fixed;top:52px;right:180px;background:#fff;border-radius:0 0 8px 8px;box-shadow:0 10px 30px rgba(0,0,0,0.25);min-width:220px;max-height:320px;overflow-y:auto;padding:8px;z-index:320}
+#bt-topnav-job-picker.show{display:block}
+#bt-topnav-job-picker input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;margin-bottom:6px;box-sizing:border-box}
+.bt-topnav-job-item{padding:8px 10px;font-size:12.5px;font-weight:600;color:var(--text);cursor:pointer;border-radius:6px}
+.bt-topnav-job-item:hover{background:var(--bg);color:var(--teal)}
+
 #bt-sidebar.collapsed{width:56px;}
 #bt-sidebar.collapsed .bt-logo-text,
 #bt-sidebar.collapsed .bt-nav-label,
@@ -65,12 +97,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 
 /* ── TOP HEADER BAR ── */
 #bt-topbar{
-  position:fixed;top:0;left:var(--sb-width);right:0;height:var(--top-h);
+  position:fixed;top:52px;left:0;right:0;height:var(--top-h);
   background:#fff;border-bottom:1px solid var(--border);z-index:200;
   display:flex;align-items:center;padding:0 20px;gap:16px;
-  box-shadow:0 1px 4px rgba(0,0,0,0.08);transition:left 0.2s ease;
+  box-shadow:0 1px 4px rgba(0,0,0,0.08);
 }
-#bt-topbar.expanded{left:56px}
 .bt-topbar-left{display:flex;align-items:center;gap:12px;}
 .bt-sidebar-toggle{background:none;border:1px solid var(--border);color:var(--muted);cursor:pointer;padding:5px 8px;border-radius:5px;font-size:15px;line-height:1}
 .bt-sidebar-toggle:hover{background:var(--bg);color:var(--teal)}
@@ -85,10 +116,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 
 /* ── MAIN CONTENT ── */
 #bt-main{
-  position:fixed;top:var(--top-h);left:var(--sb-width);right:0;bottom:0;
-  overflow-y:auto;transition:left 0.2s ease;
+  position:fixed;top:calc(52px + var(--top-h));left:0;right:0;bottom:0;
+  overflow-y:auto;
 }
-#bt-main.expanded{left:56px}
 #bt-ctx{background:#fff;border-bottom:1px solid var(--border);padding:8px 20px;display:none;align-items:center;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
 #bt-ctx.show{display:flex}
 .content{padding:20px}
@@ -176,9 +206,8 @@ tr:hover td{background:#fafbfc}
 #call-overlay.show{display:flex}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
 @media(max-width:900px){
-  #bt-sidebar{width:56px}
-  #bt-topbar,#bt-main{left:56px}
-  .bt-logo-text,.bt-nav-label,.bt-nav-arrow,.bt-nav-sub,.bt-user div,.bt-job-sel div:last-child{display:none!important}
+  #bt-topnav-logo-name-text{display:none}
+  .bt-topnav-tab{padding:0 9px;font-size:11.5px}
 }
 
         @media (max-width: 768px) {
@@ -215,7 +244,92 @@ tr:hover td{background:#fafbfc}
         </style>
 </head>
 <body>
-<!-- ── LEFT SIDEBAR (Buildertrend-style) ── -->
+<!-- ── TOP NAV BAR (Buildertrend-style horizontal tabs, Corestone branding) ── -->
+<div id="bt-topnav">
+  <div class="bt-topnav-logo" onclick="goTab('dashboard')">
+    <div class="bt-topnav-logo-mark">C</div>
+    <div class="bt-topnav-logo-name" id="bt-topnav-logo-name-text">CORESTONE</div>
+  </div>
+  <div class="bt-topnav-tabs" id="bt-topnav-tabs">
+    <div class="bt-topnav-tab active" id="tn-btn-dashboard" onclick="goTab('dashboard')">⚡ Summary</div>
+
+    <div class="bt-topnav-tab" id="tn-grp-sales" onclick="pmtToggleTopnavDropdown(event,'tn-grp-sales')">
+      📥 Sales <span class="bt-topnav-arrow">▾</span>
+      <div class="bt-topnav-dropdown">
+        <div class="bt-topnav-dropdown-item" id="tn-item-sales" onclick="goTab('sales')">Leads</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-proposals" onclick="goTab('proposals')">Proposals</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-bids" onclick="goTab('bids')">Bid Requests</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-requirements" onclick="goTab('requirements')">📋 Requirements</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-survey" onclick="goTab('survey')">📝 Surveys</div>
+      </div>
+    </div>
+
+    <div class="bt-topnav-tab" id="tn-grp-pm" onclick="pmtToggleTopnavDropdown(event,'tn-grp-pm')">
+      🏗️ Project Management <span class="bt-topnav-arrow">▾</span>
+      <div class="bt-topnav-dropdown">
+        <div class="bt-topnav-dropdown-item" id="tn-item-jobs" onclick="goTab('jobs')">Jobs</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-schedule" onclick="goTab('schedule')">Schedule</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-daily" onclick="goTab('daily')">Daily Logs</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-todos" onclick="goTab('todos')">To-Dos</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-punchlist" onclick="goTab('punchlist')">Punch List</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-selections" onclick="goTab('selections')">Selections</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-specs" onclick="goTab('specs')">Specifications</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-rfis" onclick="goTab('rfis')">RFIs</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-warranty" onclick="goTab('warranty')">Warranty</div>
+      </div>
+    </div>
+
+    <div class="bt-topnav-tab" id="tn-grp-fin" onclick="pmtToggleTopnavDropdown(event,'tn-grp-fin')">
+      💰 Financial <span class="bt-topnav-arrow">▾</span>
+      <div class="bt-topnav-dropdown">
+        <div class="bt-topnav-dropdown-item" id="tn-item-estimates" onclick="goTab('estimates')">Estimates</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-budget" onclick="goTab('budget')">Job Costing Budget</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-financial" onclick="goTab('financial')">Invoices</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-bills" onclick="goTab('bills')">Bills</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-pos" onclick="goTab('pos')">Purchase Orders</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-cos" onclick="goTab('cos')">Change Orders</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-liens" onclick="goTab('liens')">Lien Waivers</div>
+      </div>
+    </div>
+
+    <div class="bt-topnav-tab" id="tn-grp-files" onclick="pmtToggleTopnavDropdown(event,'tn-grp-files')">
+      📁 Files & Photos <span class="bt-topnav-arrow">▾</span>
+      <div class="bt-topnav-dropdown">
+        <div class="bt-topnav-dropdown-item" id="tn-item-files" onclick="goTab('files')">Documents</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-photos" onclick="goTab('photos')">Photos & Videos</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-plans" onclick="goTab('plans')">Plans & Takeoff</div>
+      </div>
+    </div>
+
+    <div class="bt-topnav-tab" id="tn-grp-comm" onclick="pmtToggleTopnavDropdown(event,'tn-grp-comm')">
+      💬 Communication <span class="bt-topnav-arrow">▾</span>
+      <div class="bt-topnav-dropdown">
+        <div class="bt-topnav-dropdown-item" id="tn-item-messages" onclick="goTab('messages')">Messages</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-emails" onclick="goTab('emails')">Emails</div>
+        <div class="bt-topnav-dropdown-item" id="tn-item-comments" onclick="goTab('comments')">Comments</div>
+      </div>
+    </div>
+
+    <div class="bt-topnav-tab" id="tn-btn-subs" onclick="goTab('subs')">🤝 Subcontractors</div>
+    <div class="bt-topnav-tab" id="tn-btn-reports" onclick="goTab('reports')">📊 Reports</div>
+    <div class="bt-topnav-tab" id="tn-btn-gatekeeper" onclick="goTab('gatekeeper')">🔑 Gatekeeper <span class="gk-pill" id="gk-count-nav">0</span></div>
+  </div>
+  <div class="bt-topnav-right">
+    <div class="bt-topnav-jobsel" onclick="toggleTopnavJobPicker(event)">
+      <div id="bt-topnav-sel-name">All Jobs</div>
+      <div style="font-size:9.5px;color:rgba(255,255,255,0.5)">Switch job ▾</div>
+    </div>
+    <div class="av" style="cursor:pointer" title="Feishy Felberbaum" onclick="goTab('settings')">FF</div>
+  </div>
+</div>
+<div id="bt-topnav-job-picker">
+  <input type="text" id="bt-topnav-job-search" placeholder="Search jobs..." oninput="pmtFilterTopnavJobs(this.value)">
+  <div class="bt-topnav-job-item" onclick="clearJob();pmtCloseTopnavJobPicker()">🏢 All Jobs</div>
+  <div id="bt-topnav-job-list"></div>
+</div>
+
+<!-- ── LEFT SIDEBAR (Buildertrend-style) — kept in the DOM, hidden; the -->
+<!-- horizontal #bt-topnav above is the active navigation now. -->
 <div id="bt-sidebar">
   <!-- Logo -->
   <div class="bt-logo" onclick="goTab('dashboard')">
@@ -361,7 +475,7 @@ tr:hover td{background:#fafbfc}
 <!-- ── TOP HEADER BAR ── -->
 <div id="bt-topbar">
   <div class="bt-topbar-left">
-    <button class="bt-sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">☰</button><button onclick="showErrLog()" style="position:relative;background:transparent;border:none;cursor:pointer;font-size:15px;padding:4px 6px;margin-left:4px" title="Error Log">&#9888;<span id="err-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#e63946;color:#fff;font-size:9px;font-weight:800;border-radius:8px;padding:1px 4px">0</span></button>
+    <button onclick="showErrLog()" style="position:relative;background:transparent;border:none;cursor:pointer;font-size:15px;padding:4px 6px" title="Error Log">&#9888;<span id="err-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#e63946;color:#fff;font-size:9px;font-weight:800;border-radius:8px;padding:1px 4px">0</span></button>
     <div id="bt-breadcrumb">Dashboard</div>
   </div>
   <div class="bt-topbar-center">
@@ -1340,6 +1454,19 @@ async function loadSidebar(){
         picker.appendChild(d);
       });
     }
+    // Same job list, populated into the new top nav's job picker too
+    var tnPicker = document.getElementById('bt-topnav-job-list');
+    if(tnPicker){
+      tnPicker.innerHTML = '';
+      jobs.forEach(function(j){
+        var d = document.createElement('div');
+        d.className = 'bt-topnav-job-item';
+        d.dataset.jobName = (j.job_name||'').toLowerCase();
+        d.innerHTML = '<strong>'+j.job_name+'</strong><div style="font-size:10px;color:var(--muted)">'+(j.percent_complete||0)+'% \u00b7 '+(j.current_phase||'')+'</div>';
+        d.onclick = (function(jid){return function(){ selectJob(jid); pmtCloseTopnavJobPicker(); };})(j.id);
+        tnPicker.appendChild(d);
+      });
+    }
     // GK count
     var gk=await dbGet('gatekeeper_queue','?status=eq.pending');
     updateGKBadge(gk.length);
@@ -1378,11 +1505,59 @@ function safeSelectJob(id, tab) {
   goTab(tab||'schedule');
 }
 
+// Top nav dropdown toggle — click a grouped tab to open its dropdown,
+// click elsewhere to close it.
+function pmtToggleTopnavDropdown(e, tabId){
+  e.stopPropagation();
+  var tab = document.getElementById(tabId);
+  var wasOpen = tab.classList.contains('dropdown-open');
+  document.querySelectorAll('.bt-topnav-tab.dropdown-open').forEach(function(el){ el.classList.remove('dropdown-open'); });
+  if(!wasOpen) tab.classList.add('dropdown-open');
+}
+function toggleTopnavJobPicker(e){
+  e.stopPropagation();
+  var picker = document.getElementById('bt-topnav-job-picker');
+  picker.classList.toggle('show');
+  if(picker.classList.contains('show')){
+    setTimeout(function(){ var inp=document.getElementById('bt-topnav-job-search'); if(inp) inp.focus(); }, 30);
+  }
+}
+function pmtCloseTopnavJobPicker(){
+  var picker = document.getElementById('bt-topnav-job-picker');
+  if(picker) picker.classList.remove('show');
+}
+function pmtFilterTopnavJobs(q){
+  q = (q||'').toLowerCase();
+  document.querySelectorAll('#bt-topnav-job-list .bt-topnav-job-item').forEach(function(el){
+    el.style.display = el.dataset.jobName.indexOf(q) > -1 ? '' : 'none';
+  });
+}
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.bt-topnav-tab')){
+    document.querySelectorAll('.bt-topnav-tab.dropdown-open').forEach(function(el){ el.classList.remove('dropdown-open'); });
+  }
+  if(!e.target.closest('.bt-topnav-jobsel') && !e.target.closest('#bt-topnav-job-picker')){
+    pmtCloseTopnavJobPicker();
+  }
+});
+
+function clearJob(){
+  AJOB = null;
+  var sel = document.getElementById('bt-topnav-sel-name');
+  if(sel) sel.textContent = 'All Jobs';
+  var selOld = document.getElementById('bt-sel-name');
+  if(selOld) selOld.textContent = 'All Jobs';
+  goTab(CUR || 'dashboard');
+}
 function selectJob(id){
   var jobs = lsAll('jobs');
   var job = jobs.find(function(j){return j.id===id;});
   if(!job){ toast('Job not found','err'); return; }
   AJOB = job;
+  var sel = document.getElementById('bt-topnav-sel-name');
+  if(sel) sel.textContent = job.job_name;
+  var selOld = document.getElementById('bt-sel-name');
+  if(selOld) selOld.textContent = job.job_name;
   renderJobCommandCenter(job);
 }
 
@@ -15770,6 +15945,17 @@ function goTab(tab){
     document.querySelectorAll('.bt-nav-item, .bt-nav-sub-item').forEach(function(el){ el.classList.remove('active'); });
     var btn = document.getElementById('btn-'+tab);
     if(btn) btn.classList.add('active');
+
+    // Same active-state highlighting, applied to the new top nav bar
+    document.querySelectorAll('.bt-topnav-tab, .bt-topnav-dropdown-item').forEach(function(el){ el.classList.remove('active'); });
+    var tnItem = document.getElementById('tn-item-'+tab) || document.getElementById('tn-btn-'+tab);
+    if(tnItem){
+      tnItem.classList.add('active');
+      var parentTab = tnItem.closest ? tnItem.closest('.bt-topnav-tab') : null;
+      if(parentTab && parentTab!==tnItem) parentTab.classList.add('active');
+    }
+    document.querySelectorAll('.bt-topnav-tab.dropdown-open').forEach(function(el){ el.classList.remove('dropdown-open'); });
+
     var bc = document.getElementById('bt-breadcrumb');
     if(bc) bc.textContent = CS_TAB_LABELS[tab] || tab;
     var fn = CS_TAB_MAP[tab];
