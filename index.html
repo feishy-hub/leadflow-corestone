@@ -14715,6 +14715,12 @@ function closeExecTestMode() {
 
 var GS_VISIBLE = false;
 
+document.addEventListener('keydown', function(e){
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='k'){
+    e.preventDefault();
+    toggleGlobalSearch();
+  }
+});
 function toggleGlobalSearch() {
   GS_VISIBLE = !GS_VISIBLE;
   var panel = document.getElementById('gs-panel');
@@ -14737,12 +14743,31 @@ function buildGlobalSearch() {
     + '<kbd style="font-size:11px;background:#f1f5f9;border:1px solid var(--border);border-radius:4px;padding:2px 8px;color:var(--muted)">ESC</kbd>'
     + '</div>'
     + '<div id="gs-results" style="max-height:480px;overflow-y:auto;padding:8px 0">'
-    + '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Start typing to search across Corestone...</div>'
+    + pmtCommandPaletteNavHtml()
     + '</div>'
     + '</div>';
   document.body.appendChild(panel);
   setTimeout(function(){ var inp=document.getElementById('gs-input'); if(inp) inp.focus(); }, 100);
   document.addEventListener('keydown', function gsEsc(e){ if(e.key==='Escape'){ toggleGlobalSearch(); document.removeEventListener('keydown', gsEsc); }});
+}
+// The real command-palette piece — every destination in the app, jump
+// straight to it without typing anything, shown the moment the palette
+// opens (same list as the top nav, so nothing is ever out of sync).
+function pmtCommandPaletteNavHtml(){
+  var items = [
+    ['dashboard','⚡ Summary'],['sales','📥 Leads'],['proposals','📄 Proposals'],['bids','📤 Bid Requests'],
+    ['requirements','📋 Requirements'],['survey','📝 Surveys'],['jobs','🏗️ Jobs'],['schedule','📅 Schedule'],
+    ['daily','📝 Daily Logs'],['todos','✅ To-Dos'],['punchlist','🔨 Punch List'],['selections','🎨 Selections'],
+    ['specs','📐 Specifications'],['rfis','❓ RFIs'],['warranty','🛡️ Warranty'],['estimates','💰 Estimates'],
+    ['budget','📊 Job Costing Budget'],['financial','🧾 Invoices'],['bills','💵 Bills'],['pos','📦 Purchase Orders'],
+    ['cos','🔄 Change Orders'],['liens','📋 Lien Waivers'],['files','📁 Documents'],['photos','📸 Photos & Videos'],
+    ['plans','📐 Plans & Takeoff'],['messages','💬 Messages'],['emails','📧 Emails'],['comments','💭 Comments'],
+    ['subs','🤝 Subcontractors'],['reports','📊 Reports'],['gatekeeper','🔑 Gatekeeper'],['settings','⚙️ Settings']
+  ];
+  return '<div style="padding:6px 20px;font-size:10px;font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:0.06em">Navigate</div>'
+    + items.map(function(it){
+        return '<div onclick="goTab(\''+it[0]+'\');toggleGlobalSearch()" style="padding:9px 20px;cursor:pointer;font-size:13.5px;color:var(--text)" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'transparent\'">'+it[1]+'</div>';
+      }).join('');
 }
 
 var _gsTimer = null;
@@ -14750,7 +14775,7 @@ function gsSearch(q) {
   clearTimeout(_gsTimer);
   if(!q || q.trim().length < 2) {
     var r = document.getElementById('gs-results');
-    if(r) r.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Start typing to search across Corestone...</div>';
+    if(r) r.innerHTML = pmtCommandPaletteNavHtml();
     return;
   }
   _gsTimer = setTimeout(function(){ gsDoSearch(q.trim()); }, 250);
