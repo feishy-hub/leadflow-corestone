@@ -8993,9 +8993,9 @@ async function openEstimate(id){
       + (l.cost_code?'<div style="font-size:10px;color:var(--dim)">'+l.cost_code+'</div>':'')
       + (l.notes?'<div style="font-size:11px;color:var(--muted)">'+l.notes+'</div>':'')
       + '</div>'
-      + '<div style="font-size:13px;text-align:center">'+l.qty+' '+l.unit+'</div>'
-      + '<div style="font-size:13px;text-align:right">'+fmt$(l.unit_cost)+'</div>'
-      + '<div style="font-size:13px;text-align:center">'+l.markup_pct+'%</div>'
+      + '<div class="pmt-inline-edit" data-field="qty" data-idx="'+i+'" onclick="pmtInlineEditField(\''+id+'\','+i+',\'qty\',this)" title="Click to edit" style="font-size:13px;text-align:center;cursor:pointer;border-bottom:1px dashed transparent" onmouseover="this.style.borderBottomColor=\'var(--teal)\'" onmouseout="this.style.borderBottomColor=\'transparent\'">'+l.qty+' '+l.unit+'</div>'
+      + '<div class="pmt-inline-edit" data-field="unit_cost" data-idx="'+i+'" onclick="pmtInlineEditField(\''+id+'\','+i+',\'unit_cost\',this)" title="Click to edit" style="font-size:13px;text-align:right;cursor:pointer;border-bottom:1px dashed transparent" onmouseover="this.style.borderBottomColor=\'var(--teal)\'" onmouseout="this.style.borderBottomColor=\'transparent\'">'+fmt$(l.unit_cost)+'</div>'
+      + '<div class="pmt-inline-edit" data-field="markup_pct" data-idx="'+i+'" onclick="pmtInlineEditField(\''+id+'\','+i+',\'markup_pct\',this)" title="Click to edit" style="font-size:13px;text-align:center;cursor:pointer;border-bottom:1px dashed transparent" onmouseover="this.style.borderBottomColor=\'var(--teal)\'" onmouseout="this.style.borderBottomColor=\'transparent\'">'+l.markup_pct+'%</div>'
       + '<div style="font-size:13px;font-weight:700;text-align:right;color:var(--teal)">'+fmt$(total)+'</div>'
       + '<div style="display:flex;gap:4px;flex-wrap:wrap">'
       + (l.bid_status
@@ -10113,6 +10113,39 @@ async function deleteLine(estId, idx, btnEl){
   }catch(e){if(btnEl)releaseAction(idemKey,btnEl,false);toast('Error: '+e.message,'err');}
 }
 
+// Real inline editing — click qty, unit cost, or markup right in the
+// row, type the new number, press Enter or click away. No modal.
+function pmtInlineEditField(estId, idx, field, el){
+  if(el.querySelector('input')) return; // already editing
+  var currentText = el.textContent;
+  var currentVal = parseFloat(currentText.replace(/[^0-9.]/g,'')) || 0;
+  el.innerHTML = '<input type="number" step="0.01" value="'+currentVal+'" style="width:70px;padding:3px 5px;border:1.5px solid var(--teal);border-radius:4px;font-size:12.5px;text-align:inherit">';
+  var input = el.querySelector('input');
+  input.focus();
+  input.select();
+  var saved = false;
+  function doSave(){
+    if(saved) return; saved = true;
+    pmtSaveInlineField(estId, idx, field, parseFloat(input.value)||0);
+  }
+  input.addEventListener('blur', doSave);
+  input.addEventListener('keydown', function(e){
+    if(e.key==='Enter'){ input.blur(); }
+    if(e.key==='Escape'){ saved = true; openEstimate(estId); }
+  });
+}
+async function pmtSaveInlineField(estId, idx, field, value){
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var lines = est.line_items||[];
+  if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
+  if(!lines[idx]) return;
+  lines[idx][field] = value;
+  await dbUpd('estimates', estId, {line_items: lines});
+  await autoMarkEstimateRevised(estId);
+  openEstimate(estId);
+}
+
 async function editLine(estId, idx){
   var results = await dbGet('estimates','?id=eq.'+estId);
   var est = results[0];
@@ -10157,7 +10190,10 @@ async function saveEditLine(estId, idx, btnEl){
     var est = results[0];
     var lines = est.line_items||[];
     if(typeof lines==='string'){try{lines=JSON.parse(lines);}catch(e){lines=[];}}
-    lines[idx] = {
+    // Merge into the existing line instead of replacing it wholesale —
+    // otherwise cost_code, trade, is_allowance, bid_status, and Takeoff
+    // links silently get wiped out by fields this form doesn't even show.
+    lines[idx] = Object.assign({}, lines[idx], {
       description: descEl.value.trim(),
       notes: document.getElementById('eli-notes').value.trim(),
       cost_type: document.getElementById('eli-type').value,
@@ -10165,7 +10201,7 @@ async function saveEditLine(estId, idx, btnEl){
       qty: parseFloat(document.getElementById('eli-qty').value)||1,
       unit_cost: parseFloat(document.getElementById('eli-cost').value)||0,
       markup_pct: parseFloat(document.getElementById('eli-markup').value)||20
-    };
+    });
     await dbUpd('estimates',estId,{line_items:lines});
     // BUG-4: editing a line on a SENT estimate auto-flips status to Revised — never manual
     await autoMarkEstimateRevised(estId);
