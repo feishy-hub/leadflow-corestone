@@ -16536,6 +16536,7 @@ async function showPlanMarkupTool(docId){
   PMT = {
     docId: docId,
     scalePxPerFt: saved.scalePxPerFt || null,
+    pageScales: saved.pageScales || {},
     groups: saved.groups || [{id:'g1', name:'General', color:'#0d7a70', visible:true, items:[]}],
     activeGroupId: (saved.groups && saved.groups[0]) ? saved.groups[0].id : 'g1',
     tool: null,       // 'scale' | 'linear' | 'rect' | 'poly' | 'count'
@@ -16670,9 +16671,10 @@ function pmtRefreshPageDropdown(){
   if(!sel) return;
   var pagesWithItems = {};
   PMT.groups.forEach(function(g){ g.items.forEach(function(it){ pagesWithItems[it.page||1] = true; }); });
+  PMT.pageScales = PMT.pageScales || {};
   var options = [];
   for(var i=1;i<=PMT.numPages;i++){
-    options.push('<option value="'+i+'"'+(i===PMT.currentPage?' selected':'')+'>Page '+i+' of '+PMT.numPages+(pagesWithItems[i]?' \u25CF has measurements':'')+'</option>');
+    options.push('<option value="'+i+'"'+(i===PMT.currentPage?' selected':'')+'>Page '+i+' of '+PMT.numPages+(pagesWithItems[i]?' \u25CF has measurements':'')+(PMT.pageScales[i]?' \u2713 calibrated':' \u2014 not calibrated')+'</option>');
   }
   sel.innerHTML = options.join('');
 }
@@ -16732,7 +16734,19 @@ async function pmtRenderPage(pageNum){
 function pmtGoToPage(pageNum){
   if(pageNum < 1 || pageNum > PMT.numPages) return;
   PMT.clickPoints = [];
-  pmtRenderPage(pageNum);
+  pmtRenderPage(pageNum).then(function(){
+    PMT.pageScales = PMT.pageScales || {};
+    if(PMT.pageScales[pageNum]){
+      PMT.scalePxPerFt = PMT.pageScales[pageNum];
+      var s = document.getElementById('pmt-status');
+      if(s) s.textContent = 'Page '+pageNum+' — scale already set ('+PMT.scalePxPerFt.toFixed(1)+' px/ft). Pick a tool.';
+    } else {
+      PMT.scalePxPerFt = null;
+      toast('Page '+pageNum+' has no scale set yet — set it before measuring on this sheet','err',5000);
+      var s2 = document.getElementById('pmt-status');
+      if(s2) s2.textContent = 'Page '+pageNum+' is not calibrated — click "Set Scale" before measuring.';
+    }
+  });
 }
 
 // ── SCALE ENTRY — replaces window.prompt() (poor on mobile/site use) with a
@@ -16796,38 +16810,46 @@ function pmtAutoSave(){
   clearTimeout(_pmtAutoSaveTimer);
   _pmtAutoSaveTimer = setTimeout(function(){
     dbUpd('documents', PMT.docId, {
-      markup_data: JSON.stringify({scalePxPerFt: PMT.scalePxPerFt, groups: PMT.groups})
+      markup_data: JSON.stringify({scalePxPerFt: PMT.scalePxPerFt, pageScales: PMT.pageScales||{}, groups: PMT.groups})
     }).catch(function(e){ console.warn('[pmtAutoSave] failed', e); });
   }, 400);
+}
+
+// Scale is now stored per-page, not just once for the whole plan —
+// different sheets in a real set often have different printed scales.
+function pmtSetScaleForCurrentPage(pxPerFt){
+  PMT.scalePxPerFt = pxPerFt;
+  PMT.pageScales = PMT.pageScales || {};
+  PMT.pageScales[PMT.currentPage || 1] = pxPerFt;
 }
 
 function pmtConfirmRawScale(){
   var val = parseFloat(document.getElementById('pmt-scale-raw-input').value);
   if(!val || val<=0){ toast('Enter a pixels-per-foot value greater than 0','err'); return; }
-  PMT.scalePxPerFt = val;
+  pmtSetScaleForCurrentPage(val);
   pmtAutoSave();
   var statusEl = document.getElementById('pmt-status');
-  if(statusEl) statusEl.textContent = 'Scale set directly ('+val+' px/ft). Pick a measuring tool.';
-  toast('Scale set: '+val+' px/ft','ok');
+  if(statusEl) statusEl.textContent = 'Scale set directly ('+val+' px/ft) for page '+(PMT.currentPage||1)+'. Pick a measuring tool.';
+  toast('Scale set for page '+(PMT.currentPage||1)+': '+val+' px/ft','ok');
   var ov1 = document.getElementById('pmt-scale-ov'); if(ov1) ov1.remove();
 }
 function pmtConfirmManualScale(pxDist){
   if(!pxDist || pxDist<=0){ toast('Use "Set Scale" on the toolbar and click two points on the plan first for this option — or use the ratio/number options below instead','err',5000); return; }
   var ft = parseFloat(document.getElementById('pmt-scale-ft-input').value);
   if(!ft || ft<=0){ toast('Enter a real length greater than 0','err'); return; }
-  PMT.scalePxPerFt = pxDist / ft;
+  pmtSetScaleForCurrentPage(pxDist / ft);
   pmtAutoSave();
   var statusEl2 = document.getElementById('pmt-status');
-  if(statusEl2) statusEl2.textContent = 'Scale set ('+PMT.scalePxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
-  toast('Scale set: '+PMT.scalePxPerFt.toFixed(1)+' px/ft','ok');
+  if(statusEl2) statusEl2.textContent = 'Scale set ('+PMT.scalePxPerFt.toFixed(1)+' px/ft) for page '+(PMT.currentPage||1)+'. Pick a measuring tool.';
+  toast('Scale set for page '+(PMT.currentPage||1)+': '+PMT.scalePxPerFt.toFixed(1)+' px/ft','ok');
   var ov2 = document.getElementById('pmt-scale-ov'); if(ov2) ov2.remove();
 }
 function pmtConfirmPresetScale(pxPerFt){
-  PMT.scalePxPerFt = pxPerFt;
+  pmtSetScaleForCurrentPage(pxPerFt);
   pmtAutoSave();
   var statusEl3 = document.getElementById('pmt-status');
-  if(statusEl3) statusEl3.textContent = 'Scale set from printed scale ('+pxPerFt.toFixed(1)+' px/ft). Pick a measuring tool.';
-  toast('Scale set from printed scale','ok');
+  if(statusEl3) statusEl3.textContent = 'Scale set from printed scale ('+pxPerFt.toFixed(1)+' px/ft) for page '+(PMT.currentPage||1)+'. Pick a measuring tool.';
+  toast('Scale set from printed scale for page '+(PMT.currentPage||1),'ok');
   var ov3 = document.getElementById('pmt-scale-ov'); if(ov3) ov3.remove();
 }
 
@@ -18278,7 +18300,7 @@ function pmtLabel(ctx, text, x, y, color){
 async function pmtSaveAndClose(){
   if(!PMT) return;
   await dbUpd('documents', PMT.docId, {
-    markup_data: JSON.stringify({scalePxPerFt: PMT.scalePxPerFt, groups: PMT.groups})
+    markup_data: JSON.stringify({scalePxPerFt: PMT.scalePxPerFt, pageScales: PMT.pageScales||{}, groups: PMT.groups})
   });
   toast('Markup saved','ok');
   var el = document.getElementById('pmt-overlay'); if(el) el.remove();
@@ -19545,11 +19567,13 @@ async function pmtShowThumbnails(){
     +'</div>';
   document.body.appendChild(el);
   var grid = document.getElementById('pmt-thumb-grid');
+  PMT.pageScales = PMT.pageScales || {};
   for(var i=1;i<=PMT.numPages;i++){
     var cell = document.createElement('div');
     cell.style.cssText = 'cursor:pointer;text-align:center';
     cell.innerHTML = '<div style="width:140px;height:100px;background:#0d0f11;border:2px solid '+(i===PMT.currentPage?'#0d7a70':'rgba(255,255,255,0.15)')+';border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden"><span style="color:rgba(255,255,255,0.3);font-size:11px">Loading\u2026</span></div>'
-      +'<div style="color:#fff;font-size:11px;margin-top:4px">Page '+i+'</div>';
+      +'<div style="color:#fff;font-size:11px;margin-top:4px">Page '+i+'</div>'
+      +'<div style="font-size:9.5px;margin-top:1px;color:'+(PMT.pageScales[i]?'#4ade80':'#fbbf24')+'">'+(PMT.pageScales[i]?'\u2713 Calibrated':'\u26a0 Not calibrated')+'</div>';
     cell.onclick = (function(pageNum){ return function(){ pmtGoToPage(pageNum); document.getElementById('pmt-thumb-ov').remove(); }; })(i);
     grid.appendChild(cell);
     pmtRenderThumbnail(i, cell.querySelector('div'));
