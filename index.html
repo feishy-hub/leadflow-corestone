@@ -16593,40 +16593,43 @@ async function showPlanMarkupTool(docId){
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
       +'<button onclick="pmtSaveAndClose()" style="padding:7px 14px;background:#fff;color:#1a1d21;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💾 Save & Close</button>'
       +'</div></div>'
-    +'<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#22262b;border-bottom:1px solid rgba(255,255,255,0.08);flex-wrap:wrap;font-family:inherit">'
-      +'<button data-pmt-tool="select" onclick="pmtSetTool(null)" title="Stop — exit whatever tool is active" style="padding:8px 12px;background:#0d7a70;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;white-space:nowrap">'
-        +pmtSvgIcon('select')+'Stop</button>'
-      +'<div style="width:1px;height:26px;background:rgba(255,255,255,0.12)"></div>'
-      // Step 1 — one single place to set the scale, no matter how you want to do it
-      +'<div style="display:flex;align-items:center;gap:8px">'
-      +'<span style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:10px;font-weight:800">1</span>'
-      +'<button onclick="pmtShowScaleEntryModal(0)" title="Set the scale — required before measuring" style="padding:8px 12px;background:#2d323a;color:#fff;border:1px solid '+(PMT.scalePxPerFt?'rgba(13,122,112,0.5)':'rgba(255,255,255,0.15)')+';border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;white-space:nowrap">'
-        +pmtSvgIcon('scale')+'Set Scale'+(PMT.scalePxPerFt?' ✓':'')+'</button>'
-      +'</div>'
-      +'<div style="width:1px;height:26px;background:rgba(255,255,255,0.12)"></div>'
-      // Step 2 — one place to add any measurement, searchable, scales to
-      // any number of item types instead of a permanent row of buttons
-      +'<div style="display:flex;align-items:center;gap:8px">'
-      +'<span style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:10px;font-weight:800">2</span>'
-      +'<button id="pmt-add-measurement-btn" onclick="pmtToggleCategoryMenu(event)" style="padding:8px 12px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;white-space:nowrap">'
-      +'<span style="font-size:15px;line-height:1">+</span> Add Measurement<span style="opacity:0.5;font-size:9px">▾</span></button>'
-      +'<span id="pmt-active-item-label" style="color:rgba(255,255,255,0.5);font-size:11px"></span>'
-      +'</div>'
-      +'<div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
-      +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="padding:7px 10px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;white-space:nowrap">'
-        +pmtSvgIcon('aidetect')+'AI Detect</button>'
-      +'<button onclick="pmtShowManualEntry()" title="Type in a measurement directly — no clicking on the plan required" style="padding:7px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;white-space:nowrap">'
-        +pmtSvgIcon('manual')+'Type It In</button>'
-      +'<div style="width:1px;height:26px;background:rgba(255,255,255,0.12)"></div>'
-      +[['text','Note'],['callout','Callout'],['cloud','Cloud'],['stamp','Stamp']].map(function(t){
-        return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[1]+'" style="padding:7px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer" >'+pmtSvgIcon(t[0])+'</button>';
-      }).join('')
-      +'<button onclick="pmtUndo()" title="Undo last item" style="padding:7px;background:#3a2d2d;color:#fca5a5;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">↩️</button>'
-      +'<button onclick="pmtRedo()" title="Redo" style="padding:7px;background:#2d3a2d;color:#86efac;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">↪️</button>'
-      +'<button onclick="pmtShowHistory()" title="Markup history" style="padding:7px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;align-items:center">🕐</button>'
-      +'</div>'
-    +'</div>'
     +'<div style="flex:1;display:flex;overflow:hidden">'
+      // LEFT TOOL RAIL — same tools, same functions, vertical instead of a horizontal bar
+      +'<div style="width:76px;background:#22262b;border-right:1px solid rgba(255,255,255,0.08);overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:10px 6px;gap:6px;font-family:inherit">'
+      +'<button data-pmt-tool="select" onclick="pmtSetTool(null)" title="Stop — exit whatever tool is active" style="width:100%;padding:9px 4px;background:#0d7a70;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9px;font-weight:700">'
+        +pmtSvgIcon('select')+'Stop</button>'
+      +'<div style="width:100%;height:1px;background:rgba(255,255,255,0.12);margin:2px 0"></div>'
+      +'<div style="display:flex;flex-direction:column;align-items:center;gap:4px;width:100%">'
+      +'<span style="display:flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:9px;font-weight:800">1</span>'
+      +'<button onclick="pmtShowScaleEntryModal(0)" title="Set the scale — required before measuring" style="width:100%;padding:8px 4px;background:#2d323a;color:#fff;border:1px solid '+(PMT.scalePxPerFt?'rgba(13,122,112,0.5)':'rgba(255,255,255,0.15)')+';border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9px;font-weight:700">'
+        +pmtSvgIcon('scale')+'Scale'+(PMT.scalePxPerFt?' ✓':'')+'</button>'
+      +'</div>'
+      +'<div style="width:100%;height:1px;background:rgba(255,255,255,0.12);margin:2px 0"></div>'
+      +'<div style="display:flex;flex-direction:column;align-items:center;gap:4px;width:100%">'
+      +'<span style="display:flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,0.15);color:#fff;font-size:9px;font-weight:800">2</span>'
+      +'<button id="pmt-add-measurement-btn" onclick="pmtToggleCategoryMenu(event)" style="width:100%;padding:8px 2px;background:#2d323a;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:9px;font-weight:700">'
+      +'<span style="font-size:15px;line-height:1">+</span> Add</button>'
+      +'<span id="pmt-active-item-label" style="color:rgba(255,255,255,0.5);font-size:8.5px;text-align:center"></span>'
+      +'</div>'
+      +'<div style="width:100%;height:1px;background:rgba(255,255,255,0.12);margin:2px 0"></div>'
+      +'<button onclick="pmtAIAutoDetect()" title="AI Auto-Detect Rooms (experimental — verify results)" style="width:100%;padding:7px 2px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:8.5px;font-weight:600">'
+        +pmtSvgIcon('aidetect')+'AI Detect</button>'
+      +'<button onclick="pmtShowManualEntry()" title="Type in a measurement directly — no clicking on the plan required" style="width:100%;padding:7px 2px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:8.5px;font-weight:600">'
+        +pmtSvgIcon('manual')+'Type It In</button>'
+      +'<div style="width:100%;height:1px;background:rgba(255,255,255,0.12);margin:2px 0"></div>'
+      +'<div style="display:flex;gap:4px;width:100%">'
+      + [['text','Note'],['callout','Callout'],['cloud','Cloud'],['stamp','Stamp']].map(function(t){
+          return '<button data-pmt-tool="'+t[0]+'" onclick="pmtSetTool(\''+t[0]+'\')" title="'+t[1]+'" style="flex:1;padding:6px 0;background:#2d323a;color:#fff;border:none;border-radius:5px;cursor:pointer" >'+pmtSvgIcon(t[0])+'</button>';
+        }).join('')
+      +'</div>'
+      +'<div style="width:100%;height:1px;background:rgba(255,255,255,0.12);margin:2px 0"></div>'
+      +'<div style="display:flex;gap:4px;width:100%">'
+      +'<button onclick="pmtUndo()" title="Undo last item" style="flex:1;padding:6px 0;background:#3a2d2d;color:#fca5a5;border:none;border-radius:5px;cursor:pointer">↩️</button>'
+      +'<button onclick="pmtRedo()" title="Redo" style="flex:1;padding:6px 0;background:#2d3a2d;color:#86efac;border:none;border-radius:5px;cursor:pointer">↪️</button>'
+      +'</div>'
+      +'<button onclick="pmtShowHistory()" title="Markup history" style="width:100%;padding:6px 0;background:#2d323a;color:#fff;border:none;border-radius:5px;cursor:pointer;margin-top:2px">🕐</button>'
+      +'<button onclick="pmtShowLayerPanel()" title="Layers" style="width:100%;padding:6px 0;background:#2d323a;color:#fff;border:none;border-radius:5px;cursor:pointer;margin-top:2px">🗂️</button>'
+      +'</div>'
       // Canvas area
       +'<div id="pmt-canvas-wrap" style="flex:1;overflow:auto;background:#0d0f11;position:relative;display:flex;justify-content:center;padding:20px">'
       +'<div id="pmt-count-badge" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#0d7a70;color:#fff;padding:8px 20px;border-radius:20px;font-weight:800;font-size:14px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.3)">Count: 0</div>'
@@ -16640,10 +16643,19 @@ async function showPlanMarkupTool(docId){
       +'</div>'
       +'<div id="pmt-canvas-stack" style="position:relative;line-height:0"></div>'
       +'</div>'
-      // Sidebar
-      +'<div style="width:280px;background:#22262b;border-left:1px solid rgba(255,255,255,0.08);overflow-y:auto;display:flex;flex-direction:column;min-height:0;height:100%">'
+      // RIGHT PANEL — tabbed: Measurements / AI
+      +'<div style="width:300px;background:#22262b;border-left:1px solid rgba(255,255,255,0.08);overflow-y:auto;display:flex;flex-direction:column;min-height:0;height:100%">'
+      +'<div style="display:flex;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0">'
+      +'<div id="pmt-tab-measurements" onclick="pmtSwitchRightTab(\'measurements\')" style="flex:1;padding:11px 0;text-align:center;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;border-bottom:2px solid #0d7a70;background:rgba(13,122,112,0.1)">📏 Measurements</div>'
+      +'<div id="pmt-tab-ai" onclick="pmtSwitchRightTab(\'ai\')" style="flex:1;padding:11px 0;text-align:center;color:rgba(255,255,255,0.5);font-size:11.5px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🤖 AI</div>'
+      +'</div>'
+      +'<div id="pmt-panel-measurements" style="display:block">'
       +'<div id="pmt-sidebar" style="padding:12px"></div>'
       +'<div style="border-top:1px solid rgba(255,255,255,0.08);padding:12px">'
+      +'<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:8px">Markups (Notes, Callouts, Clouds, Stamps)</div>'
+      +'<div id="pmt-markups-list"></div>'
+      +'</div></div>'
+      +'<div id="pmt-panel-ai" style="display:none;padding:12px">'
       +'<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:8px">🤖 Ask AI About This Plan</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">'
       + ['Count doors','Count windows','Total sqft','All rooms','Permits needed','Frame takeoff','Outlet count'].map(function(q){
@@ -16655,11 +16667,11 @@ async function showPlanMarkupTool(docId){
       +'<button onclick="pmtAskAI(document.getElementById(\'pmt-ai-question\').value)" style="padding:0 12px;background:var(--teal);border:none;color:#fff;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px">Ask</button>'
       +'</div>'
       +'<div id="pmt-ai-answer" style="margin-top:10px;font-size:12px;color:rgba(255,255,255,0.8);line-height:1.5"></div>'
+      +'<div style="border-top:1px solid rgba(255,255,255,0.08);margin-top:14px;padding-top:12px">'
+      +'<button onclick="pmtAIAutoDetect()" style="width:100%;padding:10px;background:#3d2d5c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px">'+pmtSvgIcon('aidetect')+'Run AI Auto-Detect on This Page</button>'
       +'</div>'
-      +'<div style="border-top:1px solid rgba(255,255,255,0.08);padding:12px">'
-      +'<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:8px">Markups (Notes, Callouts, Clouds, Stamps)</div>'
-      +'<div id="pmt-markups-list"></div>'
-      +'</div></div>'
+      +'</div>'
+      +'</div>'
     +'</div>'
     +'<div style="padding:8px 16px;background:#22262b;border-top:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-size:11px" id="pmt-status">'
       +(PMT.scalePxPerFt ? 'Scale set — click a tool to start measuring. Tip: hold Shift for perfectly straight lines, clicks near an existing point snap to it automatically.' : 'Start by setting the scale — click "Set Scale," then click two points on a known wall or dimension.')
@@ -17734,6 +17746,23 @@ function pmtExportTakeoffPDF(){
     +'</body></html>');
   w.document.close();
   setTimeout(function(){ w.print(); }, 500);
+}
+
+function pmtSwitchRightTab(tab){
+  var mTab = document.getElementById('pmt-tab-measurements');
+  var aTab = document.getElementById('pmt-tab-ai');
+  var mPanel = document.getElementById('pmt-panel-measurements');
+  var aPanel = document.getElementById('pmt-panel-ai');
+  if(!mTab || !aTab || !mPanel || !aPanel) return;
+  var showM = tab==='measurements';
+  mPanel.style.display = showM ? 'block' : 'none';
+  aPanel.style.display = showM ? 'none' : 'block';
+  mTab.style.borderBottomColor = showM ? '#0d7a70' : 'transparent';
+  mTab.style.background = showM ? 'rgba(13,122,112,0.1)' : 'transparent';
+  mTab.style.color = showM ? '#fff' : 'rgba(255,255,255,0.5)';
+  aTab.style.borderBottomColor = showM ? 'transparent' : '#0d7a70';
+  aTab.style.background = showM ? 'transparent' : 'rgba(13,122,112,0.1)';
+  aTab.style.color = showM ? 'rgba(255,255,255,0.5)' : '#fff';
 }
 
 function pmtShowLayerPanel(){
