@@ -3038,6 +3038,7 @@ async function pgInvoices(){
   uxLoading('content','Loading invoices...');
   try{
     var invs = await dbGet('invoices','?order=created_at.desc') || [];
+    if(AJOB){ invs = invs.filter(function(i){ return i.job_id === AJOB.id; }); }
     var state = uxGetState('invoices');
     var jobs = await dbGet('jobs','?order=job_name.asc') || [];
 
@@ -3362,6 +3363,7 @@ async function pgBills(){
   uxLoading('content','Loading bills...');
   try{
     var bills = await dbGet('bills','?order=created_at.desc') || [];
+    if(AJOB){ bills = bills.filter(function(b){ return b.job_id === AJOB.id; }); }
     var state = uxGetState('bills');
 
     var filtered = bills;
@@ -8165,6 +8167,7 @@ async function pgBids(){
   var bids=await dbGet('bids','?order=created_at.desc');
   var jobs=await dbGet('jobs','?order=job_name.asc');
   var subs=await dbGet('subcontractors','?order=company_name.asc');
+  if(AJOB){ bids = bids.filter(function(b){ return b.job_id === AJOB.id; }); }
   await pmtCheckOverdueBids(bids);
   var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
     +'<div><div style="font-size:20px;font-weight:800">Bidding</div>'
@@ -8263,6 +8266,7 @@ async function voiceBid(){
 async function pgTodos(){
   var jobs = await dbGet('jobs','?order=job_name.asc');
   var todos = await dbGet('todos','?order=due_date.asc');
+  if(AJOB){ todos = todos.filter(function(t){ return t.job_id === AJOB.id; }); }
   var now = Date.now();
   
   var overdue = todos.filter(function(t){return !t.done && t.due_date && new Date(t.due_date)<now;});
@@ -8668,6 +8672,7 @@ async function aiGenerateSpecs(){
 async function pgWarranty(){
   var jobs=await dbGet('jobs','?order=job_name.asc')||[];
   var claims=await dbGet('warranty_claims','?order=created_at.desc')||[];
+  if(AJOB){ claims = claims.filter(function(c){ return c.job_id === AJOB.id; }); }
   var open=claims.filter(function(c){return c.status!=='Resolved'&&c.status!=='Closed';});
   var resolved=claims.filter(function(c){return c.status==='Resolved'||c.status==='Closed';});
   var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
@@ -8802,6 +8807,7 @@ async function pgEstimates(){
   try{
     var ests = await dbGet('estimates','?order=created_at.desc') || [];
     var jobs = await dbGet('jobs','?order=job_name.asc') || [];
+    if(AJOB){ ests = ests.filter(function(e){ return e.job_id === AJOB.id; }); }
     var state = uxGetState('estimates');
 
     var filtered = ests;
@@ -10842,6 +10848,7 @@ async function confirmSendEstimate(estId,btnEl){
 }
 async function pgBudget(){
   var jobs=await dbGet('jobs','?order=job_name.asc');
+  if(AJOB){ jobs = jobs.filter(function(j){ return j.id === AJOB.id; }); }
   var cos=await dbGet('change_orders','?status=eq.Approved');
   var pos=await dbGet('purchase_orders','?order=created_at.desc');
   var invs=await dbGet('invoices','?order=created_at.desc');
@@ -10888,6 +10895,7 @@ async function pgPOs(){
   uxLoading('content','Loading purchase orders...');
   try{
     var pos = await dbGet('purchase_orders','?order=created_at.desc') || [];
+    if(AJOB){ pos = pos.filter(function(p){ return p.job_id === AJOB.id; }); }
     var state = uxGetState('pos');
     var jobs = await dbGet('jobs','?order=job_name.asc') || [];
 
@@ -11049,6 +11057,7 @@ async function pgCOs(){
   try{
     var cos=await dbGet('change_orders','?order=created_at.desc')||[];
     var jobs=await dbGet('jobs','?order=job_name.asc')||[];
+    if(AJOB){ cos = cos.filter(function(c){ return c.job_id === AJOB.id; }); }
     var state=uxGetState('cos');
 
     var filtered=cos;
@@ -11399,6 +11408,7 @@ async function pgComments() {
   var msgs = await dbGet('messages', '?order=created_at.desc') || [];
   var jobs = await dbGet('jobs', '?order=job_name.asc') || [];
   var leads = await dbGet('leads', '?order=created_at.desc') || [];
+  if(AJOB){ msgs = msgs.filter(function(m){ return m.job_id === AJOB.id; }); }
   var jobMap = {}; jobs.forEach(function(j){ jobMap[j.id]=j; });
   var leadMap = {}; leads.forEach(function(l){ leadMap[l.id]=l; });
 
