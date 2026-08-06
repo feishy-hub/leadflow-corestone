@@ -16562,6 +16562,7 @@ async function showPlanMarkupTool(docId){
       +'<div style="display:flex;gap:8px">'
       +'<button onclick="pmtShowResultsSummary()" style="padding:7px 14px;background:#0d7a70;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">📋 Results Summary</button>'
       +'<button onclick="pmtExportCSV()" style="padding:7px 14px;background:#374151;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">⬇️ Export CSV</button>'
+      +'<button onclick="pmtExportTakeoffPDF()" style="padding:7px 14px;background:#374151;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">🖨 Export PDF</button>'
       +'<button onclick="pmtGenerateSchedules()" style="padding:7px 14px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">📄 Generate All Schedules</button>'
       +'<button onclick="pmtPushToEstimate()" style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💰 Push Measurements to Estimate</button>'
       +'<button onclick="pmtSaveAndClose()" style="padding:7px 14px;background:#fff;color:#1a1d21;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px">💾 Save & Close</button>'
@@ -17638,6 +17639,56 @@ var PMT_TEMPLATES = {
 // A dedicated layer management view — every group in one place, with
 // visibility, lock, color, and item count all together, instead of
 // hunting for the small icons scattered through the main list.
+// Composites the plan image and the measurement overlay (two separate
+// stacked canvases) into one flat image, then opens a print-ready view
+// with that image plus the full measurements table below it.
+function pmtExportTakeoffPDF(){
+  var base = document.getElementById('pmt-base');
+  var draw = document.getElementById('pmt-draw');
+  if(!base || !draw){ toast('No plan is open to export','err'); return; }
+
+  var combined = document.createElement('canvas');
+  combined.width = base.width; combined.height = base.height;
+  var ctx = combined.getContext('2d');
+  ctx.drawImage(base, 0, 0);
+  ctx.drawImage(draw, 0, 0);
+  var imgData = combined.toDataURL('image/png');
+
+  var rows = [];
+  PMT.groups.forEach(function(g){
+    g.items.forEach(function(it){
+      if((it.page||1) !== (PMT.currentPage||1)) return;
+      var qty, unit;
+      if(it.value_squares!==undefined){ qty=it.value_squares; unit='squares'; }
+      else if(it.value_cy!==undefined){ qty=it.value_cy; unit='CY'; }
+      else if(it.type==='count'){ qty=1; unit='ea'; }
+      else if(it.value_with_waste!==undefined && it.value_sqft!==undefined){ qty=it.value_with_waste; unit='sqft'; }
+      else if(it.value_with_waste!==undefined && it.value_ft!==undefined){ qty=it.value_with_waste; unit='ft'; }
+      else if(it.value_sqft!==undefined){ qty=it.value_sqft; unit='sqft'; }
+      else if(it.value_ft!==undefined){ qty=it.value_ft; unit='ft'; }
+      else return;
+      var dashIdx = (it.label||'').indexOf(' — ');
+      var name = dashIdx>-1 ? it.label.slice(0,dashIdx) : (it.libItemName||'Measurement');
+      rows.push({name:name, qty:qty, unit:unit, color:it.color||g.color, group:g.name});
+    });
+  });
+
+  var w = window.open('', '_blank');
+  w.document.write('<html><head><title>Takeoff Export — Page '+(PMT.currentPage||1)+'</title>'
+    +'<style>body{font-family:Arial,sans-serif;padding:30px;color:#1a1a1a}h1{font-size:18px;border-bottom:2px solid #0d7a70;padding-bottom:8px}'
+    +'img{max-width:100%;border:1px solid #ddd;margin:16px 0}'
+    +'table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}th,td{padding:6px 8px;text-align:left;border-bottom:1px solid #eee}th{background:#f3f4f6}'
+    +'.sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}</style></head><body>'
+    +'<h1>Takeoff Export — Page '+(PMT.currentPage||1)+' of '+(PMT.numPages||1)+'</h1>'
+    +'<img src="'+imgData+'">'
+    +'<table><tr><th></th><th>Item</th><th>Group</th><th>Quantity</th></tr>'
+    + rows.map(function(r){ return '<tr><td><span class="sw" style="background:'+r.color+'"></span></td><td>'+r.name+'</td><td>'+r.group+'</td><td>'+r.qty+' '+r.unit+'</td></tr>'; }).join('')
+    +'</table>'
+    +'</body></html>');
+  w.document.close();
+  setTimeout(function(){ w.print(); }, 500);
+}
+
 function pmtShowLayerPanel(){
   document.querySelectorAll('#pmt-layers-ov').forEach(function(el){el.remove();});
   var el = document.createElement('div');
