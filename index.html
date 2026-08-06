@@ -8960,6 +8960,18 @@ async function openEstimate(id){
     });
   });
 
+  // Budget warning — flags if this estimate runs well past what the
+  // client was originally told to expect. Advisory only, never blocks.
+  var budgetLead = reqLeadId ? (await dbGet('leads','?id=eq.'+reqLeadId))[0] : null;
+  var budgetWarning = null;
+  if(budgetLead && budgetLead.estimated_value){
+    var over = totals.grand_total - budgetLead.estimated_value;
+    var overPct = Math.round((over / budgetLead.estimated_value) * 100);
+    if(overPct >= 15){
+      budgetWarning = 'Estimate total of '+fmt$(totals.grand_total)+' exceeds the client\'s stated project value of '+fmt$(budgetLead.estimated_value)+' by '+overPct+'%. Review scope or discuss budget with the client.';
+    }
+  }
+
   var costTypes = ['Labor','Materials','Subcontractor','Equipment','Permit','Other'];
   // Real construction sequence — the order work (and client draws) actually
   // happen in, not just a cost category. This is what "sort by trade" means.
@@ -9041,6 +9053,7 @@ async function openEstimate(id){
     '<button class="btn btn-p btn-sm" onclick="sendEstimate(\''+id+'\')">📧 Send to Client</button>',
     '</div>',
     (uncostedReqs.length ? '<div style="background:#fef3c7;border:1.5px solid #d97706;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:#92400e"><b>⚠️ '+uncostedReqs.length+' requirement'+(uncostedReqs.length===1?'':'s')+' with no matching line item</b> — '+uncostedReqs.map(function(r){return uxEsc(r.title);}).join(', ')+'</div>' : ''),
+    (budgetWarning ? '<div style="background:#fee2e2;border:1.5px solid #dc2626;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:#991b1b"><b>⚠️ Over Budget</b> — '+budgetWarning+'</div>' : ''),
     '<div style="display:grid;grid-template-columns:1fr 280px;gap:16px">',
     
     // Left: line items
@@ -17531,6 +17544,47 @@ var PMT_TEMPLATES = {
   flooring: {label:'Flooring', groups:['Living Areas','Wet Areas','Stairs']},
   full_reno: {label:'Full Renovation', groups:['Demo','Framing','MEP Rough','Insulation','Drywall','Flooring','Trim & Paint']}
 };
+// A dedicated layer management view — every group in one place, with
+// visibility, lock, color, and item count all together, instead of
+// hunting for the small icons scattered through the main list.
+function pmtShowLayerPanel(){
+  document.querySelectorAll('#pmt-layers-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'pmt-layers-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:3500;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:0;width:380px;max-height:75vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eee"><div style="font-weight:800;font-size:15px">🗂️ Layers</div>'
+    +'<div style="font-size:12px;color:#6b7280">Show, hide, or lock entire groups at once</div></div>'
+    +'<div id="pmt-layer-list" style="padding:10px 20px;overflow-y:auto;flex:1"></div>'
+    +'<div style="padding:12px 20px;border-top:1px solid #eee"><button onclick="document.getElementById(\'pmt-layers-ov\').remove()" style="width:100%;padding:9px;background:#0d7a70;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Close</button></div>'
+    +'</div>';
+  document.body.appendChild(el);
+  pmtRenderLayerList();
+}
+function pmtRenderLayerList(){
+  var list = document.getElementById('pmt-layer-list');
+  if(!list) return;
+  list.innerHTML = PMT.groups.map(function(g){
+    var itemCount = g.items.length;
+    var lockedCount = g.items.filter(function(i){return i.locked;}).length;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f3f4f6">'
+      +'<input type="color" value="'+g.color+'" onchange="pmtSetGroupColor(\''+g.id+'\',this.value);pmtRenderLayerList()" style="width:20px;height:20px;padding:0;border:none;border-radius:50%;cursor:pointer">'
+      +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+uxEsc(g.name)+'</div>'
+      +'<div style="font-size:10.5px;color:#9ca3af">'+itemCount+' item'+(itemCount===1?'':'s')+(lockedCount?' \u00b7 '+lockedCount+' locked':'')+'</div></div>'
+      +'<span onclick="pmtToggleGroupVisible(\''+g.id+'\');pmtRenderLayerList()" style="cursor:pointer;font-size:15px" title="'+(g.visible?'Hide this layer':'Show this layer')+'">'+(g.visible?'👁':'🚫')+'</span>'
+      +'<span onclick="pmtToggleGroupLock(\''+g.id+'\');pmtRenderLayerList()" style="cursor:pointer;font-size:15px" title="'+(lockedCount===itemCount&&itemCount>0?'Unlock all items in this layer':'Lock all items in this layer')+'">'+(lockedCount===itemCount&&itemCount>0?'🔒':'🔓')+'</span>'
+      +'</div>';
+  }).join('');
+}
+function pmtToggleGroupLock(groupId){
+  var g = PMT.groups.find(function(x){return x.id===groupId;});
+  if(!g) return;
+  var allLocked = g.items.length && g.items.every(function(i){return i.locked;});
+  g.items.forEach(function(i){ i.locked = !allLocked; });
+  pmtRenderSidebar();
+  pmtAutoSave();
+}
+
 function pmtShowTemplatePicker(){
   document.querySelectorAll('#pmt-template-ov').forEach(function(el){el.remove();});
   var el = document.createElement('div');
@@ -17893,7 +17947,8 @@ function pmtRenderSidebar(){
   el.innerHTML = '<button id="pmt-add-measurement-btn-2" onclick="pmtToggleCategoryMenu(event)" style="width:100%;padding:9px;background:#0d7a70;color:#fff;border:none;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:700;margin-bottom:12px">'
     +'<span style="font-size:16px;line-height:1">+</span> Add Measurement</button>'
     +'<div style="color:#fff;font-weight:800;font-size:12px;text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">Measurement Groups'
-    +'<span><button onclick="pmtShowTemplatePicker()" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px">Templates</button>'
+    +'<span><button onclick="pmtShowLayerPanel()" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px">🗂️ Layers</button>'
+    +'<button onclick="pmtShowTemplatePicker()" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px">Templates</button>'
     +'<button onclick="pmtAddGroup()" style="background:var(--teal);border:none;color:#fff;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer">+ Group</button></span></div>'
     + PMT.groups.map(function(g){
       var totalLinear = g.items.filter(function(i){return i.type==='linear'||i.type==='wall'||i.type==='perimeter';}).reduce(function(s,i){return s+i.value_ft;},0);
