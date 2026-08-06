@@ -10254,11 +10254,66 @@ async function showEstimateVersionHistory(estId){
         return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">'
           +'<div><div style="font-size:12.5px;font-weight:700">'+new Date(v.saved_at).toLocaleString()+(i===0?' <span style="color:var(--teal);font-weight:800;font-size:10px">CURRENT</span>':'')+'</div>'
           +'<div style="font-size:11px;color:var(--muted)">'+(Array.isArray(lc)?lc.length:0)+' line'+(Array.isArray(lc)&&lc.length===1?'':'s')+' \u00b7 '+fmt$(v.grand_total||0)+'</div></div>'
-          +(i>0?'<button onclick="pmtViewEstimateVersion(\''+v.id+'\')" style="padding:5px 10px;font-size:11px;border:1px solid var(--teal);color:var(--teal);background:transparent;border-radius:6px;cursor:pointer">View</button>':'')
+          +(i>0?'<span><button onclick="pmtViewEstimateVersion(\''+v.id+'\')" style="padding:5px 10px;font-size:11px;border:1px solid var(--teal);color:var(--teal);background:transparent;border-radius:6px;cursor:pointer;margin-right:6px">View</button><button onclick="pmtCompareEstimateVersion(\''+estId+'\',\''+v.id+'\')" style="padding:5px 10px;font-size:11px;border:1px solid #7c3aed;color:#7c3aed;background:transparent;border-radius:6px;cursor:pointer">Compare</button></span>':'')
           +'</div>';
       }).join('') : '<div style="color:var(--dim);font-size:12px;text-align:center;padding:20px 0">No history yet — versions save automatically as you edit.</div>')
     +'</div>'
     +'<div style="padding:12px 20px;border-top:1px solid var(--border)"><button onclick="document.getElementById(\'est-version-ov\').remove()" style="width:100%;padding:9px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer">Close</button></div>'
+    +'</div>';
+  document.body.appendChild(el);
+}
+// Real diff between a past version and the current live estimate —
+// added lines in green, removed in red, changed prices in amber.
+async function pmtCompareEstimateVersion(estId, versionId){
+  var versions = await dbGet('estimate_versions','?id=eq.'+versionId);
+  var v = versions[0]; if(!v) return;
+  var oldLines = v.line_items; if(typeof oldLines==='string'){try{oldLines=JSON.parse(oldLines);}catch(e){oldLines=[];}}
+
+  var results = await dbGet('estimates','?id=eq.'+estId);
+  var est = results[0];
+  var curLines = est.line_items||[];
+  if(typeof curLines==='string'){try{curLines=JSON.parse(curLines);}catch(e){curLines=[];}}
+
+  var oldByDesc = {}; oldLines.forEach(function(l){ oldByDesc[l.description] = l; });
+  var curByDesc = {}; curLines.forEach(function(l){ curByDesc[l.description] = l; });
+
+  var rows = [];
+  curLines.forEach(function(l){
+    var old = oldByDesc[l.description];
+    if(!old){
+      rows.push({type:'added', desc:l.description, cur: (l.qty||0)*(l.unit_cost||0)});
+    } else if((old.qty!==l.qty) || (old.unit_cost!==l.unit_cost)){
+      rows.push({type:'changed', desc:l.description, old:(old.qty||0)*(old.unit_cost||0), cur:(l.qty||0)*(l.unit_cost||0)});
+    }
+  });
+  oldLines.forEach(function(l){
+    if(!curByDesc[l.description]){
+      rows.push({type:'removed', desc:l.description, old:(l.qty||0)*(l.unit_cost||0)});
+    }
+  });
+
+  document.querySelectorAll('#est-compare-ov').forEach(function(el){el.remove();});
+  var el = document.createElement('div');
+  el.id = 'est-compare-ov';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3600;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:0;width:440px;max-height:78vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--border)"><div style="font-weight:800;font-size:15px">Compare to '+new Date(v.saved_at).toLocaleString()+'</div>'
+    +'<div style="font-size:12px;color:var(--muted)">vs. current \u2014 '+fmt$(v.grand_total||0)+' \u2192 '+fmt$(est.line_items?calcEstTotal(curLines, est.job_id).grand_total:0)+'</div></div>'
+    +'<div style="padding:14px 20px;overflow-y:auto;flex:1">'
+    + (rows.length ? rows.map(function(r){
+        var color = r.type==='added' ? '#059669' : r.type==='removed' ? '#dc2626' : '#d97706';
+        var bg = r.type==='added' ? '#f0fdf4' : r.type==='removed' ? '#fef2f2' : '#fffbeb';
+        var label = r.type==='added' ? 'ADDED' : r.type==='removed' ? 'REMOVED' : 'CHANGED';
+        return '<div style="padding:9px 10px;border-radius:8px;background:'+bg+';margin-bottom:6px">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center">'
+          +'<span style="font-size:9px;font-weight:800;color:'+color+'">'+label+'</span>'
+          +'<span style="font-size:12px;font-weight:700;color:'+color+'">'+(r.type==='changed' ? fmt$(r.old)+' \u2192 '+fmt$(r.cur) : fmt$(r.cur||r.old))+'</span>'
+          +'</div>'
+          +'<div style="font-size:12.5px;margin-top:2px">'+uxEsc(r.desc)+'</div>'
+          +'</div>';
+      }).join('') : '<div style="color:var(--dim);text-align:center;padding:20px 0;font-size:12.5px">No differences \u2014 identical to the current estimate.</div>')
+    +'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid var(--border)"><button onclick="document.getElementById(\'est-compare-ov\').remove()" style="width:100%;padding:9px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Close</button></div>'
     +'</div>';
   document.body.appendChild(el);
 }
